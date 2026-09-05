@@ -1,0 +1,8 @@
+extends: oracle_left_lowres.yaml
+
+experiment:
+  name: oracle_left_lowres_target_mask80
+
+data:
+  # Mask around the projected UAV location, not the geometric crop center.
+  center_mask_fraction: 0.8

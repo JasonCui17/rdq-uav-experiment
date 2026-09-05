@@ -1,0 +1,58 @@
+{
+  "success": true,
+  "message": "Both `ftol` and `xtol` termination conditions are satisfied.",
+  "time_convention": "gt_query_time = image_time + time_offset_s",
+  "time_offset_s": -0.12415366829748864,
+  "mean_reprojection_error_px": 2.7056524365817087,
+  "median_reprojection_error_px": 1.8862582634721892,
+  "p95_reprojection_error_px": 7.257588350938166,
+  "max_reprojection_error_px": 24.506459077281484,
+  "observation_count": 2183,
+  "cameras": {
+    "left": {
+      "rotation_camera_from_gt": [
+        [
+          -0.9611438276150616,
+          0.2760260815671112,
+          -0.0034849579876607343
+        ],
+        [
+          -0.27603112745837816,
+          -0.960868300366179,
+          0.023214780323483345
+        ],
+        [
+          0.003059299188681272,
+          0.02327469969983467,
+          0.9997244265508156
+        ]
+      ],
+      "translation_camera_from_gt_m": [
+        0.16965789709994833,
+        0.01804162364147821,
+        0.036247986801981685
+      ],
+      "camera_center_in_gt_m": [
+        0.16793479688208893,
+        -0.03033804130672115,
+        -0.03606557950508037
+      ]
+    }
+  },
+  "fit": {
+    "count": 2183,
+    "mean_px": 2.7056524365817087,
+    "median_px": 1.8862582634721892,
+    "p95_px": 7.257588350938166,
+    "max_px": 24.506459077281484
+  },
+  "validation": {
+    "count": 549,
+    "mean_px": 2.7559940715383324,
+    "median_px": 1.848397157686358,
+    "p95_px": 7.838146770588041,
+    "max_px": 19.090901892726734
+  },
+  "source_config": "/home/jasoncui/datasets/MMAUD/rdq_uav_experiment/configs/calibration/mmaud_v1_omni.yaml",
+  "source_annotations": "/home/jasoncui/datasets/MMAUD/rdq_uav_experiment/calibration/official_left_center_annotations.csv"
+}

@@ -1,0 +1,7 @@
+extends: oracle_left_bbox_full.yaml
+
+experiment:
+  name: oracle_left_bbox_crop
+
+data:
+  bbox_mode: crop

@@ -1,0 +1,31 @@
+{
+  "time_offset_s": 0.0,
+  "cameras": {
+    "left": {
+      "rotation_camera_from_gt": [
+        [
+          -0.9608431033099012,
+          0.277055266032043,
+          -0.004572787521084927
+        ],
+        [
+          -0.27708940730155884,
+          -0.9606157592833195,
+          0.0209481115569563
+        ],
+        [
+          0.0014110928636731556,
+          0.02139491950080128,
+          0.999770106692776
+        ]
+      ],
+      "translation_camera_from_gt_m": [
+        0.1718187006751956,
+        0.03479036310919905,
+        0.05093774940228025
+      ],
+      "bootstrap_median_error_px": 2.899834435620175
+    }
+  },
+  "warning": "Bootstrap only; run fit_spatiotemporal.py and validate on held-out clicks."
+}

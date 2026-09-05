@@ -1,0 +1,129 @@
+{
+  "time_offset_s": -0.12415366829748864,
+  "selection": {
+    "exact_pixel_match": true,
+    "max_abs_dt_to_manifest_s": 0.12,
+    "count": 4120
+  },
+  "oracle_roi": {
+    "shared_radius_m": 1.0,
+    "context_scale": 1.5,
+    "min_side_px": 128,
+    "max_side_px": 512,
+    "class_dependent_roi_size": false
+  },
+  "overall": {
+    "count": 4120,
+    "invalid_projection_count": 0,
+    "mean_px": 2.949361696872102,
+    "median_px": 2.0797797374222915,
+    "p95_px": 8.033495911420282,
+    "max_px": 24.506459077281484,
+    "inside_bbox_rate": 0.9813106796116505,
+    "within_5px_rate": 0.8337378640776699,
+    "within_10px_rate": 0.9713592233009709,
+    "official_bbox_fully_inside_oracle_roi_rate": 0.9992718446601941
+  },
+  "by_experiment_split": {
+    "test": {
+      "count": 722,
+      "invalid_projection_count": 0,
+      "mean_px": 3.5165198427026993,
+      "median_px": 2.46404532102415,
+      "p95_px": 8.515658079519621,
+      "max_px": 13.709711062471868,
+      "inside_bbox_rate": 0.9016620498614959,
+      "within_5px_rate": 0.7160664819944599,
+      "within_10px_rate": 0.9722991689750693,
+      "official_bbox_fully_inside_oracle_roi_rate": 1.0
+    },
+    "train": {
+      "count": 2732,
+      "invalid_projection_count": 0,
+      "mean_px": 2.7157686728888777,
+      "median_px": 1.875322748217789,
+      "p95_px": 7.388154889272338,
+      "max_px": 24.506459077281484,
+      "inside_bbox_rate": 0.9985358711566618,
+      "within_5px_rate": 0.8678623718887262,
+      "within_10px_rate": 0.9707174231332357,
+      "official_bbox_fully_inside_oracle_roi_rate": 0.9992679355783309
+    },
+    "val": {
+      "count": 666,
+      "invalid_projection_count": 0,
+      "mean_px": 3.29273701253648,
+      "median_px": 2.566615371216873,
+      "p95_px": 8.31134826490645,
+      "max_px": 16.210700857693386,
+      "inside_bbox_rate": 0.996996996996997,
+      "within_5px_rate": 0.8213213213213213,
+      "within_10px_rate": 0.972972972972973,
+      "official_bbox_fully_inside_oracle_roi_rate": 0.9984984984984985
+    }
+  },
+  "by_class": {
+    "Avata": {
+      "count": 1108,
+      "invalid_projection_count": 0,
+      "mean_px": 2.1767274707878896,
+      "median_px": 1.4062457807384658,
+      "p95_px": 7.033960116035222,
+      "max_px": 12.99347992327746,
+      "inside_bbox_rate": 0.9359205776173285,
+      "within_5px_rate": 0.8835740072202166,
+      "within_10px_rate": 0.9981949458483754,
+      "official_bbox_fully_inside_oracle_roi_rate": 1.0
+    },
+    "M300": {
+      "count": 622,
+      "invalid_projection_count": 0,
+      "mean_px": 6.938733351443449,
+      "median_px": 5.942449862147341,
+      "p95_px": 14.583501261030191,
+      "max_px": 24.506459077281484,
+      "inside_bbox_rate": 0.9903536977491961,
+      "within_5px_rate": 0.3279742765273312,
+      "within_10px_rate": 0.8167202572347267,
+      "official_bbox_fully_inside_oracle_roi_rate": 0.9951768488745981
+    },
+    "Mavic2": {
+      "count": 991,
+      "invalid_projection_count": 0,
+      "mean_px": 2.1663995883551164,
+      "median_px": 1.8259743109523232,
+      "p95_px": 4.785730145129634,
+      "max_px": 10.042694299202152,
+      "inside_bbox_rate": 1.0,
+      "within_5px_rate": 0.9535822401614531,
+      "within_10px_rate": 0.9989909182643795,
+      "official_bbox_fully_inside_oracle_roi_rate": 1.0
+    },
+    "Mavic3": {
+      "count": 658,
+      "invalid_projection_count": 0,
+      "mean_px": 2.5689132691191596,
+      "median_px": 2.193015400214085,
+      "p95_px": 5.977740368508753,
+      "max_px": 9.480483177560558,
+      "inside_bbox_rate": 1.0,
+      "within_5px_rate": 0.9027355623100304,
+      "within_10px_rate": 1.0,
+      "official_bbox_fully_inside_oracle_roi_rate": 1.0
+    },
+    "Pham4": {
+      "count": 741,
+      "invalid_projection_count": 0,
+      "mean_px": 2.140913745940518,
+      "median_px": 1.8636673794466165,
+      "p95_px": 4.408073655710965,
+      "max_px": 12.50426470590931,
+      "inside_bbox_rate": 1.0,
+      "within_5px_rate": 0.9622132253711201,
+      "within_10px_rate": 0.9986504723346828,
+      "official_bbox_fully_inside_oracle_roi_rate": 1.0
+    }
+  },
+  "source_mapping": "/home/jasoncui/datasets/MMAUD/rdq_uav_experiment/calibration/official_2d_timestamp_mapping.csv",
+  "source_calibration": "/home/jasoncui/datasets/MMAUD/rdq_uav_experiment/calibration/official_left_fitted_calibration.json"
+}

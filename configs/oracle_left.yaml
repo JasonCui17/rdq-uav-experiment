@@ -1,0 +1,16 @@
+extends: base.yaml
+
+experiment:
+  name: oracle_left_rdq
+
+data:
+  manifest_dir: /home/jasoncui/datasets/MMAUD/rdq_uav_experiment/manifests_oracle_left
+  image_mode: oracle_left
+  # Oracle ROI is square; preserve its geometry instead of stretching to 4:3.
+  image_size: [256, 256]
+
+train:
+  batch_size: 16
+
+evaluation:
+  batch_size: 32

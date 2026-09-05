@@ -1,0 +1,77 @@
+experiment:
+  name: rdq_resnet18
+  seed: 42
+  output_dir: /home/jasoncui/datasets/MMAUD/rdq_uav_experiment/outputs
+
+data:
+  root: /home/jasoncui/datasets/MMAUD/v1
+  manifest_dir: /home/jasoncui/datasets/MMAUD/rdq_uav_experiment/manifests
+  classes: [Mavic2, Mavic3, Avata, M300, Pham4]
+  image_mode: dual_full
+  # Diagnostic only: in oracle_left mode, mask this central fraction after crop.
+  center_mask_fraction: 0.0
+  # Counterfactual diagnostics using official 2D bounding boxes.
+  bbox_mode: full
+  bbox_context_scale: 1.0
+  image_size: [288, 384]
+  sync_threshold_ms: 40.0
+  num_workers: 0
+  eval_num_workers: 0
+  pin_memory: true
+  persistent_workers: true
+  train_color_jitter: 0.15
+  image_decode_retries: 3
+  split:
+    mode: blocked_random
+    num_blocks: 12
+    train_blocks: 8
+    val_blocks: 2
+    test_blocks: 2
+    guard_seconds: 1.0
+    seed: 42
+  radar:
+    max_points: 768
+    max_range_m: 50.0
+    normalization: train_standard
+    deterministic_eval_sampling: true
+
+model:
+  variant: rdq
+  num_classes: 5
+  embed_dim: 256
+  dropout: 0.1
+  backbone:
+    name: resnet18
+    provider: timm
+    pretrained: true
+    out_index: 3
+    trainable: true
+  radar_encoder:
+    input_dim: 3
+    hidden_dims: [64, 128]
+  attention:
+    num_heads: 8
+    ffn_ratio: 2
+  radar_skip: true
+  auxiliary_position:
+    enabled: false
+    loss_weight: 0.1
+
+train:
+  epochs: 30
+  batch_size: 16
+  backbone_lr: 0.0001
+  new_modules_lr: 0.001
+  weight_decay: 0.0001
+  label_smoothing: 0.1
+  amp: true
+  grad_clip_norm: 5.0
+  class_balanced_sampler: false
+  checkpoint_metric: macro_f1
+  log_interval: 20
+  resume: null
+
+evaluation:
+  batch_size: 32
+  radar_mode: normal
+  save_predictions: true

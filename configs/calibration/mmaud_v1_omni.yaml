@@ -1,0 +1,63 @@
+schema_version: 1
+dataset_root: /home/jasoncui/datasets/MMAUD/v1
+manifest_dir: /home/jasoncui/datasets/MMAUD/rdq_uav_experiment/manifests
+
+# Official UVC images contain two 1280x960 frames concatenated horizontally.
+# Exact decoded-pixel matching against all 4,425 official 2D images verified
+# that the released detection images are crops of the left half.
+image_layout:
+  full_resolution: [2560, 960]
+  split_x: 1280
+  left_half_camera: left
+  right_half_camera: right
+
+time:
+  # The optimizer evaluates GT at image_time + offset_s.
+  initial_offset_s: 0.0
+  max_abs_offset_s: 0.25
+  interpolation: pchip
+
+stereo:
+  official_baseline_m: 0.178
+
+cameras:
+  left:
+    model: omni
+    distortion_model: radtan
+    intrinsics: [2.9414247486244967, 1844.9864629191054, 1845.5803330648505, 615.0248705672041, 507.23461275157297]
+    distortion_coeffs: [-0.35828592536315235, 0.3430453067389284, -0.0000797244897011588, -0.0006030718056190388]
+    resolution: [1280, 960]
+    source: fisheye_calibration/left/we_want_rgb-camchain.yaml
+  right:
+    model: omni
+    distortion_model: radtan
+    intrinsics: [3.436494190606926, 2106.853984938829, 2106.852683195852, 665.8348834311574, 509.7688186136955]
+    distortion_coeffs: [-0.18785812841593974, 1.0726776524436488, -0.00011855288754855391, -0.00021920632933264815]
+    resolution: [1280, 960]
+    source: fisheye_calibration/right/we_want_rgb-camchain.yaml
+
+# No camera-to-GT/radar extrinsic is present in the published calibration zip
+# or the Mavic2 sensor bag. These are deliberately marked unresolved instead
+# of silently assuming coincident coordinate frames.
+extrinsics:
+  status: unresolved
+  convention: p_camera = R_camera_from_gt * p_gt + t_camera_from_gt
+  left:
+    rotation_camera_from_gt: null
+    translation_camera_from_gt_m: null
+  right:
+    rotation_camera_from_gt: null
+    translation_camera_from_gt_m: null
+
+roi:
+  # Physical radii are intentionally not guessed here. Fill from verified UAV
+  # dimensions; projection code then converts the 3D sphere to an adaptive box.
+  physical_radius_m:
+    Mavic2: null
+    Mavic3: null
+    Avata: null
+    M300: null
+    Pham4: null
+  context_scale: 3.0
+  min_side_px: 48
+  max_side_px: 512

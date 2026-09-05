@@ -1,0 +1,17 @@
+extends: oracle_left_fixed256.yaml
+
+experiment:
+  name: oracle_left_bbox_full
+  seed: 0
+
+data:
+  manifest_dir: /home/jasoncui/datasets/MMAUD/rdq_uav_experiment/manifests_oracle_left_fixed256_bbox
+  bbox_mode: full
+  bbox_context_scale: 2.0
+  train_color_jitter: 0.0
+
+model:
+  variant: rgb
+
+train:
+  epochs: 10

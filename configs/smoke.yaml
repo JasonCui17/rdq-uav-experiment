@@ -1,0 +1,71 @@
+experiment:
+  name: smoke_tiny
+  seed: 7
+  output_dir: /home/jasoncui/datasets/MMAUD/rdq_uav_experiment/outputs
+
+data:
+  root: /home/jasoncui/datasets/MMAUD/v1
+  manifest_dir: /home/jasoncui/datasets/MMAUD/rdq_uav_experiment/manifests
+  classes: [Mavic2, Mavic3, Avata, M300, Pham4]
+  image_size: [96, 128]
+  sync_threshold_ms: 40.0
+  num_workers: 0
+  eval_num_workers: 0
+  pin_memory: false
+  persistent_workers: false
+  train_color_jitter: 0.0
+  image_decode_retries: 3
+  split:
+    mode: blocked_random
+    num_blocks: 12
+    train_blocks: 8
+    val_blocks: 2
+    test_blocks: 2
+    guard_seconds: 1.0
+    seed: 42
+  radar:
+    max_points: 64
+    max_range_m: 50.0
+    normalization: train_standard
+    deterministic_eval_sampling: true
+
+model:
+  variant: rdq
+  num_classes: 5
+  embed_dim: 64
+  dropout: 0.1
+  backbone:
+    name: tiny_cnn
+    provider: builtin
+    pretrained: false
+    out_index: 0
+    trainable: true
+  radar_encoder:
+    input_dim: 3
+    hidden_dims: [32, 48]
+  attention:
+    num_heads: 4
+    ffn_ratio: 2
+  radar_skip: true
+  auxiliary_position:
+    enabled: false
+    loss_weight: 0.1
+
+train:
+  epochs: 1
+  batch_size: 2
+  backbone_lr: 0.001
+  new_modules_lr: 0.001
+  weight_decay: 0.0001
+  label_smoothing: 0.0
+  amp: false
+  grad_clip_norm: 5.0
+  class_balanced_sampler: false
+  checkpoint_metric: macro_f1
+  log_interval: 1
+  resume: null
+
+evaluation:
+  batch_size: 2
+  radar_mode: normal
+  save_predictions: true

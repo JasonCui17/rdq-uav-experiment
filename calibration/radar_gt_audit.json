@@ -1,0 +1,117 @@
+{
+  "Mavic2": {
+    "frames": 715,
+    "aligned_nearest_m": {
+      "min": 0.025580318022020286,
+      "median": 8.937511736068245,
+      "p10": 1.1551966329676842,
+      "p25": 6.427863069507614
+    },
+    "hit_rates": {
+      "within_0.5m": {
+        "aligned": 0.08671328671328671,
+        "half_sequence_shifted": 0.0
+      },
+      "within_1m": {
+        "aligned": 0.0979020979020979,
+        "half_sequence_shifted": 0.0
+      },
+      "within_2m": {
+        "aligned": 0.11188811188811189,
+        "half_sequence_shifted": 0.0
+      }
+    }
+  },
+  "Mavic3": {
+    "frames": 529,
+    "aligned_nearest_m": {
+      "min": 0.032502640025592396,
+      "median": 10.068811633904822,
+      "p10": 0.38244838124255276,
+      "p25": 1.3173930952739819
+    },
+    "hit_rates": {
+      "within_0.5m": {
+        "aligned": 0.14744801512287334,
+        "half_sequence_shifted": 0.0
+      },
+      "within_1m": {
+        "aligned": 0.23629489603024575,
+        "half_sequence_shifted": 0.0
+      },
+      "within_2m": {
+        "aligned": 0.2665406427221172,
+        "half_sequence_shifted": 0.0
+      }
+    }
+  },
+  "Avata": {
+    "frames": 1001,
+    "aligned_nearest_m": {
+      "min": 0.2800069476745987,
+      "median": 8.740626930459252,
+      "p10": 1.3835332885333218,
+      "p25": 3.453389146253544
+    },
+    "hit_rates": {
+      "within_0.5m": {
+        "aligned": 0.01898101898101898,
+        "half_sequence_shifted": 0.0
+      },
+      "within_1m": {
+        "aligned": 0.08291708291708291,
+        "half_sequence_shifted": 0.0
+      },
+      "within_2m": {
+        "aligned": 0.13886113886113885,
+        "half_sequence_shifted": 0.0
+      }
+    }
+  },
+  "M300": {
+    "frames": 514,
+    "aligned_nearest_m": {
+      "min": 0.018478333304167992,
+      "median": 11.052555937819939,
+      "p10": 0.408104375915328,
+      "p25": 1.6626900358919348
+    },
+    "hit_rates": {
+      "within_0.5m": {
+        "aligned": 0.14007782101167315,
+        "half_sequence_shifted": 0.0
+      },
+      "within_1m": {
+        "aligned": 0.16731517509727625,
+        "half_sequence_shifted": 0.0
+      },
+      "within_2m": {
+        "aligned": 0.29766536964980544,
+        "half_sequence_shifted": 0.0
+      }
+    }
+  },
+  "Pham4": {
+    "frames": 549,
+    "aligned_nearest_m": {
+      "min": 0.08692610734100788,
+      "median": 10.04608194453802,
+      "p10": 0.7017045127149332,
+      "p25": 1.248725206671048
+    },
+    "hit_rates": {
+      "within_0.5m": {
+        "aligned": 0.04918032786885246,
+        "half_sequence_shifted": 0.0
+      },
+      "within_1m": {
+        "aligned": 0.15664845173041894,
+        "half_sequence_shifted": 0.0
+      },
+      "within_2m": {
+        "aligned": 0.34972677595628415,
+        "half_sequence_shifted": 0.0
+      }
+    }
+  }
+}

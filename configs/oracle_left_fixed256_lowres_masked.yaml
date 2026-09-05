@@ -1,0 +1,7 @@
+extends: oracle_left_fixed256_lowres.yaml
+
+experiment:
+  name: oracle_left_fixed256_lowres_target_mask80
+
+data:
+  center_mask_fraction: 0.8
