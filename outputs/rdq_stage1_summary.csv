@@ -1,0 +1,6 @@
+experiment,seed,variant,best_epoch,val_accuracy,val_macro_f1,per_class_recall,checkpoint_path
+A_bbox_rgb_seed0,0,rgb,10,0.7855421687,0.7320103132,"[0.7346938776, 0.9516129032, 0.9380530973, 0.1475409836, 0.9876543210]",/home/jasoncui/datasets/MMAUD/rdq_uav_experiment/outputs/oracle_left_bbox_crop_rgb_s0_20260905_163732/best.pt
+B_bbox_radar_seed0,0,radar,2,0.3518072289,0.3537710695,"[0.3979591837, 0.3387096774, 0.4070796460, 0.0000000000, 0.4938271605]",/home/jasoncui/datasets/MMAUD/rdq_uav_experiment/outputs/B_bbox_radar_seed0_radar_s0_20260906_141031/best.pt
+C_bbox_concat_seed0,0,concat,7,0.8072289157,0.7585586022,"[0.9183673469, 0.7741935484, 0.9734513274, 0.3114754098, 0.8395061728]",/home/jasoncui/datasets/MMAUD/rdq_uav_experiment/outputs/C_bbox_concat_seed0_concat_s0_20260906_151116/best.pt
+D_bbox_learned_query_seed0,0,learned_query,2,0.8409638554,0.8112387164,"[0.8469387755, 0.5645161290, 1.0000000000, 0.6557377049, 0.9629629630]",/home/jasoncui/datasets/MMAUD/rdq_uav_experiment/outputs/D_bbox_learned_query_seed0_learned_query_s0_20260906_155830/best.pt
+E_bbox_rdq_seed0,0,rdq,5,0.8915662651,0.8673159313,"[0.9897959184, 0.5645161290, 1.0000000000, 0.7213114754, 1.0000000000]",/home/jasoncui/datasets/MMAUD/rdq_uav_experiment/outputs/E_bbox_rdq_seed0_rdq_s0_20260906_161632/best.pt

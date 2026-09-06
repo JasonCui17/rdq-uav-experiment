@@ -7,6 +7,8 @@ __pycache__/
 .vscode/
 outputs/*
 !outputs/.gitkeep
+!outputs/rdq_stage1_summary.csv
+!outputs/rdq_stage2_interventions.csv
 
 # Dataset-derived manifests are reproducible and may contain annotations.
 manifests*/*
