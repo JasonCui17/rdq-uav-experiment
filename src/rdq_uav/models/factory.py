@@ -6,6 +6,7 @@ from typing import Any
 from torch import nn
 
 from rdq_uav.models.model import MultiModalClassifier
+from rdq_uav.models.localizer import MultiModalLocalizer
 
 
 def build_model(
@@ -43,3 +44,12 @@ def build_parameter_groups(
     if not groups:
         raise RuntimeError("Model has no trainable parameters")
     return groups
+
+
+def build_localizer(
+    config: dict[str, Any], *, load_backbone_pretrained: bool = True
+) -> MultiModalLocalizer:
+    model_config = copy.deepcopy(config)
+    if not load_backbone_pretrained:
+        model_config["backbone"]["pretrained"] = False
+    return MultiModalLocalizer(model_config)

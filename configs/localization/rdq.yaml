@@ -1,0 +1,7 @@
+extends: base.yaml
+
+experiment:
+  name: stage4_rdq
+
+model:
+  variant: rdq

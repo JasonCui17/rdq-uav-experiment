@@ -1,0 +1,7 @@
+extends: base.yaml
+
+experiment:
+  name: stage4_rgb
+
+model:
+  variant: rgb

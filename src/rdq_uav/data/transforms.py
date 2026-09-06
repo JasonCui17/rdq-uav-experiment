@@ -20,6 +20,7 @@ class DualFisheyeTransform:
         center_mask_fraction: float = 0.0,
         bbox_mode: str = "full",
         bbox_context_scale: float = 1.0,
+        expected_panorama_size: Sequence[int] | None = None,
     ) -> None:
         if len(image_size) != 2:
             raise ValueError("image_size must be [height, width]")
@@ -39,6 +40,11 @@ class DualFisheyeTransform:
             raise ValueError("bbox_context_scale must be >= 1")
         if self.center_mask_fraction > 0 and self.bbox_mode != "full":
             raise ValueError("center_mask_fraction and bbox_mode cannot be enabled together")
+        self.expected_panorama_size = (
+            None
+            if expected_panorama_size is None
+            else (int(expected_panorama_size[0]), int(expected_panorama_size[1]))
+        )
         self.jitter = (
             transforms.ColorJitter(
                 brightness=color_jitter,
@@ -55,6 +61,12 @@ class DualFisheyeTransform:
     def __call__(self, image: Image.Image, row: Mapping[str, str] | None = None) -> torch.Tensor:
         image = image.convert("RGB")
         width, height = image.size
+        if self.expected_panorama_size is not None:
+            expected_height, expected_width = self.expected_panorama_size
+            if (height, width) != (expected_height, expected_width):
+                raise ValueError(
+                    f"Expected panorama {(expected_width, expected_height)}, got {image.size}"
+                )
         if self.image_mode == "dual_full":
             if self.training and self.jitter is not None:
                 # Apply once to the panorama so both synchronized cameras

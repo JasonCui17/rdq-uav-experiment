@@ -1,0 +1,48 @@
+extends: ../base.yaml
+
+task:
+  name: single_uav_joint_2d_3d_localization
+
+experiment:
+  name: stage4_localization
+  seed: 42
+
+data:
+  manifest_dir: /home/jasoncui/datasets/MMAUD/rdq_uav_experiment/manifests_oracle_left_fixed256_bbox
+  # Fixed full panorama split only. Neither the transform nor its crop depends on GT.
+  image_mode: dual_full
+  bbox_mode: full
+  center_mask_fraction: 0.0
+  bbox_context_scale: 1.0
+  image_size: [288, 384]
+  panorama_size: [960, 2560]
+  train_color_jitter: 0.0
+
+model:
+  variant: rdq
+  radar_skip: true
+  auxiliary_position:
+    enabled: false
+    loss_weight: 0.0
+
+loss:
+  bbox_l1_weight: 5.0
+  giou_weight: 2.0
+  position_weight: 1.0
+  projection_consistency:
+    enabled: false
+    weight: 0.0
+
+physical_priors:
+  velocity:
+    enabled: false
+    v_max_soft_mps: 40.0
+
+train:
+  epochs: 30
+  batch_size: 8
+  checkpoint_metric: total_loss
+  checkpoint_mode: min
+
+evaluation:
+  batch_size: 16

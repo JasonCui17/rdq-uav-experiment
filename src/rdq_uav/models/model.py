@@ -70,6 +70,7 @@ class MultiModalClassifier(nn.Module):
             classifier_input = 2 * self.embed_dim
         else:
             classifier_input = self.embed_dim * (2 if self.radar_skip else 1)
+        self.fused_dim = classifier_input
         self.classifier = ClassificationHead(
             classifier_input,
             self.embed_dim,
@@ -89,7 +90,7 @@ class MultiModalClassifier(nn.Module):
         position = position.repeat(views, 1)[None, :, :]
         return tokens + position, (height, width)
 
-    def forward(
+    def forward_features(
         self,
         image: torch.Tensor,
         radar: torch.Tensor,
@@ -131,12 +132,28 @@ class MultiModalClassifier(nn.Module):
             if self.radar_skip:
                 fused = torch.cat((fused, radar_token), dim=-1)
 
+        return {
+            "attention": attention,
+            "features": fused,
+            "visual_grid": visual_grid,
+        }
+
+    def forward(
+        self,
+        image: torch.Tensor,
+        radar: torch.Tensor,
+        radar_mask: torch.Tensor,
+        return_attention: bool = False,
+    ) -> dict[str, torch.Tensor | None]:
+        encoded = self.forward_features(image, radar, radar_mask, return_attention)
+        fused = encoded["features"]
+        assert isinstance(fused, torch.Tensor)
         logits = self.classifier(fused)
         position = self.position_head(fused) if self.position_head is not None else None
         return {
             "logits": logits,
             "position": position,
-            "attention": attention,
+            "attention": encoded["attention"],
             "features": fused,
-            "visual_grid": visual_grid,
+            "visual_grid": encoded["visual_grid"],
         }

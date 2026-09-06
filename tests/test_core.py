@@ -9,6 +9,7 @@ from PIL import Image
 from scipy.spatial.transform import Rotation
 
 from rdq_uav.data.dataset import RadarProcessor
+from rdq_uav.data.localization import MMAUDLocalizationDataset
 from rdq_uav.data.transforms import DualFisheyeTransform
 from rdq_uav.calibration import OmniRadtanCamera, PositionTrajectory
 from rdq_uav.calibration.omni import transform_points
@@ -17,8 +18,10 @@ from rdq_uav.calibration.spatiotemporal import (
     fit_spatiotemporal_calibration,
 )
 from rdq_uav.engine.metrics import ClassificationMetrics
+from rdq_uav.engine.localization import LocalizationLoss, LocalizationMetrics
 from rdq_uav.engine.sequence import aggregate_temporal_blocks
 from rdq_uav.models.model import MultiModalClassifier
+from rdq_uav.models.localizer import MultiModalLocalizer
 from rdq_uav.models.radar import MaskedPointMLP
 
 
@@ -190,6 +193,55 @@ class CoreTests(unittest.TestCase):
                 self.assertTrue(torch.isfinite(output["logits"]).all())
                 if variant in {"learned_query", "rdq"}:
                     self.assertIsNotNone(output["attention"])
+
+    def test_localizer_all_variants_forward_and_backward(self) -> None:
+        images = torch.randn(2, 2, 3, 64, 96)
+        radar = torch.randn(2, 12, 3)
+        mask = torch.ones(2, 12, dtype=torch.bool)
+        target_box = torch.tensor([[0.25, 0.5, 0.1, 0.2]]).repeat(2, 1)
+        target_position = torch.randn(2, 3)
+        criterion = LocalizationLoss(
+            {
+                "bbox_l1_weight": 5.0,
+                "giou_weight": 2.0,
+                "position_weight": 1.0,
+                "projection_consistency": {"enabled": False},
+            }
+        )
+        for variant in ("rgb", "radar", "concat", "learned_query", "rdq"):
+            model = MultiModalLocalizer(copy.deepcopy(model_config(variant)))
+            output = model(images, radar, mask, return_attention=True)
+            self.assertEqual(tuple(output["box"].shape), (2, 4))
+            self.assertEqual(tuple(output["position"].shape), (2, 3))
+            self.assertTrue(bool(((output["box"] >= 0) & (output["box"] <= 1)).all()))
+            losses = criterion(output["box"], target_box, output["position"], target_position)
+            losses["total_loss"].backward()
+            self.assertTrue(all(torch.isfinite(p.grad).all() for p in model.parameters() if p.grad is not None))
+
+    def test_localization_bbox_is_normalized_on_stitched_full_panorama(self) -> None:
+        dataset = object.__new__(MMAUDLocalizationDataset)
+        dataset.panorama_width = 2560
+        dataset.panorama_height = 960
+        bbox = dataset._normalized_bbox(
+            {
+                "official_bbox_x1": "620",
+                "official_bbox_y1": "460",
+                "official_bbox_x2": "676",
+                "official_bbox_y2": "520",
+            }
+        )
+        expected = torch.tensor([648 / 2560, 490 / 960, 56 / 2560, 60 / 960])
+        self.assertTrue(torch.allclose(bbox, expected))
+
+    def test_localization_metrics_perfect_prediction(self) -> None:
+        meter = LocalizationMetrics(processed_height=288, processed_stitched_width=768)
+        boxes = torch.tensor([[0.25, 0.5, 0.1, 0.2], [0.3, 0.4, 0.2, 0.1]])
+        positions = torch.tensor([[1.0, 2.0, 3.0], [2.0, 3.0, 4.0]])
+        meter.update(boxes, boxes, positions, positions)
+        result = meter.compute()
+        self.assertAlmostEqual(result["mean_iou"], 1.0)
+        self.assertAlmostEqual(result["bbox_center_error_px_mean"], 0.0)
+        self.assertAlmostEqual(result["position_error_mean_m"], 0.0)
 
     def test_metrics(self) -> None:
         meter = ClassificationMetrics(3)

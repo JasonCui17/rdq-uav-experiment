@@ -85,6 +85,7 @@ class MMAUDDataset(Dataset[dict[str, Any]]):
         radar_shift_seconds: float = 0.0,
         image_decode_retries: int = 3,
         limit_per_class: int | None = None,
+        expected_panorama_size: list[int] | None = None,
     ) -> None:
         self.manifest_path = Path(manifest_path).expanduser().resolve()
         self.root = Path(root).expanduser().resolve()
@@ -114,6 +115,7 @@ class MMAUDDataset(Dataset[dict[str, Any]]):
             center_mask_fraction=center_mask_fraction,
             bbox_mode=bbox_mode,
             bbox_context_scale=bbox_context_scale,
+            expected_panorama_size=expected_panorama_size,
         )
         self.radar_processor = RadarProcessor(
             max_points=max_radar_points,

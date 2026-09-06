@@ -1,0 +1,7 @@
+extends: base.yaml
+
+experiment:
+  name: stage4_learned_query
+
+model:
+  variant: learned_query
