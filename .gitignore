@@ -62,6 +62,13 @@ outputs/stage4_minimal_multiscale_*/*
 !outputs/stage4_minimal_multiscale_*/bbox_stats.json
 !outputs/stage4_minimal_multiscale_*/position_stats.json
 !outputs/stage4_minimal_multiscale_*/config_*.yaml
+!outputs/stage4_attention_audit_*/
+outputs/stage4_attention_audit_*/*
+!outputs/stage4_attention_audit_*/attention_audit_report.json
+!outputs/stage4_attention_audit_*/attention_history.csv
+!outputs/stage4_attention_audit_*/best_fused_checkpoint_predictions.csv
+!outputs/stage4_attention_audit_*/position_stats.json
+!outputs/stage4_attention_audit_*/resolved_config.yaml
 
 # Dataset-derived manifests are reproducible and may contain annotations.
 manifests*/*

@@ -1,0 +1,209 @@
+{
+  "hypothesis": "Radar-conditioned query attends near the UAV; a single fused token may discard spatial location",
+  "controlled_operation": "read genuine per-head RDQ attention and decode token coordinates without changing the model",
+  "fixed_variables": {
+    "backbone": "ResNet18 stride8-only out_index=2",
+    "fusion": "RDQ with unchanged radar encoder and CrossAttentionBlock",
+    "samples": 20,
+    "seed": 42,
+    "batch_size": 2,
+    "learning_rates": {
+      "backbone": 0.0001,
+      "new_modules": 0.0001
+    },
+    "optimizer_steps": 600,
+    "training_objective": "normalized CXCY center L1 only"
+  },
+  "attention_contract": {
+    "attention_shape": [
+      2,
+      8,
+      1,
+      3456
+    ],
+    "visual_grid_per_view": [
+      36,
+      48
+    ],
+    "visual_token_count": 3456,
+    "cell_width_px": 8.0,
+    "cell_height_px": 8.0,
+    "best_fixed_head_index": 0,
+    "per_head_center_error_px_mean": [
+      140.443115234375,
+      247.5552978515625,
+      185.88461303710938,
+      233.1142120361328,
+      224.26046752929688,
+      250.85598754882812,
+      193.4494171142578,
+      248.9114227294922
+    ],
+    "attention_entropy_mean": 8.108345985412598,
+    "attention_entropy_median": 8.111300468444824,
+    "attention_entropy_normalized_mean": 0.9951494336128235,
+    "attention_entropy_normalized_median": 0.9955121278762817,
+    "gt_mass_1cell_mean": 0.0009677305934019387,
+    "gt_mass_1cell_median": 0.0009672464802861214,
+    "gt_mass_2cell_mean": 0.003912714309990406,
+    "gt_mass_2cell_median": 0.003912857733666897,
+    "uniform_mass_1cell_mean": 0.0011574075324460864,
+    "uniform_mass_2cell_mean": 0.004629630129784346
+  },
+  "metrics": {
+    "fused_token": {
+      "best_step": 250,
+      "best": {
+        "center_error_px_mean": 7.997092247009277,
+        "center_error_px_median": 1.297097086906433,
+        "center_error_lt_2px": 0.6000000238418579,
+        "center_error_lt_4px": 0.699999988079071,
+        "center_error_lt_8px": 0.75
+      },
+      "tail_center_error_px_mean": 9.669144439697266,
+      "tail_center_error_px_std_sample": 1.019078883266356,
+      "tail_center_error_px_min": 8.901296615600586,
+      "tail_center_error_lt_2px_mean": 0.0,
+      "tail_center_error_lt_4px_mean": 0.12000000402331353,
+      "tail_center_error_lt_8px_mean": 0.5499999970197678,
+      "final": {
+        "center_error_px_mean": 9.22300910949707,
+        "center_error_px_median": 8.28447437286377,
+        "center_error_lt_2px": 0.0,
+        "center_error_lt_4px": 0.10000000149011612,
+        "center_error_lt_8px": 0.3499999940395355
+      }
+    },
+    "mean_attention": {
+      "best_step": 400,
+      "best": {
+        "center_error_px_mean": 176.59434509277344,
+        "center_error_px_median": 174.96737670898438,
+        "center_error_lt_2px": 0.0,
+        "center_error_lt_4px": 0.0,
+        "center_error_lt_8px": 0.0
+      },
+      "tail_center_error_px_mean": 204.4371826171875,
+      "tail_center_error_px_std_sample": 23.56694165136467,
+      "tail_center_error_px_min": 176.59434509277344,
+      "tail_center_error_lt_2px_mean": 0.0,
+      "tail_center_error_lt_4px_mean": 0.0,
+      "tail_center_error_lt_8px_mean": 0.0,
+      "final": {
+        "center_error_px_mean": 215.4573211669922,
+        "center_error_px_median": 214.47064208984375,
+        "center_error_lt_2px": 0.0,
+        "center_error_lt_4px": 0.0,
+        "center_error_lt_8px": 0.0
+      }
+    },
+    "peak_attention": {
+      "best_step": 400,
+      "best": {
+        "center_error_px_mean": 120.13224792480469,
+        "center_error_px_median": 114.57785034179688,
+        "center_error_lt_2px": 0.0,
+        "center_error_lt_4px": 0.0,
+        "center_error_lt_8px": 0.0
+      },
+      "tail_center_error_px_mean": 309.30149230957034,
+      "tail_center_error_px_std_sample": 106.21927138260274,
+      "tail_center_error_px_min": 120.13224792480469,
+      "tail_center_error_lt_2px_mean": 0.0,
+      "tail_center_error_lt_4px_mean": 0.0,
+      "tail_center_error_lt_8px_mean": 0.0,
+      "final": {
+        "center_error_px_mean": 362.3592224121094,
+        "center_error_px_median": 359.65362548828125,
+        "center_error_lt_2px": 0.0,
+        "center_error_lt_4px": 0.0,
+        "center_error_lt_8px": 0.0
+      }
+    },
+    "best_fixed_head": {
+      "best_step": 0,
+      "best": {
+        "center_error_px_mean": 59.930885314941406,
+        "center_error_px_median": 59.216712951660156,
+        "center_error_lt_2px": 0.0,
+        "center_error_lt_4px": 0.0,
+        "center_error_lt_8px": 0.0
+      },
+      "tail_center_error_px_mean": 134.29884490966796,
+      "tail_center_error_px_std_sample": 44.88607400805501,
+      "tail_center_error_px_min": 77.54547882080078,
+      "tail_center_error_lt_2px_mean": 0.0,
+      "tail_center_error_lt_4px_mean": 0.0,
+      "tail_center_error_lt_8px_mean": 0.0,
+      "final": {
+        "center_error_px_mean": 140.443115234375,
+        "center_error_px_median": 142.71043395996094,
+        "center_error_lt_2px": 0.0,
+        "center_error_lt_4px": 0.0,
+        "center_error_lt_8px": 0.0
+      }
+    },
+    "oracle_best_head": {
+      "best_step": 0,
+      "best": {
+        "center_error_px_mean": 59.930885314941406,
+        "center_error_px_median": 59.216712951660156,
+        "center_error_lt_2px": 0.0,
+        "center_error_lt_4px": 0.0,
+        "center_error_lt_8px": 0.0
+      },
+      "tail_center_error_px_mean": 134.02151947021486,
+      "tail_center_error_px_std_sample": 44.56282310811218,
+      "tail_center_error_px_min": 77.54547882080078,
+      "tail_center_error_lt_2px_mean": 0.0,
+      "tail_center_error_lt_4px_mean": 0.0,
+      "tail_center_error_lt_8px_mean": 0.0,
+      "final": {
+        "center_error_px_mean": 140.443115234375,
+        "center_error_px_median": 142.71043395996094,
+        "center_error_lt_2px": 0.0,
+        "center_error_lt_4px": 0.0,
+        "center_error_lt_8px": 0.0
+      }
+    },
+    "grid_oracle": {
+      "best_step": 0,
+      "best": {
+        "center_error_px_mean": 2.864502429962158,
+        "center_error_px_median": 2.8721394538879395,
+        "center_error_lt_2px": 0.20000000298023224,
+        "center_error_lt_4px": 0.8500000238418579,
+        "center_error_lt_8px": 1.0
+      },
+      "tail_center_error_px_mean": 2.864502429962158,
+      "tail_center_error_px_std_sample": 0.0,
+      "tail_center_error_px_min": 2.864502429962158,
+      "tail_center_error_lt_2px_mean": 0.20000000298023224,
+      "tail_center_error_lt_4px_mean": 0.8500000238418579,
+      "tail_center_error_lt_8px_mean": 1.0,
+      "final": {
+        "center_error_px_mean": 2.864502429962158,
+        "center_error_px_median": 2.8721394538879395,
+        "center_error_lt_2px": 0.20000000298023224,
+        "center_error_lt_4px": 0.8500000238418579,
+        "center_error_lt_8px": 1.0
+      }
+    }
+  },
+  "best_fused_checkpoint_step": 250,
+  "tail_attention_vs_fused_gain": -20.14325459632789,
+  "tail_best_fixed_head_vs_mean_gain": 0.34308014231860595,
+  "tail_oracle_best_head_vs_mean_gain": 0.34443667363009645,
+  "quantization_likely_limiting": false,
+  "status": "rejected",
+  "test_split_accessed": false,
+  "runtime_seconds": 198.3727232760284,
+  "decision_guard": {
+    "best_fixed_head_spatially_useful": false,
+    "oracle_best_head_spatially_useful": false,
+    "spatially_useful_rule": "tail mean <=16px and tail P(error<8px)>=0.50"
+  },
+  "attention_near_uav_status": "rejected",
+  "single_token_bottleneck_status": "inconclusive",
+  "primary_diagnosis": "radar_query_correspondence_problem"
+}

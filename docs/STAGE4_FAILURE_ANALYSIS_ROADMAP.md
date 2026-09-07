@@ -21,8 +21,9 @@
 | trajectory shortcut | train-only mean/nearest/interpolation | 相对global mean的2D/3D gain | 插值：2D +3.25%，3D +44.75% | rejected | joint shortcut较弱，但3D trajectory prior为moderate | 允许Stage 4.5；不因shortcut修改split |
 | stride16 bottleneck | out_index3 stride16 vs out_index2 stride8 | tail center error、tail Mean IoU | center −16.27%，tail IoU +0.1021 | supported | stride8使平均目标从不足1 cell提升至约1 cell，改善跨越完整tail | 暂停；高分辨率表示有依据，等待是否研究P2/P3/FPN |
 | multi-scale semantic fusion | stride8-only vs minimal stride8+stride16 additive fusion | tail center error、tail Mean IoU | center恶化32.57%，IoU −0.114 | rejected | 更好best是孤立峰值；增加深层语义使tail更差且成本显著增加 | 保留stride8-only，等待single-token audit |
-| single-token bottleneck | fused-token regression vs center heatmap | center error thresholds | 未执行 | inconclusive | stride8有效，但minimal multiscale已被拒绝 | 等待确认后执行 |
-| Radar correspondence | frozen checkpoint temporal shift eval | IoU/center/3D error shift curve | 未执行 | inconclusive | 需先获得稳定 baseline | 等待前置结论 |
+| single-token bottleneck | fused-token center vs真实attention中心 | tail center error | fused 9.67 px；mean-attention 204.44 px | inconclusive | attention本身没有找到UAV，不能归因于后续single-token压缩 | 不实现spatial decoder |
+| Radar-to-visual spatial correspondence | per-head attention soft-argmax/peak/GT mass | attention center、entropy、GT mass | best fixed head 134.30 px；entropy 0.9946；GT mass低于均匀参考 | rejected | 当前Radar query没有形成目标附近的空间attention；fused head可经query residual/radar skip绕过它 | 只建议temporal-shift correspondence eval |
+| Radar temporal correspondence | frozen checkpoint temporal shift eval | IoU/center/3D error shift curve | 未执行 | inconclusive | 空间attention correspondence已被拒绝，仍需区分当前Radar与session prior | 等待用户决定 |
 | fisheye seam issue | fixed canvas-region grouped eval | seam/edge vs interior error | 未执行 | inconclusive | 只允许 read-only audit | 等待前置结论 |
 
 ## Stage 4.3：Tiny-Batch Optimization Stability

@@ -19,6 +19,10 @@ from rdq_uav.calibration.spatiotemporal import (
 )
 from rdq_uav.engine.metrics import ClassificationMetrics
 from rdq_uav.engine.localization import LocalizationLoss, LocalizationMetrics
+from rdq_uav.engine.attention_audit import (
+    attention_center_diagnostics,
+    stitched_token_centers,
+)
 from rdq_uav.engine.sequence import aggregate_temporal_blocks
 from rdq_uav.models.model import MultiModalClassifier
 from rdq_uav.models.localizer import MultiModalLocalizer
@@ -47,6 +51,36 @@ def model_config(variant: str) -> dict:
 
 
 class CoreTests(unittest.TestCase):
+    def test_attention_audit_uses_dual_view_tokenizer_order(self) -> None:
+        centers = stitched_token_centers(
+            2, 3, 2, 20, 30, device=torch.device("cpu"), dtype=torch.float32
+        )
+        expected = torch.tensor(
+            [
+                [5, 5], [15, 5], [25, 5], [5, 15], [15, 15], [25, 15],
+                [35, 5], [45, 5], [55, 5], [35, 15], [45, 15], [55, 15],
+            ],
+            dtype=torch.float32,
+        )
+        self.assertTrue(torch.equal(centers, expected))
+        weights = torch.zeros(1, 2, 1, 12)
+        weights[:, :, :, 7] = 1.0
+        diagnostics = attention_center_diagnostics(
+            weights,
+            torch.tensor([[45 / 60, 5 / 20]], dtype=torch.float32),
+            centers,
+            stitched_width=60,
+            image_height=20,
+            cell_width=10,
+            cell_height=10,
+        )
+        self.assertAlmostEqual(float(diagnostics["mean_attention_error_px"][0]), 0.0)
+        self.assertAlmostEqual(float(diagnostics["peak_attention_error_px"][0]), 0.0)
+        self.assertAlmostEqual(float(diagnostics["best_head_error_px"][0]), 0.0)
+        self.assertAlmostEqual(float(diagnostics["grid_oracle_error_px"][0]), 0.0)
+        self.assertAlmostEqual(float(diagnostics["gt_mass_1cell"][0]), 1.0)
+        self.assertAlmostEqual(float(diagnostics["attention_entropy_normalized"][0]), 0.0)
+
     def test_minimal_top_down_fusion_shape_and_gradient(self) -> None:
         fusion = MinimalTopDownFusion(16, 32, 24)
         stride8 = torch.randn(2, 16, 8, 12, requires_grad=True)
@@ -203,6 +237,10 @@ class CoreTests(unittest.TestCase):
                 self.assertTrue(torch.isfinite(output["logits"]).all())
                 if variant in {"learned_query", "rdq"}:
                     self.assertIsNotNone(output["attention"])
+                    self.assertEqual(
+                        tuple(output["attention"].shape),
+                        (2, 4, 1, views * 8 * 12),
+                    )
 
     def test_localizer_all_variants_forward_and_backward(self) -> None:
         images = torch.randn(2, 2, 3, 64, 96)
