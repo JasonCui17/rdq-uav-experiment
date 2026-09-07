@@ -1,0 +1,17 @@
+{
+  "width_mean": 0.01219590317286652,
+  "width_median": 0.00859399999999999,
+  "width_std": 0.009930979882004257,
+  "height_mean": 0.02937351695842451,
+  "height_median": 0.01875,
+  "height_std": 0.025450284759259433,
+  "num_train_samples": 1828,
+  "computed_from_split": "train",
+  "manifest_path": "/home/jasoncui/datasets/MMAUD/rdq_uav_experiment/manifests_oracle_left_fixed256_bbox/train.csv",
+  "bbox_format": "normalized_cxcywh_on_full_stitched_panorama",
+  "panorama_size": [
+    960,
+    2560
+  ],
+  "standard_deviation": "population_ddof_0"
+}
