@@ -1,0 +1,260 @@
+{
+  "research_question": "Can session/time/background predict 2D center and 3D XYZ in UAV-positive frames?",
+  "protocol": {
+    "train_manifest": "/home/jasoncui/datasets/MMAUD/rdq_uav_experiment/manifests_oracle_left_fixed256_bbox/train.csv",
+    "val_manifest": "/home/jasoncui/datasets/MMAUD/rdq_uav_experiment/manifests_oracle_left_fixed256_bbox/val.csv",
+    "test_split_accessed": false,
+    "canvas": [
+      288,
+      768
+    ],
+    "trajectory_lookup_scope": "same sequence train samples only",
+    "interpolation_outside_train_range": "clamp to nearest train endpoint",
+    "trajectory_status_score": "max over nearest/interpolation of min(Gain2D, Gain3D)",
+    "background_status_score": "min(Gain2D, Gain3D)"
+  },
+  "trajectory": {
+    "hypothesis": "train-only session/time information predicts validation target center and XYZ",
+    "controlled_variable": "trajectory estimator",
+    "fixed_variables": "same train/val manifest and canvas",
+    "metrics": {
+      "global_mean": {
+        "center_error_mean_px": 48.48400105147028,
+        "center_error_median_px": 46.14960127869079,
+        "position_error_mean_m": 8.252889520812985,
+        "position_error_median_m": 7.618742805849684,
+        "mae_x_m": 1.4680009804982486,
+        "mae_y_m": 4.777037949222034,
+        "mae_z_m": 5.824692943871753
+      },
+      "sequence_mean": {
+        "center_error_mean_px": 54.24895816867407,
+        "center_error_median_px": 53.98298659186721,
+        "position_error_mean_m": 8.510241168656288,
+        "position_error_median_m": 7.689922154677725,
+        "mae_x_m": 1.537285008324642,
+        "mae_y_m": 4.96695374840669,
+        "mae_z_m": 5.771024255491345
+      },
+      "nearest_train_time": {
+        "center_error_mean_px": 51.60879518006178,
+        "center_error_median_px": 46.96221088502131,
+        "position_error_mean_m": 4.824053220837817,
+        "position_error_median_m": 3.8031197160942334,
+        "mae_x_m": 1.5569099836907312,
+        "mae_y_m": 4.510786144387127,
+        "mae_z_m": 0.13764495030202709
+      },
+      "linear_interpolation": {
+        "center_error_mean_px": 46.90987411788116,
+        "center_error_median_px": 45.51704227264532,
+        "position_error_mean_m": 4.559964444485474,
+        "position_error_median_m": 3.3997427893893475,
+        "mae_x_m": 1.4424727156618902,
+        "mae_y_m": 4.226965996231855,
+        "mae_z_m": 0.4264608406331923
+      }
+    },
+    "nearest_time_gap": {
+      "mean_s": 8.318296326786639,
+      "median_s": 7.003793001174927,
+      "p95_s": 20.661717247962944,
+      "max_s": 24.80356502532959,
+      "bins": [
+        {
+          "bin": "0-1s",
+          "count": 0,
+          "center_error_mean_px": null,
+          "position_error_mean_m": null
+        },
+        {
+          "bin": "1-2s",
+          "count": 0,
+          "center_error_mean_px": null,
+          "position_error_mean_m": null
+        },
+        {
+          "bin": "2-5s",
+          "count": 129,
+          "center_error_mean_px": 26.44392667997236,
+          "position_error_mean_m": 2.7194940011998416
+        },
+        {
+          "bin": "5-10s",
+          "count": 179,
+          "center_error_mean_px": 62.710014537666545,
+          "position_error_mean_m": 6.600867336180559
+        },
+        {
+          "bin": "10-30s",
+          "count": 107,
+          "center_error_mean_px": 63.37655005389621,
+          "position_error_mean_m": 4.388898199220509
+        },
+        {
+          "bin": ">=30s",
+          "count": 0,
+          "center_error_mean_px": null,
+          "position_error_mean_m": null
+        }
+      ]
+    },
+    "score": 0.03246693547254975,
+    "status": "weak"
+  },
+  "background": {
+    "hypothesis": "fixed low-frequency full images predict validation target center and XYZ",
+    "controlled_variable": "low-frequency RGB evidence without bbox or radar",
+    "fixed_variables": "same train/val manifest and fixed dual-view transform",
+    "metrics": {
+      "center_error_mean_px": 47.25378675182612,
+      "center_error_median_px": 35.07514218766567,
+      "position_error_mean_m": 4.575748632924416,
+      "position_error_median_m": 4.5424210365644955,
+      "mae_x_m": 1.109223956381341,
+      "mae_y_m": 3.6143920550953195,
+      "mae_z_m": 1.8862617061798832
+    },
+    "protocol": {
+      "low_frequency_per_view": [
+        36,
+        48
+      ],
+      "encoder": "frozen_timm_resnet18_a1_in1k",
+      "pooling": "global_average_pool_per_view_then_concatenate",
+      "head": "Linear(1024,128)-ReLU-Linear(128,5)",
+      "epochs": 100,
+      "batch_size": 64,
+      "optimizer": "AdamW",
+      "learning_rate": 0.001,
+      "target_normalization": {
+        "mean": [
+          0.24379882216453552,
+          0.41461554169654846,
+          1.097604751586914,
+          3.6788041591644287,
+          11.067756652832031
+        ],
+        "std": [
+          0.013460335321724415,
+          0.17431211471557617,
+          1.6146068572998047,
+          5.384348392486572,
+          5.758533477783203
+        ]
+      },
+      "training_history": [
+        {
+          "epoch": 1,
+          "train_loss": 0.2837627799753548
+        },
+        {
+          "epoch": 10,
+          "train_loss": 0.05606865462249948
+        },
+        {
+          "epoch": 20,
+          "train_loss": 0.03659093978710848
+        },
+        {
+          "epoch": 30,
+          "train_loss": 0.028031087686313842
+        },
+        {
+          "epoch": 40,
+          "train_loss": 0.02608740167728986
+        },
+        {
+          "epoch": 50,
+          "train_loss": 0.018863012651450264
+        },
+        {
+          "epoch": 60,
+          "train_loss": 0.019985477702948926
+        },
+        {
+          "epoch": 70,
+          "train_loss": 0.016469384295992245
+        },
+        {
+          "epoch": 80,
+          "train_loss": 0.017439167962880312
+        },
+        {
+          "epoch": 90,
+          "train_loss": 0.0143899263699969
+        },
+        {
+          "epoch": 100,
+          "train_loss": 0.012009557892916892
+        }
+      ],
+      "uses_gt_bbox_for_input": false,
+      "uses_radar": false
+    },
+    "score": 0.025373613418128826,
+    "status": "weak"
+  },
+  "summary": [
+    {
+      "method": "global_mean",
+      "center_error_mean_px": 48.48400105147028,
+      "center_error_median_px": 46.14960127869079,
+      "position_error_mean_m": 8.252889520812985,
+      "position_error_median_m": 7.618742805849684,
+      "mae_x_m": 1.4680009804982486,
+      "mae_y_m": 4.777037949222034,
+      "mae_z_m": 5.824692943871753,
+      "gain_2d": 0.0,
+      "gain_3d": 0.0
+    },
+    {
+      "method": "sequence_mean",
+      "center_error_mean_px": 54.24895816867407,
+      "center_error_median_px": 53.98298659186721,
+      "position_error_mean_m": 8.510241168656288,
+      "position_error_median_m": 7.689922154677725,
+      "mae_x_m": 1.537285008324642,
+      "mae_y_m": 4.96695374840669,
+      "mae_z_m": 5.771024255491345,
+      "gain_2d": -0.11890431878927976,
+      "gain_3d": -0.031183217368206284
+    },
+    {
+      "method": "nearest_train_time",
+      "center_error_mean_px": 51.60879518006178,
+      "center_error_median_px": 46.96221088502131,
+      "position_error_mean_m": 4.824053220837817,
+      "position_error_median_m": 3.8031197160942334,
+      "mae_x_m": 1.5569099836907312,
+      "mae_y_m": 4.510786144387127,
+      "mae_z_m": 0.13764495030202709,
+      "gain_2d": -0.064450005379594,
+      "gain_3d": 0.4154710045891171
+    },
+    {
+      "method": "linear_interpolation",
+      "center_error_mean_px": 46.90987411788116,
+      "center_error_median_px": 45.51704227264532,
+      "position_error_mean_m": 4.559964444485474,
+      "position_error_median_m": 3.3997427893893475,
+      "mae_x_m": 1.4424727156618902,
+      "mae_y_m": 4.226965996231855,
+      "mae_z_m": 0.4264608406331923,
+      "gain_2d": 0.03246693547254975,
+      "gain_3d": 0.4474705576773218
+    },
+    {
+      "method": "background_only",
+      "center_error_mean_px": 47.25378675182612,
+      "center_error_median_px": 35.07514218766567,
+      "position_error_mean_m": 4.575748632924416,
+      "position_error_median_m": 4.5424210365644955,
+      "mae_x_m": 1.109223956381341,
+      "mae_y_m": 3.6143920550953195,
+      "mae_z_m": 1.8862617061798832,
+      "gain_2d": 0.025373613418128826,
+      "gain_3d": 0.4455579925812865
+    }
+  ]
+}

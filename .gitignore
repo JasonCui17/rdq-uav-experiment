@@ -40,6 +40,12 @@ outputs/stage4_optimization_stability_*/*
 !outputs/stage4_optimization_stability_*/bbox_stats.json
 !outputs/stage4_optimization_stability_*/position_stats.json
 !outputs/stage4_optimization_stability_*/config_*.yaml
+!outputs/stage4_shortcut_audit_*/
+outputs/stage4_shortcut_audit_*/*
+!outputs/stage4_shortcut_audit_*/shortcut_summary.csv
+!outputs/stage4_shortcut_audit_*/trajectory_predictions.csv
+!outputs/stage4_shortcut_audit_*/background_predictions.csv
+!outputs/stage4_shortcut_audit_*/shortcut_report.json
 
 # Dataset-derived manifests are reproducible and may contain annotations.
 manifests*/*
