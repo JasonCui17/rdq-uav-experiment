@@ -293,6 +293,8 @@ class CoreTests(unittest.TestCase):
         result = meter.compute()
         self.assertAlmostEqual(result["mean_iou"], 1.0)
         self.assertAlmostEqual(result["bbox_center_error_px_mean"], 0.0)
+        self.assertAlmostEqual(result["center_error_lt_2px"], 1.0)
+        self.assertAlmostEqual(result["center_error_lt_4px"], 1.0)
         self.assertAlmostEqual(result["center_abs_error_x"], 0.0)
         self.assertAlmostEqual(result["center_abs_error_y"], 0.0)
         self.assertAlmostEqual(result["width_abs_error_mean"], 0.0)

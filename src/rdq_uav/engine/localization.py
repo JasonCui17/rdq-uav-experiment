@@ -149,6 +149,8 @@ class LocalizationMetrics:
             "bbox_center_error_px_median": float(center_px.quantile(0.5)),
             "center_error_px_mean": float(center_px.mean()),
             "center_error_px_median": float(center_px.quantile(0.5)),
+            "center_error_lt_2px": float((center_px < 2.0).double().mean()),
+            "center_error_lt_4px": float((center_px < 4.0).double().mean()),
             "normalized_center_error": float(center_norm.mean()),
             "center_abs_error_x": float(center_absolute[:, 0].mean()),
             "center_abs_error_y": float(center_absolute[:, 1].mean()),

@@ -46,6 +46,14 @@ outputs/stage4_shortcut_audit_*/*
 !outputs/stage4_shortcut_audit_*/trajectory_predictions.csv
 !outputs/stage4_shortcut_audit_*/background_predictions.csv
 !outputs/stage4_shortcut_audit_*/shortcut_report.json
+!outputs/stage4_spatial_resolution_*/
+outputs/stage4_spatial_resolution_*/*
+!outputs/stage4_spatial_resolution_*/spatial_resolution_history.csv
+!outputs/stage4_spatial_resolution_*/spatial_resolution_comparison.csv
+!outputs/stage4_spatial_resolution_*/spatial_resolution_report.json
+!outputs/stage4_spatial_resolution_*/bbox_stats.json
+!outputs/stage4_spatial_resolution_*/position_stats.json
+!outputs/stage4_spatial_resolution_*/config_*.yaml
 
 # Dataset-derived manifests are reproducible and may contain annotations.
 manifests*/*
