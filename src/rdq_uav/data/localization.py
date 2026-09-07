@@ -36,6 +36,54 @@ def compute_position_stats(manifest_path: str | Path) -> dict[str, Any]:
     }
 
 
+def compute_bbox_stats(
+    manifest_path: str | Path, panorama_size: list[int]
+) -> dict[str, Any]:
+    """Compute normalized bbox size statistics from the full training manifest."""
+    manifest_path = Path(manifest_path).expanduser().resolve()
+    if len(panorama_size) != 2:
+        raise ValueError("panorama_size must be [height, width]")
+    panorama_height, panorama_width = (int(value) for value in panorama_size)
+    with manifest_path.open("r", newline="", encoding="utf-8") as handle:
+        rows = list(csv.DictReader(handle))
+    if not rows:
+        raise ValueError(f"Manifest has no rows: {manifest_path}")
+    widths = np.asarray(
+        [
+            (float(row["official_bbox_x2"]) - float(row["official_bbox_x1"]))
+            / panorama_width
+            for row in rows
+        ],
+        dtype=np.float64,
+    )
+    heights = np.asarray(
+        [
+            (float(row["official_bbox_y2"]) - float(row["official_bbox_y1"]))
+            / panorama_height
+            for row in rows
+        ],
+        dtype=np.float64,
+    )
+    if not np.isfinite(widths).all() or not np.isfinite(heights).all():
+        raise ValueError("BBox statistics contain non-finite sizes")
+    if np.any(widths <= 0) or np.any(heights <= 0):
+        raise ValueError("BBox width/height must be positive")
+    return {
+        "width_mean": float(widths.mean()),
+        "width_median": float(np.median(widths)),
+        "width_std": float(widths.std(ddof=0)),
+        "height_mean": float(heights.mean()),
+        "height_median": float(np.median(heights)),
+        "height_std": float(heights.std(ddof=0)),
+        "num_train_samples": int(len(rows)),
+        "computed_from_split": "train",
+        "manifest_path": str(manifest_path),
+        "bbox_format": "normalized_cxcywh_on_full_stitched_panorama",
+        "panorama_size": [panorama_height, panorama_width],
+        "standard_deviation": "population_ddof_0",
+    }
+
+
 class MMAUDLocalizationDataset(MMAUDDataset):
     """Train/val single-UAV localization dataset on fixed full dual-fisheye input."""
 

@@ -14,7 +14,7 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(PROJECT_ROOT / "src"))
 
 from rdq_uav.config import load_config  # noqa: E402
-from rdq_uav.data.localization import compute_position_stats  # noqa: E402
+from rdq_uav.data.localization import compute_bbox_stats, compute_position_stats  # noqa: E402
 from rdq_uav.engine.localization import LocalizationLoss, LocalizationMetrics  # noqa: E402
 from rdq_uav.localization_experiment import make_loader, make_localization_dataset  # noqa: E402
 from rdq_uav.models import build_localizer, build_parameter_groups  # noqa: E402
@@ -82,6 +82,13 @@ def main() -> None:
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     manifest_dir = Path(config["data"]["manifest_dir"])
     position_stats = compute_position_stats(manifest_dir / "train.csv")
+    bbox_stats = compute_bbox_stats(
+        manifest_dir / "train.csv", config["data"]["panorama_size"]
+    )
+    if config["model"].get("bbox_parameterization") == "sigmoid_center_log_size":
+        config["model"]["bbox_reference_wh"] = [
+            bbox_stats["width_median"], bbox_stats["height_median"]
+        ]
     dataset = make_localization_dataset(config, "train", position_stats, args.samples)
     loader = make_loader(config, dataset, "val", args.batch_size)
     cached_batches = list(loader)
@@ -184,6 +191,7 @@ def main() -> None:
         "overfit_final_metrics": final_metrics,
         "overfit_success": overfit_ok,
         "position_stats": position_stats,
+        "bbox_stats": bbox_stats,
         "test_split_accessed": False,
     }
     run_dir = Path(config["experiment"]["output_dir"]) / (
@@ -191,6 +199,7 @@ def main() -> None:
     )
     run_dir.mkdir(parents=True, exist_ok=False)
     write_json(position_stats, run_dir / "position_stats.json")
+    write_json(bbox_stats, run_dir / "bbox_stats.json")
     write_json(report, run_dir / "smoke_report.json")
     print(f"initial={initial}")
     print(f"final={final}")

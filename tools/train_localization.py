@@ -14,7 +14,7 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(PROJECT_ROOT / "src"))
 
 from rdq_uav.config import load_config  # noqa: E402
-from rdq_uav.data.localization import compute_position_stats  # noqa: E402
+from rdq_uav.data.localization import compute_bbox_stats, compute_position_stats  # noqa: E402
 from rdq_uav.engine.localization import LocalizationLoss, run_localization_epoch  # noqa: E402
 from rdq_uav.localization_experiment import make_loader, make_localization_dataset  # noqa: E402
 from rdq_uav.models import build_localizer, build_parameter_groups  # noqa: E402
@@ -55,6 +55,14 @@ def main() -> None:
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     manifest_dir = Path(config["data"]["manifest_dir"])
     position_stats = compute_position_stats(manifest_dir / "train.csv")
+    bbox_stats = compute_bbox_stats(
+        manifest_dir / "train.csv", config["data"]["panorama_size"]
+    )
+    if config["model"].get("bbox_parameterization") == "sigmoid_center_log_size":
+        config["model"]["bbox_reference_wh"] = [
+            bbox_stats["width_median"],
+            bbox_stats["height_median"],
+        ]
 
     train_dataset = make_localization_dataset(
         config, "train", position_stats, limit_samples=args.limit_samples
@@ -90,8 +98,10 @@ def main() -> None:
         yaml.safe_dump(config, sort_keys=False, allow_unicode=True), encoding="utf-8"
     )
     write_json(position_stats, run_dir / "position_stats.json")
+    write_json(bbox_stats, run_dir / "bbox_stats.json")
     print(f"device={device} run_dir={run_dir}")
     print(f"position_stats={position_stats}")
+    print(f"bbox_stats={bbox_stats}")
 
     start_epoch = 0
     mode = str(config["train"].get("checkpoint_mode", "min"))

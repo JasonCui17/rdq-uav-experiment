@@ -20,6 +20,9 @@ data:
 
 model:
   variant: rdq
+  bbox_parameterization: sigmoid_cxcywh
+  # Populated at runtime from the full train manifest for log-size decoding.
+  bbox_reference_wh: null
   radar_skip: true
   auxiliary_position:
     enabled: false

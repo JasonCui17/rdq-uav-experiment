@@ -18,7 +18,7 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(PROJECT_ROOT / "src"))
 
 from rdq_uav.config import load_config  # noqa: E402
-from rdq_uav.data.localization import compute_position_stats  # noqa: E402
+from rdq_uav.data.localization import compute_bbox_stats, compute_position_stats  # noqa: E402
 from rdq_uav.engine.localization import LocalizationLoss, LocalizationMetrics  # noqa: E402
 from rdq_uav.localization_experiment import make_loader, make_localization_dataset  # noqa: E402
 from rdq_uav.models import build_localizer, build_parameter_groups  # noqa: E402
@@ -112,6 +112,12 @@ def main() -> None:
     parser.add_argument("--steps", type=int, default=600)
     parser.add_argument("--batch-size", type=int, default=2)
     parser.add_argument("--history-interval", type=int, default=50)
+    parser.add_argument(
+        "--parameterization",
+        choices=("sigmoid_cxcywh", "sigmoid_center_log_size"),
+        default="sigmoid_cxcywh",
+    )
+    parser.add_argument("--output-prefix", default="stage4_bbox_sanity")
     args = parser.parse_args()
     if args.samples != 20:
         raise ValueError("This controlled comparison is fixed to exactly 20 samples")
@@ -128,6 +134,15 @@ def main() -> None:
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     manifest_dir = Path(config["data"]["manifest_dir"])
     position_stats = compute_position_stats(manifest_dir / "train.csv")
+    bbox_stats = compute_bbox_stats(
+        manifest_dir / "train.csv", config["data"]["panorama_size"]
+    )
+    config["model"]["bbox_parameterization"] = args.parameterization
+    config["model"]["bbox_reference_wh"] = (
+        [bbox_stats["width_median"], bbox_stats["height_median"]]
+        if args.parameterization == "sigmoid_center_log_size"
+        else None
+    )
     dataset = make_localization_dataset(config, "train", position_stats, limit_samples=args.samples)
     # The val loader mode gives deterministic ordering while retaining exactly
     # the same already-materialized train samples and transforms.
@@ -135,12 +150,13 @@ def main() -> None:
     cached_batches = list(loader)
 
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    run_dir = Path(config["experiment"]["output_dir"]) / f"stage4_bbox_sanity_{timestamp}"
+    run_dir = Path(config["experiment"]["output_dir"]) / f"{args.output_prefix}_{timestamp}"
     run_dir.mkdir(parents=True, exist_ok=False)
     (run_dir / "config.yaml").write_text(
         yaml.safe_dump(config, sort_keys=False, allow_unicode=True), encoding="utf-8"
     )
     write_json(position_stats, run_dir / "position_stats.json")
+    write_json(bbox_stats, run_dir / "bbox_stats.json")
 
     model = build_localizer(config["model"], load_backbone_pretrained=False).to(device)
     criterion = LocalizationLoss(config["loss"])
@@ -225,6 +241,8 @@ def main() -> None:
             "history_interval": args.history_interval,
             "seed": seed,
             "variant": config["model"]["variant"],
+            "bbox_parameterization": args.parameterization,
+            "bbox_reference_wh": config["model"]["bbox_reference_wh"],
             "optimizer": "AdamW",
             "backbone_lr": config["train"]["backbone_lr"],
             "new_modules_lr": config["train"]["new_modules_lr"],
@@ -250,8 +268,13 @@ def main() -> None:
         "best_observed": {
             "mean_iou": float(best_mean_iou_row["mean_iou"]),
             "mean_iou_step": int(best_mean_iou_row["step"]),
-            "recall_iou_0.5": float(best_recall_row["recall_iou_0.5"]),
-            "recall_iou_0.5_step": int(best_recall_row["step"]),
+            "recall_iou_0.5": float(best_mean_iou_row["recall_iou_0.5"]),
+            "center_error_px": float(best_mean_iou_row["center_error_px"]),
+            "width_abs_error": float(best_mean_iou_row["width_abs_error"]),
+            "height_abs_error": float(best_mean_iou_row["height_abs_error"]),
+            "position_error_mean_m": float(best_mean_iou_row["position_error_mean_m"]),
+            "max_recall_iou_0.5": float(best_recall_row["recall_iou_0.5"]),
+            "max_recall_iou_0.5_step": int(best_recall_row["step"]),
         },
         "delta": {
             key: float(final[key]) - float(initial[key])
@@ -264,6 +287,7 @@ def main() -> None:
             and float(final["height_abs_error_mean"]) < float(initial["height_abs_error_mean"])
         ),
         "position_stats": position_stats,
+        "bbox_stats": bbox_stats,
     }
     write_history(history, run_dir / "bbox_sanity_history.csv")
     write_json(report, run_dir / "bbox_sanity_report.json")

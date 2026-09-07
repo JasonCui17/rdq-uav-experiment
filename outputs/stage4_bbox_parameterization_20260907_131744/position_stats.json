@@ -1,0 +1,16 @@
+{
+  "mean": [
+    1.097604748579709,
+    3.6788042521086592,
+    11.067756736575872
+  ],
+  "std": [
+    1.6146068626754042,
+    5.384348231012733,
+    5.7585334895114935
+  ],
+  "count": 1828,
+  "computed_from_split": "train",
+  "manifest_path": "/home/jasoncui/datasets/MMAUD/rdq_uav_experiment/manifests_oracle_left_fixed256_bbox/train.csv",
+  "standard_deviation": "population_ddof_0"
+}

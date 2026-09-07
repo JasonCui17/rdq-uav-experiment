@@ -40,6 +40,42 @@ class MultiModalLocalizer(MultiModalClassifier):
         self.box_head = RegressionHead(
             self.fused_dim, self.embed_dim, 4, float(config["dropout"])
         )
+        self.bbox_parameterization = str(
+            config.get("bbox_parameterization", "sigmoid_cxcywh")
+        )
+        if self.bbox_parameterization not in {
+            "sigmoid_cxcywh",
+            "sigmoid_center_log_size",
+        }:
+            raise ValueError(
+                f"Unsupported bbox parameterization: {self.bbox_parameterization}"
+            )
+        reference = config.get("bbox_reference_wh")
+        if self.bbox_parameterization == "sigmoid_center_log_size":
+            if reference is None or len(reference) != 2:
+                raise ValueError(
+                    "sigmoid_center_log_size requires train-derived bbox_reference_wh"
+                )
+            reference_tensor = torch.tensor(reference, dtype=torch.float32)
+            if not bool(torch.all(reference_tensor > 0)):
+                raise ValueError("bbox_reference_wh must be positive")
+            self.register_buffer("bbox_reference_wh", reference_tensor)
+            final_layer = self.box_head.layers[-1]
+            if not isinstance(final_layer, nn.Linear):
+                raise TypeError("RegressionHead must end with nn.Linear")
+            with torch.no_grad():
+                # delta_w=delta_h=0 gives the train-median reference size.
+                final_layer.bias[2:].zero_()
+        else:
+            self.register_buffer("bbox_reference_wh", torch.empty(0))
+
+    def _decode_box(self, raw_box: torch.Tensor) -> torch.Tensor:
+        if self.bbox_parameterization == "sigmoid_cxcywh":
+            return raw_box.sigmoid()
+        center = raw_box[..., :2].sigmoid()
+        delta_size = raw_box[..., 2:].clamp(-4.0, 4.0)
+        size = self.bbox_reference_wh.to(raw_box).mul(delta_size.exp())
+        return torch.cat((center, size), dim=-1)
 
     def forward(
         self,
@@ -52,7 +88,7 @@ class MultiModalLocalizer(MultiModalClassifier):
         fused = encoded["features"]
         assert isinstance(fused, torch.Tensor)
         return {
-            "box": self.box_head(fused).sigmoid(),
+            "box": self._decode_box(self.box_head(fused)),
             "position": self.position_head(fused),
             "attention": encoded["attention"],
             "features": fused,

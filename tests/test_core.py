@@ -232,6 +232,17 @@ class CoreTests(unittest.TestCase):
             losses["total_loss"].backward()
             self.assertTrue(all(torch.isfinite(p.grad).all() for p in model.parameters() if p.grad is not None))
 
+    def test_log_size_parameterization_uses_reference_and_zero_size_bias(self) -> None:
+        config = copy.deepcopy(model_config("rdq"))
+        config["bbox_parameterization"] = "sigmoid_center_log_size"
+        config["bbox_reference_wh"] = [0.025, 0.06]
+        model = MultiModalLocalizer(config)
+        final_layer = model.box_head.layers[-1]
+        self.assertTrue(torch.equal(final_layer.bias[2:], torch.zeros(2)))
+        decoded = model._decode_box(torch.zeros(2, 4))
+        self.assertTrue(torch.allclose(decoded[:, :2], torch.full((2, 2), 0.5)))
+        self.assertTrue(torch.allclose(decoded[:, 2:], torch.tensor([[0.025, 0.06]]).repeat(2, 1)))
+
     def test_localization_bbox_is_normalized_on_stitched_full_panorama(self) -> None:
         dataset = object.__new__(MMAUDLocalizationDataset)
         dataset.panorama_width = 2560

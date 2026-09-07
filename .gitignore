@@ -16,6 +16,14 @@ outputs/stage4_bbox_sanity_*/*
 !outputs/stage4_bbox_sanity_*/bbox_sanity_history.csv
 !outputs/stage4_bbox_sanity_*/position_stats.json
 !outputs/stage4_bbox_sanity_*/config.yaml
+!outputs/stage4_bbox_parameterization_*/
+outputs/stage4_bbox_parameterization_*/*
+!outputs/stage4_bbox_parameterization_*/bbox_sanity_report.json
+!outputs/stage4_bbox_parameterization_*/bbox_sanity_history.csv
+!outputs/stage4_bbox_parameterization_*/bbox_stats.json
+!outputs/stage4_bbox_parameterization_*/position_stats.json
+!outputs/stage4_bbox_parameterization_*/config.yaml
+!outputs/stage4_bbox_parameterization_*/parameterization_comparison.csv
 
 # Dataset-derived manifests are reproducible and may contain annotations.
 manifests*/*
