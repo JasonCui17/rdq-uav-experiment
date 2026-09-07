@@ -30,7 +30,9 @@ class MultiModalClassifier(nn.Module):
         self.visual_tokenizer: DualViewTokenizer | None = None
         self.position_encoding: SinePositionEncoding2D | None = None
         if self.variant != "radar":
-            backbone = build_backbone(config["backbone"])
+            backbone_config = dict(config["backbone"])
+            backbone_config["embed_dim"] = self.embed_dim
+            backbone = build_backbone(backbone_config)
             self.visual_tokenizer = DualViewTokenizer(backbone, self.embed_dim)
             self.position_encoding = SinePositionEncoding2D(self.embed_dim)
 

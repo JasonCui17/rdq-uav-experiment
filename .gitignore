@@ -54,6 +54,14 @@ outputs/stage4_spatial_resolution_*/*
 !outputs/stage4_spatial_resolution_*/bbox_stats.json
 !outputs/stage4_spatial_resolution_*/position_stats.json
 !outputs/stage4_spatial_resolution_*/config_*.yaml
+!outputs/stage4_minimal_multiscale_*/
+outputs/stage4_minimal_multiscale_*/*
+!outputs/stage4_minimal_multiscale_*/multiscale_comparison.csv
+!outputs/stage4_minimal_multiscale_*/multiscale_history.csv
+!outputs/stage4_minimal_multiscale_*/report.json
+!outputs/stage4_minimal_multiscale_*/bbox_stats.json
+!outputs/stage4_minimal_multiscale_*/position_stats.json
+!outputs/stage4_minimal_multiscale_*/config_*.yaml
 
 # Dataset-derived manifests are reproducible and may contain annotations.
 manifests*/*

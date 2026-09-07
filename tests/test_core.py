@@ -22,6 +22,7 @@ from rdq_uav.engine.localization import LocalizationLoss, LocalizationMetrics
 from rdq_uav.engine.sequence import aggregate_temporal_blocks
 from rdq_uav.models.model import MultiModalClassifier
 from rdq_uav.models.localizer import MultiModalLocalizer
+from rdq_uav.models.backbones import MinimalTopDownFusion
 from rdq_uav.models.radar import MaskedPointMLP
 
 
@@ -46,6 +47,15 @@ def model_config(variant: str) -> dict:
 
 
 class CoreTests(unittest.TestCase):
+    def test_minimal_top_down_fusion_shape_and_gradient(self) -> None:
+        fusion = MinimalTopDownFusion(16, 32, 24)
+        stride8 = torch.randn(2, 16, 8, 12, requires_grad=True)
+        stride16 = torch.randn(2, 32, 4, 6, requires_grad=True)
+        output = fusion(stride8, stride16)
+        self.assertEqual(tuple(output.shape), (2, 24, 8, 12))
+        output.mean().backward()
+        self.assertTrue(torch.isfinite(stride8.grad).all())
+        self.assertTrue(torch.isfinite(stride16.grad).all())
     def test_oracle_left_transform_returns_one_view_and_masks_center(self) -> None:
         image = Image.fromarray(np.full((100, 200, 3), 255, dtype=np.uint8))
         transform = DualFisheyeTransform(

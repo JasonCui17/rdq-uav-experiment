@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import torch
 from torch import nn
+from torch.nn import functional as F
 
 
 class TinyCNN(nn.Module):
@@ -59,17 +60,77 @@ class TimmBackbone(nn.Module):
         return features[0]
 
 
+class MinimalTopDownFusion(nn.Module):
+    """Minimal stride16-to-stride8 additive fusion without an FPN neck."""
+
+    def __init__(self, stride8_channels: int, stride16_channels: int, embed_dim: int) -> None:
+        super().__init__()
+        self.stride8_projection = nn.Conv2d(stride8_channels, embed_dim, kernel_size=1)
+        self.stride16_projection = nn.Conv2d(stride16_channels, embed_dim, kernel_size=1)
+
+    def forward(self, stride8: torch.Tensor, stride16: torch.Tensor) -> torch.Tensor:
+        shallow = self.stride8_projection(stride8)
+        deep = self.stride16_projection(stride16)
+        deep = F.interpolate(deep, size=shallow.shape[-2:], mode="bilinear", align_corners=False)
+        return shallow + deep
+
+
+class TimmMinimalFPNBackbone(nn.Module):
+    """ResNet stride8 + stride16 top-down fusion exposed as one stride8 feature map."""
+
+    def __init__(self, name: str, pretrained: bool, embed_dim: int) -> None:
+        super().__init__()
+        try:
+            import timm
+        except ImportError as exc:
+            raise ImportError("Install timm to use minimal_fpn") from exc
+        try:
+            self.model = timm.create_model(
+                name,
+                pretrained=pretrained,
+                features_only=True,
+                out_indices=(2, 3),
+            )
+        except Exception as exc:
+            if pretrained:
+                raise RuntimeError(
+                    f"Could not create pretrained timm backbone '{name}' for minimal_fpn"
+                ) from exc
+            raise
+        channels = self.model.feature_info.channels()
+        if len(channels) != 2:
+            raise RuntimeError(f"Expected two feature levels, got channels={channels}")
+        self.fusion = MinimalTopDownFusion(int(channels[0]), int(channels[1]), embed_dim)
+        self.out_channels = int(embed_dim)
+
+    def forward(self, images: torch.Tensor) -> torch.Tensor:
+        features = self.model(images)
+        if not isinstance(features, (list, tuple)) or len(features) != 2:
+            raise RuntimeError("minimal_fpn expected stride8 and stride16 feature maps")
+        return self.fusion(features[0], features[1])
+
+
 def build_backbone(config: dict) -> nn.Module:
     provider = str(config["provider"])
     name = str(config["name"])
     if provider == "builtin" and name == "tiny_cnn":
         backbone: nn.Module = TinyCNN()
     elif provider == "timm":
-        backbone = TimmBackbone(
-            name=name,
-            pretrained=bool(config["pretrained"]),
-            out_index=int(config["out_index"]),
-        )
+        fusion = str(config.get("fusion", "none"))
+        if fusion == "none":
+            backbone = TimmBackbone(
+                name=name,
+                pretrained=bool(config["pretrained"]),
+                out_index=int(config["out_index"]),
+            )
+        elif fusion == "minimal_fpn":
+            backbone = TimmMinimalFPNBackbone(
+                name=name,
+                pretrained=bool(config["pretrained"]),
+                embed_dim=int(config["embed_dim"]),
+            )
+        else:
+            raise ValueError(f"Unsupported backbone fusion: {fusion}")
     else:
         raise ValueError(f"Unsupported backbone: provider={provider}, name={name}")
     if not bool(config.get("trainable", True)):
