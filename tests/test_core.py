@@ -243,6 +243,33 @@ class CoreTests(unittest.TestCase):
         self.assertTrue(torch.allclose(decoded[:, :2], torch.full((2, 2), 0.5)))
         self.assertTrue(torch.allclose(decoded[:, 2:], torch.tensor([[0.025, 0.06]]).repeat(2, 1)))
 
+    def test_localization_l1_regression_mode_preserves_total_loss_formula(self) -> None:
+        criterion = LocalizationLoss(
+            {
+                "bbox_regression": "l1",
+                "bbox_l1_weight": 5.0,
+                "giou_weight": 0.0,
+                "position_weight": 1.0,
+                "projection_consistency": {"enabled": False},
+            }
+        )
+        pred_box = torch.tensor([[0.50, 0.50, 0.02, 0.04]], requires_grad=True)
+        gt_box = torch.tensor([[0.51, 0.48, 0.01, 0.03]])
+        pred_position = torch.zeros(1, 3, requires_grad=True)
+        gt_position = torch.ones(1, 3)
+        losses = criterion(pred_box, gt_box, pred_position, gt_position)
+        expected = torch.nn.functional.l1_loss(pred_box, gt_box)
+        self.assertTrue(torch.allclose(losses["bbox_regression_loss"], expected))
+        self.assertTrue(torch.allclose(losses["bbox_l1_loss"], expected))
+        self.assertTrue(
+            torch.allclose(
+                losses["total_loss"],
+                5.0 * expected + losses["position_loss"],
+            )
+        )
+        losses["total_loss"].backward()
+        self.assertTrue(torch.isfinite(pred_box.grad).all())
+
     def test_localization_bbox_is_normalized_on_stitched_full_panorama(self) -> None:
         dataset = object.__new__(MMAUDLocalizationDataset)
         dataset.panorama_width = 2560

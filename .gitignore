@@ -24,6 +24,14 @@ outputs/stage4_bbox_parameterization_*/*
 !outputs/stage4_bbox_parameterization_*/position_stats.json
 !outputs/stage4_bbox_parameterization_*/config.yaml
 !outputs/stage4_bbox_parameterization_*/parameterization_comparison.csv
+!outputs/stage4_bbox_loss_*/
+outputs/stage4_bbox_loss_*/*
+!outputs/stage4_bbox_loss_*/loss_comparison.csv
+!outputs/stage4_bbox_loss_*/bbox_loss_history.csv
+!outputs/stage4_bbox_loss_*/loss_ablation_report.json
+!outputs/stage4_bbox_loss_*/bbox_stats.json
+!outputs/stage4_bbox_loss_*/position_stats.json
+!outputs/stage4_bbox_loss_*/config_*.yaml
 
 # Dataset-derived manifests are reproducible and may contain annotations.
 manifests*/*

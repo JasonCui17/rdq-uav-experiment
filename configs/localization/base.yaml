@@ -29,6 +29,7 @@ model:
     loss_weight: 0.0
 
 loss:
+  bbox_regression: smooth_l1
   bbox_l1_weight: 5.0
   giou_weight: 2.0
   position_weight: 1.0

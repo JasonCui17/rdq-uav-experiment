@@ -29,6 +29,12 @@ def aligned_iou(boxes1: torch.Tensor, boxes2: torch.Tensor) -> torch.Tensor:
 class LocalizationLoss(nn.Module):
     def __init__(self, config: dict[str, Any]) -> None:
         super().__init__()
+        self.bbox_regression = str(config.get("bbox_regression", "smooth_l1"))
+        if self.bbox_regression not in {"smooth_l1", "l1"}:
+            raise ValueError(
+                "loss.bbox_regression must be 'smooth_l1' or 'l1', "
+                f"got {self.bbox_regression!r}"
+            )
         self.bbox_l1_weight = float(config["bbox_l1_weight"])
         self.giou_weight = float(config["giou_weight"])
         self.position_weight = float(config["position_weight"])
@@ -46,9 +52,14 @@ class LocalizationLoss(nn.Module):
         pred_position_normalized: torch.Tensor,
         gt_position_normalized: torch.Tensor,
     ) -> dict[str, torch.Tensor]:
-        bbox_l1 = nn.functional.smooth_l1_loss(pred_box, gt_box)
-        bbox_center_l1 = nn.functional.smooth_l1_loss(pred_box[..., :2], gt_box[..., :2])
-        bbox_size_l1 = nn.functional.smooth_l1_loss(pred_box[..., 2:], gt_box[..., 2:])
+        regression_fn = (
+            nn.functional.smooth_l1_loss
+            if self.bbox_regression == "smooth_l1"
+            else nn.functional.l1_loss
+        )
+        bbox_regression = regression_fn(pred_box, gt_box)
+        bbox_center = regression_fn(pred_box[..., :2], gt_box[..., :2])
+        bbox_size = regression_fn(pred_box[..., 2:], gt_box[..., 2:])
         giou = generalized_box_iou_loss(
             cxcywh_to_xyxy(pred_box), cxcywh_to_xyxy(gt_box), reduction="mean"
         )
@@ -56,15 +67,19 @@ class LocalizationLoss(nn.Module):
             pred_position_normalized, gt_position_normalized
         )
         total = (
-            self.bbox_l1_weight * bbox_l1
+            self.bbox_l1_weight * bbox_regression
             + self.giou_weight * giou
             + self.position_weight * position
         )
         return {
             "total_loss": total,
-            "bbox_l1_loss": bbox_l1,
-            "bbox_center_l1_loss": bbox_center_l1,
-            "bbox_size_l1_loss": bbox_size_l1,
+            "bbox_regression_loss": bbox_regression,
+            "bbox_center_loss": bbox_center,
+            "bbox_size_loss": bbox_size,
+            # Backward-compatible names used by the Stage-4 smoke tools.
+            "bbox_l1_loss": bbox_regression,
+            "bbox_center_l1_loss": bbox_center,
+            "bbox_size_l1_loss": bbox_size,
             "giou_loss": giou,
             "position_loss": position,
         }
