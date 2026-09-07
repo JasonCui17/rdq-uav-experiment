@@ -176,6 +176,8 @@ def main() -> None:
         print(
             f"train total={train_metrics['total_loss']:.4f} "
             f"bbox_l1={train_metrics['bbox_l1_loss']:.4f} "
+            f"center_l1={train_metrics['bbox_center_l1_loss']:.4f} "
+            f"size_l1={train_metrics['bbox_size_l1_loss']:.4f} "
             f"giou={train_metrics['giou_loss']:.4f} xyz={train_metrics['position_loss']:.4f} | "
             f"val total={val_metrics['total_loss']:.4f} mean_iou={val_metrics['mean_iou']:.4f} "
             f"e3d={val_metrics['position_error_mean_m']:.4f}m"

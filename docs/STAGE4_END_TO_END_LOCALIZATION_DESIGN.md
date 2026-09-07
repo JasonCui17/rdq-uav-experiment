@@ -114,6 +114,8 @@ GIoU 使用 torchvision 的维护实现。日志分别记录：
 
 - `total_loss`
 - `bbox_l1_loss`
+- `bbox_center_l1_loss`（观测项，不重复加入 total）
+- `bbox_size_l1_loss`（观测项，不重复加入 total）
 - `giou_loss`
 - `position_loss`
 
@@ -125,6 +127,9 @@ GIoU 使用 torchvision 的维护实现。日志分别记录：
 - Recall@IoU 0.5
 - bbox center error 的 mean/median pixel error（768×288 画布）
 - mean normalized center error
+- normalized X/Y center absolute error
+- normalized width/height absolute error 的 mean/median
+- predicted/GT width/height 的 mean/median
 
 3D：
 

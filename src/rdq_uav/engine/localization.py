@@ -47,6 +47,8 @@ class LocalizationLoss(nn.Module):
         gt_position_normalized: torch.Tensor,
     ) -> dict[str, torch.Tensor]:
         bbox_l1 = nn.functional.smooth_l1_loss(pred_box, gt_box)
+        bbox_center_l1 = nn.functional.smooth_l1_loss(pred_box[..., :2], gt_box[..., :2])
+        bbox_size_l1 = nn.functional.smooth_l1_loss(pred_box[..., 2:], gt_box[..., 2:])
         giou = generalized_box_iou_loss(
             cxcywh_to_xyxy(pred_box), cxcywh_to_xyxy(gt_box), reduction="mean"
         )
@@ -61,6 +63,8 @@ class LocalizationLoss(nn.Module):
         return {
             "total_loss": total,
             "bbox_l1_loss": bbox_l1,
+            "bbox_center_l1_loss": bbox_center_l1,
+            "bbox_size_l1_loss": bbox_size_l1,
             "giou_loss": giou,
             "position_loss": position,
         }
@@ -73,6 +77,10 @@ class LocalizationMetrics:
         self.ious: list[torch.Tensor] = []
         self.center_error_px: list[torch.Tensor] = []
         self.center_error_normalized: list[torch.Tensor] = []
+        self.center_absolute_error: list[torch.Tensor] = []
+        self.size_absolute_error: list[torch.Tensor] = []
+        self.predicted_size: list[torch.Tensor] = []
+        self.target_size: list[torch.Tensor] = []
         self.position_error: list[torch.Tensor] = []
         self.axis_absolute_error: list[torch.Tensor] = []
         self.range_error: list[torch.Tensor] = []
@@ -94,6 +102,10 @@ class LocalizationMetrics:
         self.ious.append(aligned_iou(cxcywh_to_xyxy(pred_box), cxcywh_to_xyxy(gt_box)))
         self.center_error_normalized.append(delta_center.norm(dim=1))
         self.center_error_px.append((delta_center * pixel_scale).norm(dim=1))
+        self.center_absolute_error.append(delta_center.abs())
+        self.size_absolute_error.append((pred_box[:, 2:] - gt_box[:, 2:]).abs())
+        self.predicted_size.append(pred_box[:, 2:])
+        self.target_size.append(gt_box[:, 2:])
         delta_position = pred_position_m - gt_position_m
         self.position_error.append(delta_position.norm(dim=1))
         self.axis_absolute_error.append(delta_position.abs())
@@ -107,6 +119,10 @@ class LocalizationMetrics:
         iou = torch.cat(self.ious).double()
         center_px = torch.cat(self.center_error_px).double()
         center_norm = torch.cat(self.center_error_normalized).double()
+        center_absolute = torch.cat(self.center_absolute_error).double()
+        size_absolute = torch.cat(self.size_absolute_error).double()
+        predicted_size = torch.cat(self.predicted_size).double()
+        target_size = torch.cat(self.target_size).double()
         position = torch.cat(self.position_error).double()
         axis = torch.cat(self.axis_absolute_error).double()
         range_error = torch.cat(self.range_error).double()
@@ -116,7 +132,23 @@ class LocalizationMetrics:
             "recall_iou_0.5": float((iou >= 0.5).double().mean()),
             "bbox_center_error_px_mean": float(center_px.mean()),
             "bbox_center_error_px_median": float(center_px.quantile(0.5)),
+            "center_error_px_mean": float(center_px.mean()),
+            "center_error_px_median": float(center_px.quantile(0.5)),
             "normalized_center_error": float(center_norm.mean()),
+            "center_abs_error_x": float(center_absolute[:, 0].mean()),
+            "center_abs_error_y": float(center_absolute[:, 1].mean()),
+            "width_abs_error_mean": float(size_absolute[:, 0].mean()),
+            "width_abs_error_median": float(size_absolute[:, 0].quantile(0.5)),
+            "height_abs_error_mean": float(size_absolute[:, 1].mean()),
+            "height_abs_error_median": float(size_absolute[:, 1].quantile(0.5)),
+            "pred_width_mean": float(predicted_size[:, 0].mean()),
+            "pred_width_median": float(predicted_size[:, 0].quantile(0.5)),
+            "gt_width_mean": float(target_size[:, 0].mean()),
+            "gt_width_median": float(target_size[:, 0].quantile(0.5)),
+            "pred_height_mean": float(predicted_size[:, 1].mean()),
+            "pred_height_median": float(predicted_size[:, 1].quantile(0.5)),
+            "gt_height_mean": float(target_size[:, 1].mean()),
+            "gt_height_median": float(target_size[:, 1].quantile(0.5)),
             "position_error_mean_m": float(position.mean()),
             "position_error_median_m": float(position.quantile(0.5)),
             "mae_x_m": float(axis[:, 0].mean()),
@@ -225,6 +257,8 @@ def run_localization_epoch(
                 f"step={step}/{len(loader)} samples={sample_count} "
                 f"total={totals['total_loss']/sample_count:.4f} "
                 f"bbox_l1={totals['bbox_l1_loss']/sample_count:.4f} "
+                f"center_l1={totals['bbox_center_l1_loss']/sample_count:.4f} "
+                f"size_l1={totals['bbox_size_l1_loss']/sample_count:.4f} "
                 f"giou={totals['giou_loss']/sample_count:.4f} "
                 f"xyz={totals['position_loss']/sample_count:.4f}",
                 flush=True,

@@ -150,6 +150,8 @@ def main() -> None:
             print(
                 f"overfit_step={step}/{args.steps} total={float(step_losses['total_loss']):.6f} "
                 f"bbox_l1={float(step_losses['bbox_l1_loss']):.6f} "
+                f"center_l1={float(step_losses['bbox_center_l1_loss']):.6f} "
+                f"size_l1={float(step_losses['bbox_size_l1_loss']):.6f} "
                 f"giou={float(step_losses['giou_loss']):.6f} "
                 f"xyz={float(step_losses['position_loss']):.6f}",
                 flush=True,

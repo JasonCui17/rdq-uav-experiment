@@ -215,6 +215,20 @@ class CoreTests(unittest.TestCase):
             self.assertEqual(tuple(output["position"].shape), (2, 3))
             self.assertTrue(bool(((output["box"] >= 0) & (output["box"] <= 1)).all()))
             losses = criterion(output["box"], target_box, output["position"], target_position)
+            self.assertTrue(
+                torch.allclose(
+                    losses["bbox_l1_loss"],
+                    (losses["bbox_center_l1_loss"] + losses["bbox_size_l1_loss"]) / 2,
+                )
+            )
+            self.assertTrue(
+                torch.allclose(
+                    losses["total_loss"],
+                    5.0 * losses["bbox_l1_loss"]
+                    + 2.0 * losses["giou_loss"]
+                    + losses["position_loss"],
+                )
+            )
             losses["total_loss"].backward()
             self.assertTrue(all(torch.isfinite(p.grad).all() for p in model.parameters() if p.grad is not None))
 
@@ -241,6 +255,12 @@ class CoreTests(unittest.TestCase):
         result = meter.compute()
         self.assertAlmostEqual(result["mean_iou"], 1.0)
         self.assertAlmostEqual(result["bbox_center_error_px_mean"], 0.0)
+        self.assertAlmostEqual(result["center_abs_error_x"], 0.0)
+        self.assertAlmostEqual(result["center_abs_error_y"], 0.0)
+        self.assertAlmostEqual(result["width_abs_error_mean"], 0.0)
+        self.assertAlmostEqual(result["height_abs_error_mean"], 0.0)
+        self.assertAlmostEqual(result["pred_width_mean"], result["gt_width_mean"])
+        self.assertAlmostEqual(result["pred_height_mean"], result["gt_height_mean"])
         self.assertAlmostEqual(result["position_error_mean_m"], 0.0)
 
     def test_metrics(self) -> None:

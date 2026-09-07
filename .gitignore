@@ -10,6 +10,12 @@ outputs/*
 !outputs/rdq_stage1_summary.csv
 !outputs/rdq_stage2_interventions.csv
 !outputs/rdq_stage3_multiseed.csv
+!outputs/stage4_bbox_sanity_*/
+outputs/stage4_bbox_sanity_*/*
+!outputs/stage4_bbox_sanity_*/bbox_sanity_report.json
+!outputs/stage4_bbox_sanity_*/bbox_sanity_history.csv
+!outputs/stage4_bbox_sanity_*/position_stats.json
+!outputs/stage4_bbox_sanity_*/config.yaml
 
 # Dataset-derived manifests are reproducible and may contain annotations.
 manifests*/*
