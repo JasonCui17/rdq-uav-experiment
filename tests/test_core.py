@@ -43,6 +43,11 @@ from tools.calibration.resolve_radar_coordinate_frame import (
     kabsch,
     proper_axis_rotations as radar_axis_rotations,
 )
+from tools.radar_target_association_audit import (
+    candidate_rules,
+    deterministic_shuffle_indices as association_shuffle_indices,
+    score_candidates,
+)
 
 
 def model_config(variant: str) -> dict:
@@ -66,6 +71,42 @@ def model_config(variant: str) -> dict:
 
 
 class CoreTests(unittest.TestCase):
+    def test_target_association_rules_use_confirmed_xyz_and_range(self) -> None:
+        points = np.asarray([[3.0, 4.0, 0.0], [30.0, 40.0, 1.0], [60.0, 0.0, 0.0]])
+        rules = candidate_rules(max_range_m=50.0, gt_range_gate_m=0.5)
+        self.assertEqual(
+            set(rules), {"released_xyz_all", "finite_range_le_50m", "oracle_gt_range_gate"}
+        )
+        self.assertEqual(rules["released_xyz_all"](points, None).tolist(), [True, True, True])
+        self.assertEqual(rules["finite_range_le_50m"](points, None).tolist(), [True, False, False])
+        target = np.asarray([0.0, 5.2, 0.0])
+        self.assertEqual(rules["oracle_gt_range_gate"](points, target).tolist(), [True, False, False])
+
+    def test_target_association_shuffle_stays_within_sequence(self) -> None:
+        rows = [
+            {"sequence_id": "a"}, {"sequence_id": "b"}, {"sequence_id": "a"},
+            {"sequence_id": "b"}, {"sequence_id": "a"},
+        ]
+        indices = association_shuffle_indices(rows)
+        self.assertEqual(len(indices), len(rows))
+        for index, shuffled_index in enumerate(indices):
+            self.assertEqual(rows[index]["sequence_id"], rows[shuffled_index]["sequence_id"])
+
+    def test_target_association_scoring_identity_projection(self) -> None:
+        camera = OmniRadtanCamera(
+            xi=0.0, fu=100.0, fv=100.0, pu=50.0, pv=50.0,
+            k1=0.0, k2=0.0, p1=0.0, p2=0.0, width=100, height=100,
+        )
+        points = np.asarray([[0.0, 0.0, 10.0], [1.0, 0.0, 10.0]])
+        result = score_candidates(
+            points, np.asarray([0.0, 0.0, 10.0]), np.asarray([50.0, 50.0]),
+            np.eye(3), np.zeros(3), camera, np.eye(3), np.zeros(3),
+        )
+        self.assertEqual(result["candidate_count"], 2)
+        self.assertAlmostEqual(result["nearest_candidate_gt_3d_m"], 0.0)
+        self.assertAlmostEqual(result["nearest_candidate_gt_2d_px"], 0.0)
+        self.assertEqual(result["coverage_8px"], 1)
+
     def test_radar_frame_resolution_axis_set_and_kabsch(self) -> None:
         rotations = radar_axis_rotations()
         self.assertEqual(len(rotations), 24)
