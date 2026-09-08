@@ -25,6 +25,11 @@ class MultiModalClassifier(nn.Module):
             raise ValueError(f"Unknown model variant: {self.variant}")
         self.embed_dim = int(config["embed_dim"])
         self.radar_skip = bool(config.get("radar_skip", True))
+        self.attention_output_mode = str(config.get("attention_output_mode", "standard"))
+        if self.attention_output_mode not in {"standard", "attended_only"}:
+            raise ValueError(
+                f"Unsupported attention_output_mode: {self.attention_output_mode}"
+            )
         dropout = float(config["dropout"])
 
         self.visual_tokenizer: DualViewTokenizer | None = None
@@ -128,7 +133,10 @@ class MultiModalClassifier(nn.Module):
                 assert self.query_projection is not None
                 query = self.query_projection(radar_token).unsqueeze(1)
             attended, attention = self.cross_attention(
-                query, visual_tokens, need_weights=return_attention
+                query,
+                visual_tokens,
+                need_weights=return_attention,
+                output_mode=self.attention_output_mode,
             )
             fused = attended[:, 0]
             if self.radar_skip:

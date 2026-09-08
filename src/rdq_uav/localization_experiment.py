@@ -12,6 +12,8 @@ def make_localization_dataset(
     split: str,
     position_stats: dict[str, Any],
     limit_samples: int | None = None,
+    radar_mode: str = "normal",
+    radar_shift_seconds: float = 0.0,
 ) -> MMAUDLocalizationDataset:
     if split not in {"train", "val"}:
         raise ValueError("Stage-4 localization code is restricted to train/val")
@@ -31,8 +33,8 @@ def make_localization_dataset(
         training=split == "train",
         color_jitter=float(data_cfg["train_color_jitter"]) if split == "train" else 0.0,
         deterministic_eval_sampling=bool(data_cfg["radar"]["deterministic_eval_sampling"]),
-        radar_mode="normal",
-        radar_shift_seconds=0.0,
+        radar_mode=radar_mode,
+        radar_shift_seconds=radar_shift_seconds,
         image_decode_retries=int(data_cfg.get("image_decode_retries", 3)),
         position_stats=position_stats,
         panorama_size=data_cfg["panorama_size"],

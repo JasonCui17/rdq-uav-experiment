@@ -69,6 +69,15 @@ outputs/stage4_attention_audit_*/*
 !outputs/stage4_attention_audit_*/best_fused_checkpoint_predictions.csv
 !outputs/stage4_attention_audit_*/position_stats.json
 !outputs/stage4_attention_audit_*/resolved_config.yaml
+!outputs/stage4_large_sample_pathway_*/
+outputs/stage4_large_sample_pathway_*/*
+!outputs/stage4_large_sample_pathway_*/pathway_comparison.csv
+!outputs/stage4_large_sample_pathway_*/pathway_history.csv
+!outputs/stage4_large_sample_pathway_*/full_rdq_interventions.csv
+!outputs/stage4_large_sample_pathway_*/pathway_attribution_report.json
+!outputs/stage4_large_sample_pathway_*/train_subset_512.csv
+!outputs/stage4_large_sample_pathway_*/position_stats.json
+!outputs/stage4_large_sample_pathway_*/config_*.yaml
 
 # Dataset-derived manifests are reproducible and may contain annotations.
 manifests*/*

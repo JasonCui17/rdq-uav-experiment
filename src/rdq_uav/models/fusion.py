@@ -27,8 +27,14 @@ class CrossAttentionBlock(nn.Module):
         )
 
     def forward(
-        self, query: torch.Tensor, memory: torch.Tensor, need_weights: bool = False
+        self,
+        query: torch.Tensor,
+        memory: torch.Tensor,
+        need_weights: bool = False,
+        output_mode: str = "standard",
     ) -> tuple[torch.Tensor, torch.Tensor | None]:
+        if output_mode not in {"standard", "attended_only"}:
+            raise ValueError(f"Unsupported cross-attention output mode: {output_mode}")
         attended, weights = self.attention(
             self.query_norm(query),
             self.memory_norm(memory),
@@ -36,6 +42,8 @@ class CrossAttentionBlock(nn.Module):
             need_weights=need_weights,
             average_attn_weights=False,
         )
+        if output_mode == "attended_only":
+            return attended, weights if need_weights else None
         query = query + self.dropout(attended)
         query = query + self.ffn(self.ffn_norm(query))
         return query, weights if need_weights else None

@@ -27,6 +27,7 @@ from rdq_uav.engine.sequence import aggregate_temporal_blocks
 from rdq_uav.models.model import MultiModalClassifier
 from rdq_uav.models.localizer import MultiModalLocalizer
 from rdq_uav.models.backbones import MinimalTopDownFusion
+from rdq_uav.models.fusion import CrossAttentionBlock
 from rdq_uav.models.radar import MaskedPointMLP
 
 
@@ -51,6 +52,23 @@ def model_config(variant: str) -> dict:
 
 
 class CoreTests(unittest.TestCase):
+    def test_cross_attention_attended_only_removes_query_residual_and_ffn(self) -> None:
+        block = CrossAttentionBlock(16, 4, 0.0, 2).eval()
+        query = torch.randn(2, 1, 16)
+        memory = torch.randn(2, 7, 16)
+        expected, expected_weights = block.attention(
+            block.query_norm(query),
+            block.memory_norm(memory),
+            block.memory_norm(memory),
+            need_weights=True,
+            average_attn_weights=False,
+        )
+        actual, weights = block(
+            query, memory, need_weights=True, output_mode="attended_only"
+        )
+        self.assertTrue(torch.allclose(actual, expected))
+        self.assertTrue(torch.allclose(weights, expected_weights))
+
     def test_attention_audit_uses_dual_view_tokenizer_order(self) -> None:
         centers = stitched_token_centers(
             2, 3, 2, 20, 30, device=torch.device("cpu"), dtype=torch.float32

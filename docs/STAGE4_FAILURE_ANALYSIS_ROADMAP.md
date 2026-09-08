@@ -24,6 +24,7 @@
 | single-token bottleneck | fused-token center vs真实attention中心 | tail center error | fused 9.67 px；mean-attention 204.44 px | inconclusive | attention本身没有找到UAV，不能归因于后续single-token压缩 | 不实现spatial decoder |
 | Radar-to-visual spatial correspondence | per-head attention soft-argmax/peak/GT mass | attention center、entropy、GT mass | best fixed head 134.30 px；entropy 0.9946；GT mass低于均匀参考 | rejected | 当前Radar query没有形成目标附近的空间attention；fused head可经query residual/radar skip绕过它 | 只建议temporal-shift correspondence eval |
 | Radar temporal correspondence | frozen checkpoint temporal shift eval | IoU/center/3D error shift curve | 未执行 | inconclusive | 空间attention correspondence已被拒绝，仍需区分当前Radar与session prior | 等待用户决定 |
+| large-sample pathway attribution | Full/no-skip/Radar-only/Pure-Attention + modality interventions | full-val center error与attention空间诊断 | Full 32.61 px；no-skip 32.81；Radar-only 42.27；Pure 37.25 | supported | 视觉与Radar均有贡献，但空间attention未对齐；主要经标准query-residual/FFN与全局attended values路径 | 可讨论geometry/target-aware query，当前停止 |
 | fisheye seam issue | fixed canvas-region grouped eval | seam/edge vs interior error | 未执行 | inconclusive | 只允许 read-only audit | 等待前置结论 |
 
 ## Stage 4.3：Tiny-Batch Optimization Stability
