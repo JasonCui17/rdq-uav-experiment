@@ -1,11 +1,11 @@
 experiment:
   name: rdq_resnet18
   seed: 42
-  output_dir: /home/jasoncui/datasets/MMAUD/rdq_uav_experiment/outputs
+  output_dir: /home/jasoncui/projects/rdq-uav-experiment/outputs
 
 data:
-  root: /home/jasoncui/datasets/MMAUD/v1
-  manifest_dir: /home/jasoncui/datasets/MMAUD/rdq_uav_experiment/manifests
+  root: /home/jasoncui/datasets/MMAUD/official/v1
+  manifest_dir: /home/jasoncui/projects/rdq-uav-experiment/manifests
   classes: [Mavic2, Mavic3, Avata, M300, Pham4]
   image_mode: dual_full
   # Diagnostic only: in oracle_left mode, mask this central fraction after crop.

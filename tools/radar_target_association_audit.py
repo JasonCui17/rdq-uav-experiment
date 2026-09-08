@@ -200,7 +200,7 @@ def main() -> None:
         "--manifest-dir", type=Path,
         default=PROJECT_ROOT / "manifests_oracle_left_fixed256_bbox",
     )
-    parser.add_argument("--dataset-root", type=Path, default=Path("/home/jasoncui/datasets/MMAUD/v1"))
+    parser.add_argument("--dataset-root", type=Path, default=Path("/home/jasoncui/datasets/MMAUD/official/v1"))
     parser.add_argument(
         "--radar-transform", type=Path,
         default=PROJECT_ROOT / "calibration/radar_frame_resolution.json",

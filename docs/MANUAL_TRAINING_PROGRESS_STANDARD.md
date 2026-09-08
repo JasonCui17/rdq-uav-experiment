@@ -30,7 +30,7 @@ val metric | best metric | patience current/limit | checkpoint
 
 ```bash
 conda activate rdq
-cd /home/jasoncui/datasets/MMAUD/rdq_uav_experiment
+cd /home/jasoncui/projects/rdq-uav-experiment
 
 python tools/train_localization.py \
   --config configs/localization/rdq.yaml \

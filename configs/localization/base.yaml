@@ -8,7 +8,7 @@ experiment:
   seed: 42
 
 data:
-  manifest_dir: /home/jasoncui/datasets/MMAUD/rdq_uav_experiment/manifests_oracle_left_fixed256_bbox
+  manifest_dir: /home/jasoncui/projects/rdq-uav-experiment/manifests_oracle_left_fixed256_bbox
   # Fixed full panorama split only. Neither the transform nor its crop depends on GT.
   image_mode: dual_full
   bbox_mode: full

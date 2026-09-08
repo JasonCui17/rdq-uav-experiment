@@ -45,7 +45,7 @@ def main() -> None:
     parser.add_argument(
         "--annotations", type=Path, default=PROJECT_ROOT / "calibration/center_annotations.csv"
     )
-    parser.add_argument("--dataset-root", type=Path, default=Path("/home/jasoncui/datasets/MMAUD/v1"))
+    parser.add_argument("--dataset-root", type=Path, default=Path("/home/jasoncui/datasets/MMAUD/official/v1"))
     parser.add_argument("--output-dir", type=Path, default=PROJECT_ROOT / "calibration/annotation_site")
     args = parser.parse_args()
     with args.annotations.open("r", newline="", encoding="utf-8") as handle:

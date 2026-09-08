@@ -64,7 +64,7 @@ outputs/stage4_target_association_<timestamp>/
 
 ```bash
 conda activate rdq
-cd /home/jasoncui/datasets/MMAUD/rdq_uav_experiment
+cd /home/jasoncui/projects/rdq-uav-experiment
 python tools/radar_target_association_audit.py --with-gt-range-oracle --gt-range-gate-m 0.5
 ```
 

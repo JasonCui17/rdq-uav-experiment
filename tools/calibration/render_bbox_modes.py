@@ -37,7 +37,7 @@ def main() -> None:
         default=PROJECT_ROOT / "manifests_oracle_left_fixed256_bbox/val.csv",
     )
     parser.add_argument(
-        "--root", type=Path, default=Path("/home/jasoncui/datasets/MMAUD/v1")
+        "--root", type=Path, default=Path("/home/jasoncui/datasets/MMAUD/official/v1")
     )
     parser.add_argument(
         "--output",

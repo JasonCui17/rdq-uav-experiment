@@ -1,0 +1,51 @@
+# 实验与报告索引
+
+本文件是历史实验的导航入口。`outputs/` 中的目录保持不可变，避免破坏 checkpoint、
+CSV 和 JSON 内记录的路径；实验结论以这里链接的版本化报告为准。
+
+## 数据、任务与风险审计
+
+| 主题 | 报告 |
+|---|---|
+| 工作区与数据目录 | [WORKSPACE_LAYOUT.md](WORKSPACE_LAYOUT.md) |
+| 问题定义与方法迁移 | [PROBLEM_AND_METHOD_MIGRATION.md](PROBLEM_AND_METHOD_MIGRATION.md) |
+| 鱼眼与 GT 对齐 | [FISHEYE_ALIGNMENT_DESIGN.md](FISHEYE_ALIGNMENT_DESIGN.md) |
+| Oracle left 协议 | [ORACLE_LEFT_EXPERIMENT.md](ORACLE_LEFT_EXPERIMENT.md) |
+
+## Stage 1–3：分类主假设
+
+| Stage | 内容 | 报告/汇总 |
+|---|---|---|
+| Stage 1 | RGB、Radar、Concat、Learned Query、RDQ seed0 | [RDQ_STAGE1_RESULTS.md](RDQ_STAGE1_RESULTS.md)、`outputs/rdq_stage1_summary.csv` |
+| Stage 2 | RDQ Radar intervention | `outputs/rdq_stage2_interventions.csv` |
+| Stage 3 | C/D/E 多 seed | [RDQ_STAGE3_RESULTS.md](RDQ_STAGE3_RESULTS.md)、`outputs/rdq_stage3_multiseed.csv` |
+
+## Stage 4：2D/3D 定位与失败分析
+
+按实际决策顺序阅读：
+
+1. [STAGE4_END_TO_END_LOCALIZATION_DESIGN.md](STAGE4_END_TO_END_LOCALIZATION_DESIGN.md)
+2. [STAGE4_BBOX_PARAMETERIZATION_ABLATION.md](STAGE4_BBOX_PARAMETERIZATION_ABLATION.md)
+3. [STAGE4_BBOX_LOSS_ABLATION.md](STAGE4_BBOX_LOSS_ABLATION.md)
+4. [STAGE4_FAILURE_ANALYSIS_ROADMAP.md](STAGE4_FAILURE_ANALYSIS_ROADMAP.md)
+5. [STAGE4_SPATIAL_RESOLUTION_ABLATION.md](STAGE4_SPATIAL_RESOLUTION_ABLATION.md)
+6. [STAGE4_MINIMAL_MULTISCALE_ABLATION.md](STAGE4_MINIMAL_MULTISCALE_ABLATION.md)
+7. [STAGE4_RDQ_ATTENTION_MECHANISM_AUDIT.md](STAGE4_RDQ_ATTENTION_MECHANISM_AUDIT.md)
+8. [STAGE4_LARGE_SAMPLE_PATHWAY_ATTRIBUTION.md](STAGE4_LARGE_SAMPLE_PATHWAY_ATTRIBUTION.md)
+9. [STAGE4_RADAR_IMAGE_GEOMETRY_AUDIT.md](STAGE4_RADAR_IMAGE_GEOMETRY_AUDIT.md)
+10. [STAGE4_RADAR_COORDINATE_FRAME_RESOLUTION.md](STAGE4_RADAR_COORDINATE_FRAME_RESOLUTION.md)
+11. [STAGE4_RADAR_TARGET_ASSOCIATION_AUDIT.md](STAGE4_RADAR_TARGET_ASSOCIATION_AUDIT.md)
+
+运行性能相关文档：
+
+- [STAGE4_RUNTIME_PARAMETER_TUNING.md](STAGE4_RUNTIME_PARAMETER_TUNING.md)
+- [MANUAL_TRAINING_PROGRESS_STANDARD.md](MANUAL_TRAINING_PROGRESS_STANDARD.md)
+
+## 文件归属规则
+
+- 研究结论与决策：`docs/`。
+- 可复现实验参数：`configs/`。
+- 数据划分：`manifests*/`。
+- 标定参数与小型审计结果：`calibration/`。
+- checkpoint、预测、运行期配置：`outputs/<experiment>_<timestamp>/`。
+- 临时代码、临时图片和下载包不得放入 `docs/` 或仓库根目录。

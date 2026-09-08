@@ -124,6 +124,6 @@
       "official_bbox_fully_inside_oracle_roi_rate": 1.0
     }
   },
-  "source_mapping": "/home/jasoncui/datasets/MMAUD/rdq_uav_experiment/calibration/official_2d_timestamp_mapping.csv",
-  "source_calibration": "/home/jasoncui/datasets/MMAUD/rdq_uav_experiment/calibration/official_left_fitted_calibration.json"
+  "source_mapping": "/home/jasoncui/projects/rdq-uav-experiment/calibration/official_2d_timestamp_mapping.csv",
+  "source_calibration": "/home/jasoncui/projects/rdq-uav-experiment/calibration/official_left_fitted_calibration.json"
 }

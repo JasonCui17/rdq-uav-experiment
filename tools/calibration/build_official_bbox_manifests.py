@@ -60,7 +60,7 @@ def main() -> None:
     parser.add_argument(
         "--dataset-root",
         type=Path,
-        default=Path("/home/jasoncui/datasets/MMAUD/v1"),
+        default=Path("/home/jasoncui/datasets/MMAUD/official/v1"),
     )
     parser.add_argument("--force", action="store_true")
     args = parser.parse_args()

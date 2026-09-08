@@ -1,5 +1,10 @@
 # MMAUD V1 雷达动态查询实验
 
+> 工作区已完成代码、官方数据和原始数据分离。目录约定与迁移说明见
+> [docs/WORKSPACE_LAYOUT.md](docs/WORKSPACE_LAYOUT.md)。当前代码仓库规范路径为
+> `/home/jasoncui/projects/rdq-uav-experiment`。
+> 已有实验结论统一从 [docs/EXPERIMENT_INDEX.md](docs/EXPERIMENT_INDEX.md) 查找。
+
 本项目是一套面向 MMAUD V1 五类无人机识别的模块化研究代码，用于验证一个明确的
 研究问题：**由当前 Radar 测量生成的动态 Query，是否比固定 Learned Query 和普通
 特征拼接更有效地选择双鱼眼图像中的无人机信息？** 整体流程为：
@@ -23,8 +28,8 @@
 
 ## 当前已经验证的状态
 
-- 数据集根目录：`/home/jasoncui/datasets/MMAUD/v1`
-- 数据审计报告：`/home/jasoncui/datasets/MMAUD/v1/audit/AUDIT_REPORT.md`
+- 数据集根目录：`/home/jasoncui/datasets/MMAUD/official/v1`
+- 数据审计报告：`/home/jasoncui/datasets/MMAUD/official/v1/audit/AUDIT_REPORT.md`
 - 在 40 ms 同步阈值内成功配对的 GT：5,207 / 5,212
 - 加入 1 秒隔离带后的主时间块划分：训练集 3,308，验证集 790，测试集 779
 - Radar 均值和标准差只使用训练集数据计算。
@@ -87,7 +92,7 @@ tests/                   合成数据正确性测试
 官方 `MMAUD_2D.zip` 已解压到：
 
 ```text
-/home/jasoncui/datasets/MMAUD/official_2d_detection
+/home/jasoncui/datasets/MMAUD/official/2d_detection
 ```
 
 审计确认其 4,425 张 `1280×960` 图片全部是本地时间戳双鱼眼图的**左半幅精确像素
@@ -216,7 +221,7 @@ validation 时序聚合验证前，不启动 A～E 融合比较。
 在终端执行：
 
 ```bash
-cd /home/jasoncui/datasets/MMAUD/rdq_uav_experiment
+cd /home/jasoncui/projects/rdq-uav-experiment
 conda create -n rdq python=3.10 pip -y
 conda activate rdq
 python -m pip install -r requirements.txt
@@ -237,7 +242,7 @@ CPU 版 PyTorch 与 CUDA 版 PyTorch 之间直接比较训练时间。
 
 ```bash
 conda activate rdq
-cd /home/jasoncui/datasets/MMAUD/rdq_uav_experiment
+cd /home/jasoncui/projects/rdq-uav-experiment
 python tools/preflight.py
 python -m pip check
 python -m unittest discover -s tests -v
@@ -282,7 +287,7 @@ python tools/train.py --config configs/base.yaml --limit-per-class 1 \
 需要重新执行：
 
 ```bash
-python /home/jasoncui/datasets/MMAUD/audit_v1.py
+python /home/jasoncui/projects/rdq-uav-experiment/tools/data/audit_v1.py
 python tools/build_manifest.py --config configs/base.yaml
 ```
 
@@ -292,7 +297,7 @@ python tools/build_manifest.py --config configs/base.yaml
 ```bash
 python tools/build_manifest.py --config configs/base.yaml \
   --set data.split.mode=temporal_holdout \
-  --set data.manifest_dir=/home/jasoncui/datasets/MMAUD/rdq_uav_experiment/manifests_holdout
+  --set data.manifest_dir=/home/jasoncui/projects/rdq-uav-experiment/manifests_holdout
 ```
 
 ## 数据和模型冒烟测试

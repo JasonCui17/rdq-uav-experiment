@@ -25,7 +25,7 @@ def nearest_distance(points: np.ndarray, target: np.ndarray) -> float:
 def main() -> None:
     parser = argparse.ArgumentParser(description="Audit whether official Radar XYZ and GT share a frame")
     parser.add_argument("--manifest", type=Path, default=PROJECT_ROOT / "manifests/train.csv")
-    parser.add_argument("--dataset-root", type=Path, default=Path("/home/jasoncui/datasets/MMAUD/v1"))
+    parser.add_argument("--dataset-root", type=Path, default=Path("/home/jasoncui/datasets/MMAUD/official/v1"))
     parser.add_argument("--output", type=Path, default=PROJECT_ROOT / "calibration/radar_gt_audit.json")
     args = parser.parse_args()
     grouped = defaultdict(list)

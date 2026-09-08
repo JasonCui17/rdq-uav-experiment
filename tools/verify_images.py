@@ -14,7 +14,7 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 def main() -> None:
     parser = argparse.ArgumentParser(description="Fully decode all images used by manifests")
     parser.add_argument(
-        "--root", type=Path, default=Path("/home/jasoncui/datasets/MMAUD/v1")
+        "--root", type=Path, default=Path("/home/jasoncui/datasets/MMAUD/official/v1")
     )
     parser.add_argument("--manifest-dir", type=Path, default=PROJECT_ROOT / "manifests")
     args = parser.parse_args()

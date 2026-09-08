@@ -1,6 +1,6 @@
 schema_version: 1
-dataset_root: /home/jasoncui/datasets/MMAUD/v1
-manifest_dir: /home/jasoncui/datasets/MMAUD/rdq_uav_experiment/manifests
+dataset_root: /home/jasoncui/datasets/MMAUD/official/v1
+manifest_dir: /home/jasoncui/projects/rdq-uav-experiment/manifests
 
 # Official UVC images contain two 1280x960 frames concatenated horizontally.
 # Exact decoded-pixel matching against all 4,425 official 2D images verified

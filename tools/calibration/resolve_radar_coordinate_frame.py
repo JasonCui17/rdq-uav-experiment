@@ -220,7 +220,7 @@ def transform_payload(rotation: np.ndarray, translation: np.ndarray) -> dict[str
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--manifest-dir", type=Path, default=PROJECT_ROOT / "manifests_oracle_left_fixed256_bbox")
-    parser.add_argument("--dataset-root", type=Path, default=Path("/home/jasoncui/datasets/MMAUD/v1"))
+    parser.add_argument("--dataset-root", type=Path, default=Path("/home/jasoncui/datasets/MMAUD/official/v1"))
     parser.add_argument("--camera-config", type=Path, default=PROJECT_ROOT / "configs/calibration/mmaud_v1_omni.yaml")
     parser.add_argument("--camera-calibration", type=Path, default=PROJECT_ROOT / "calibration/official_left_fitted_calibration.json")
     parser.add_argument("--output-root", type=Path, default=PROJECT_ROOT / "outputs")

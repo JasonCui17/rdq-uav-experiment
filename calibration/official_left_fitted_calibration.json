@@ -53,6 +53,6 @@
     "p95_px": 7.838146770588041,
     "max_px": 19.090901892726734
   },
-  "source_config": "/home/jasoncui/datasets/MMAUD/rdq_uav_experiment/configs/calibration/mmaud_v1_omni.yaml",
-  "source_annotations": "/home/jasoncui/datasets/MMAUD/rdq_uav_experiment/calibration/official_left_center_annotations.csv"
+  "source_config": "/home/jasoncui/projects/rdq-uav-experiment/configs/calibration/mmaud_v1_omni.yaml",
+  "source_annotations": "/home/jasoncui/projects/rdq-uav-experiment/calibration/official_left_center_annotations.csv"
 }
