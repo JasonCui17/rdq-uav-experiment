@@ -39,6 +39,10 @@ from tools.radar_image_geometry_audit import (
     project_raw_radar,
     score_pixels,
 )
+from tools.calibration.resolve_radar_coordinate_frame import (
+    kabsch,
+    proper_axis_rotations as radar_axis_rotations,
+)
 
 
 def model_config(variant: str) -> dict:
@@ -62,6 +66,18 @@ def model_config(variant: str) -> dict:
 
 
 class CoreTests(unittest.TestCase):
+    def test_radar_frame_resolution_axis_set_and_kabsch(self) -> None:
+        rotations = radar_axis_rotations()
+        self.assertEqual(len(rotations), 24)
+        self.assertTrue(all(np.isclose(np.linalg.det(rotation), 1.0) for rotation in rotations))
+        source = np.asarray([[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]])
+        expected_rotation = Rotation.from_euler("z", 35, degrees=True).as_matrix()
+        expected_translation = np.asarray([0.2, -0.3, 0.5])
+        target = source @ expected_rotation.T + expected_translation
+        rotation, translation = kabsch(source, target)
+        self.assertTrue(np.allclose(rotation, expected_rotation))
+        self.assertTrue(np.allclose(translation, expected_translation))
+
     def test_geometry_audit_raw_path_and_scoring(self) -> None:
         camera = OmniRadtanCamera(
             xi=1.0, fu=100.0, fv=100.0, pu=50.0, pv=50.0,

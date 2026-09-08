@@ -26,11 +26,12 @@ Query 是否改善型号分类”，不能冒充无需定位器的端到端检�
   使用目标less标定；公开的 `fisheye_calibration.zip` 只提供左右相机各自的内参，未提供
   camera–LiDAR、camera–Radar 或 camera–GT 的数值外参。
 
-对当前五类训练 Manifest 的数据检验显示：正确时间配对时，GT 周围 2 m 内出现 Radar
-点的比例约为 11%～35%；把 Radar 循环错开半条序列后，五类该比例全部降为 0%。这强烈
-支持官方文件中的 Radar XYZ 和 GT 已经处于同一发布坐标约定，但它仍属于数据推断，
-不是官方外参声明。可用 `tools/calibration/audit_radar_gt_alignment.py` 重现并查看
-`calibration/radar_gt_audit.json`。
+对当前五类训练 Manifest 的早期数据检验显示：正确时间配对时，GT 周围 2 m 内出现
+Radar 点的比例高于循环错配对照。这只能说明 Radar 与 GT 存在一定时间关联，不能证明
+两者坐标轴相同。后续 Stage 4.9/4.10 已确认 identity 假设不充分，并找到一个聚合意义上
+更合理的约 `+90°` yaw 粗变换；详细结果见
+`docs/STAGE4_RADAR_COORDINATE_FRAME_RESOLUTION.md`。早期检验仍可通过
+`tools/calibration/audit_radar_gt_alignment.py` 重现。
 
 官方相机模型是 Kalibr 的统一全向模型：
 

@@ -138,3 +138,16 @@ Nearest与interpolation只查询同`sequence_id`的train样本；区间外固定
 - **Next action**：停止，不实现 Geometry-RDQ 或 hard geometry gate。先确认 Radar 消息 frame convention 与 Radar-to-GT/camera 刚体变换，再决定是否重做几何审计。
 
 完整报告见 [STAGE4_RADAR_IMAGE_GEOMETRY_AUDIT.md](STAGE4_RADAR_IMAGE_GEOMETRY_AUDIT.md)。
+
+## Stage 4.10：Radar Coordinate-Frame Resolution
+
+- **Hypothesis**：Stage4.9失败来自尚未解析的单一固定Radar→GT轴/刚体关系。
+- **Controlled variable**：identity、全局24种轴/符号+平移、全局rigid refinement；train拟合、val验证与同sequence shuffle。
+- **Fixed variables**：现有GT→left-camera标定、完整train/val、原始Radar XYZ；不读取test，不修改RDQ。
+- **Metrics**：3D最近点mean/median与hit rate、图像nearest distance与Coverage@16/32/64。
+- **Result**：全局约+90° yaw使val 3D median由4.80 m降至1.85 m，图像median由289.98 px降至72.75 px，Cov@32由3.13%升至19.04%；但Cov@16仅1.69%。逐sequence拟合旋转互相矛盾且多数val退化，M300出现train 0.23 m/val 20.98 m的clutter overfit。
+- **Status**：**supported only as coarse frame resolution**；不支持精确geometry gating，也不支持sequence-specific rigid calibration。
+- **Interpretation**：全局Radar→GT粗方向约为+90° yaw，但剩余误差主要来自target association/数据语义，而非继续拟合刚体外参。
+- **Next action**：唯一方向为审计`radar_enhance_pcl`的目标回波生成、字段与聚类/筛点语义；不修改模型。
+
+完整报告见 [STAGE4_RADAR_COORDINATE_FRAME_RESOLUTION.md](STAGE4_RADAR_COORDINATE_FRAME_RESOLUTION.md)。
