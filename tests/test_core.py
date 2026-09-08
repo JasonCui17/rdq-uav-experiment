@@ -18,7 +18,11 @@ from rdq_uav.calibration.spatiotemporal import (
     fit_spatiotemporal_calibration,
 )
 from rdq_uav.engine.metrics import ClassificationMetrics
-from rdq_uav.engine.localization import LocalizationLoss, LocalizationMetrics
+from rdq_uav.engine.localization import (
+    LocalizationLoss,
+    LocalizationMetrics,
+    aligned_iou,
+)
 from rdq_uav.engine.attention_audit import (
     attention_center_diagnostics,
     stitched_token_centers,
@@ -29,6 +33,12 @@ from rdq_uav.models.localizer import MultiModalLocalizer
 from rdq_uav.models.backbones import MinimalTopDownFusion
 from rdq_uav.models.fusion import CrossAttentionBlock
 from rdq_uav.models.radar import MaskedPointMLP
+from tools.radar_image_geometry_audit import (
+    bbox_distance,
+    deterministic_shuffle,
+    project_raw_radar,
+    score_pixels,
+)
 
 
 def model_config(variant: str) -> dict:
@@ -52,6 +62,41 @@ def model_config(variant: str) -> dict:
 
 
 class CoreTests(unittest.TestCase):
+    def test_geometry_audit_raw_path_and_scoring(self) -> None:
+        camera = OmniRadtanCamera(
+            xi=1.0, fu=100.0, fv=100.0, pu=50.0, pv=50.0,
+            k1=0.0, k2=0.0, p1=0.0, p2=0.0, width=100, height=100,
+        )
+        points = np.asarray([[0.0, 0.0, 2.0], [100.0, 0.0, 1.0]])
+        pixels = project_raw_radar(points, camera, np.eye(3), np.zeros(3))
+        self.assertEqual(pixels.shape, (1, 2))
+        score = score_pixels(pixels, np.asarray([45.0, 45.0, 55.0, 55.0]))
+        self.assertEqual(score["valid_projected_point_count"], 1)
+        self.assertEqual(score["points_inside_bbox"], 1)
+        self.assertEqual(score["coverage_8px"], 1)
+        distances = bbox_distance(
+            np.asarray([[50.0, 50.0], [60.0, 60.0]]),
+            np.asarray([45.0, 45.0, 55.0, 55.0]),
+        )
+        self.assertTrue(np.allclose(distances, [0.0, np.sqrt(50.0)]))
+
+    def test_geometry_audit_shuffle_stays_within_sequence(self) -> None:
+        rows = [
+            {"sequence_id": "a", "sample_id": "a0"},
+            {"sequence_id": "a", "sample_id": "a1"},
+            {"sequence_id": "b", "sample_id": "b0"},
+            {"sequence_id": "b", "sample_id": "b1"},
+        ]
+        shuffled = deterministic_shuffle(rows)
+        self.assertEqual([row["sequence_id"] for row in shuffled], ["a", "a", "b", "b"])
+        self.assertEqual([row["sample_id"] for row in shuffled], ["a1", "a0", "b1", "b0"])
+
+    def test_aligned_iou_promotes_cpu_half_for_amp_bookkeeping(self) -> None:
+        box = torch.tensor([[0.1, 0.2, 0.4, 0.5]], dtype=torch.float16)
+        iou = aligned_iou(box, box)
+        self.assertEqual(iou.dtype, torch.float32)
+        self.assertTrue(torch.allclose(iou, torch.ones_like(iou)))
+
     def test_cross_attention_attended_only_removes_query_residual_and_ffn(self) -> None:
         block = CrossAttentionBlock(16, 4, 0.0, 2).eval()
         query = torch.randn(2, 1, 16)

@@ -17,6 +17,13 @@ data:
   image_size: [288, 384]
   panorama_size: [960, 2560]
   train_color_jitter: 0.0
+  # Runtime/LR preflight (RTX 3070 Laptop GPU, 16 CPU cores): workers=8 is
+  # the measured maximum and therefore the smallest setting within 5% of it.
+  num_workers: 8
+  eval_num_workers: 8
+  pin_memory: true
+  persistent_workers: true
+  prefetch_factor: 2
 
 model:
   variant: rdq
@@ -45,8 +52,12 @@ physical_priors:
 train:
   epochs: 30
   batch_size: 8
-  checkpoint_metric: total_loss
+  amp: true
+  # Formal runs are started manually. Validation center error is the default
+  # localization monitor and patience counts epochs without improvement.
+  checkpoint_metric: bbox_center_error_px_mean
   checkpoint_mode: min
+  early_stopping_patience: 15
 
 evaluation:
   batch_size: 16

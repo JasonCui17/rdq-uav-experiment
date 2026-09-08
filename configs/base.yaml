@@ -19,6 +19,7 @@ data:
   eval_num_workers: 0
   pin_memory: true
   persistent_workers: true
+  prefetch_factor: 2
   train_color_jitter: 0.15
   image_decode_retries: 3
   split:

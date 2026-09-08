@@ -37,6 +37,11 @@
 因此，本实验衡量的是 V1 固定采集条件下的分类性能，不能直接证明跨 session 或
 跨场景的型号泛化能力。
 
+正式训练统一由用户手动启动；tqdm 输出格式、validation checkpoint 与 Early
+Stopping 规范见 [手动训练与进度显示规范](docs/MANUAL_TRAINING_PROGRESS_STANDARD.md)。
+运行参数的单变量吞吐测试见
+[Stage 4 Runtime Parameter Tuning](docs/STAGE4_RUNTIME_PARAMETER_TUNING.md)。
+
 ## 工程结构
 
 ```text

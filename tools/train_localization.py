@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import argparse
 import csv
+import os
 import sys
 from datetime import datetime
 from pathlib import Path
@@ -100,6 +101,28 @@ def main() -> None:
     write_json(position_stats, run_dir / "position_stats.json")
     write_json(bbox_stats, run_dir / "bbox_stats.json")
     print(f"device={device} run_dir={run_dir}")
+    workers = int(config["data"]["num_workers"])
+    runtime_settings = {
+        "gpu_model": torch.cuda.get_device_name(device) if device.type == "cuda" else "CPU",
+        "cpu_cores": os.cpu_count(),
+        "batch_size": int(config["train"]["batch_size"]),
+        "workers": workers,
+        "pin_memory": bool(config["data"]["pin_memory"]),
+        "persistent_workers": bool(config["data"]["persistent_workers"]) and workers > 0,
+        "prefetch_factor": int(config["data"].get("prefetch_factor", 2)) if workers > 0 else "N/A",
+        "amp": amp_enabled,
+        "optimizer_parameter_groups": {
+            str(group.get("name", index)): {
+                "lr": float(group["lr"]),
+                "trainable_parameters": sum(
+                    parameter.numel() for parameter in group["params"]
+                    if parameter.requires_grad
+                ),
+            }
+            for index, group in enumerate(optimizer.param_groups)
+        },
+    }
+    print(yaml.safe_dump({"runtime": runtime_settings}, sort_keys=False), flush=True)
     print(f"position_stats={position_stats}")
     print(f"bbox_stats={bbox_stats}")
 
@@ -108,6 +131,8 @@ def main() -> None:
     if mode not in {"min", "max"}:
         raise ValueError("checkpoint_mode must be min or max")
     best_value = float("inf") if mode == "min" else float("-inf")
+    patience_limit = int(config["train"].get("early_stopping_patience", 15))
+    patience_count = 0
     if resume:
         checkpoint = torch.load(resume, map_location=device)
         model.load_state_dict(checkpoint["model"])
@@ -116,6 +141,7 @@ def main() -> None:
         scaler.load_state_dict(checkpoint["scaler"])
         start_epoch = int(checkpoint["epoch"]) + 1
         best_value = float(checkpoint["best_value"])
+        patience_count = int(checkpoint.get("patience_count", 0))
 
     position_mean = torch.tensor(position_stats["mean"], dtype=torch.float32)
     position_std = torch.tensor(position_stats["std"], dtype=torch.float32)
@@ -139,6 +165,7 @@ def main() -> None:
             scaler=scaler,
             grad_clip_norm=float(config["train"]["grad_clip_norm"]),
             log_interval=int(config["train"]["log_interval"]),
+            progress_label=f"Epoch {epoch + 1}/{config['train']['epochs']}",
             **common,
         )
         val_metrics, predictions = run_localization_epoch(
@@ -147,6 +174,7 @@ def main() -> None:
             scaler=None,
             grad_clip_norm=None,
             log_interval=0,
+            progress_label=f"Val {epoch + 1}/{config['train']['epochs']}",
             **common,
         )
         scheduler.step()
@@ -167,6 +195,9 @@ def main() -> None:
         is_best = current < best_value if mode == "min" else current > best_value
         if is_best:
             best_value = current
+            patience_count = 0
+        else:
+            patience_count += 1
         payload = {
             "epoch": epoch,
             "model": model.state_dict(),
@@ -174,6 +205,7 @@ def main() -> None:
             "scheduler": scheduler.state_dict(),
             "scaler": scaler.state_dict(),
             "best_value": best_value,
+            "patience_count": patience_count,
             "position_stats": position_stats,
             "config": config,
         }
@@ -192,6 +224,19 @@ def main() -> None:
             f"val total={val_metrics['total_loss']:.4f} mean_iou={val_metrics['mean_iou']:.4f} "
             f"e3d={val_metrics['position_error_mean_m']:.4f}m"
         )
+        checkpoint_name = "best.pt" if is_best else "last.pt"
+        print(
+            f"val metric={current:.6f} | best metric={best_value:.6f} | "
+            f"patience {patience_count}/{patience_limit} | checkpoint={checkpoint_name}",
+            flush=True,
+        )
+        if patience_limit > 0 and patience_count >= patience_limit:
+            print(
+                f"Early stopping: validation metric did not improve for "
+                f"{patience_limit} epochs.",
+                flush=True,
+            )
+            break
 
 
 if __name__ == "__main__":

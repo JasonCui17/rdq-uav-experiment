@@ -229,11 +229,15 @@ def build_dataloader(
     num_workers: int,
     pin_memory: bool,
     persistent_workers: bool,
+    prefetch_factor: int,
     seed: int,
     sampler: torch.utils.data.Sampler[int] | None = None,
 ) -> DataLoader:
     generator = torch.Generator()
     generator.manual_seed(seed)
+    loader_kwargs: dict[str, Any] = {}
+    if num_workers > 0:
+        loader_kwargs["prefetch_factor"] = int(prefetch_factor)
     return DataLoader(
         dataset,
         batch_size=batch_size,
@@ -245,4 +249,5 @@ def build_dataloader(
         worker_init_fn=seed_worker,
         generator=generator,
         drop_last=False,
+        **loader_kwargs,
     )

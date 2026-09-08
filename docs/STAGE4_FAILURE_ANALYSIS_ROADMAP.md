@@ -125,3 +125,16 @@ Nearest与interpolation只查询同`sequence_id`的train样本；区间外固定
 | Background-only | 47.25 / 35.08 | 4.58 / 4.54 | 1.11 / 3.61 / 1.89 | +2.54% | +44.56% |
 
 按joint score `min(Gain2D, Gain3D)`，background gain为2.54%，判为weak；单独3D gain为44.56%，属于moderate。由此不能声称低频背景足以完成联合定位，但也不能将未来3D性能全部归因于UAV目标证据。
+
+## Stage 4.9：Radar-to-Image Geometry Feasibility Audit
+
+- **Hypothesis**：全部原始 Radar XYZ 经当前 fisheye 标定投影后，与 tiny-UAV 图像位置存在显著强于同序列随机对应的空间关系。
+- **Controlled variable**：真实 Radar/bbox 配对与同 sequence、同 split 半周期 GT bbox 置换。
+- **Fixed variables**：完整 train/val、左相机 OmniRadtan 模型、当前 fitted `camera_from_gt` 变换、全部有限 Radar 点；主路径没有 GT 筛点或运动补偿。
+- **Metrics**：nearest center/bbox distance、Coverage@8/16/32/64、无有效投影率，以及 sequence/range/time-gap 分组。
+- **Result**：combined raw Coverage@8/16/32/64 为 3.66%/5.44%/13.42%/27.82%，shuffle 为 5.08%/7.80%/11.37%/17.79%；val raw 最近距离 mean/median 为 253.15/289.98 px。2 m GT-gated+motion oracle 的 combined Coverage 为 3.48%/5.66%/13.69%/27.02%，且 61.52% 帧无有效 oracle 投影。
+- **Status**：**rejected**（在当前 Radar/GT 共坐标系假设下）。
+- **Interpretation**：raw 在关键 @8/@16 上没有优于 shuffle；oracle 也没有形成强上界。左鱼眼内参与 GT-to-camera 投影已验证，但缺少已解析的 camera-radar 外参，当前问题更可能是 Radar-to-GT/camera 坐标或传感器 correspondence，其次是真实目标回波稀疏/关联；简单时间差不是充分解释。
+- **Next action**：停止，不实现 Geometry-RDQ 或 hard geometry gate。先确认 Radar 消息 frame convention 与 Radar-to-GT/camera 刚体变换，再决定是否重做几何审计。
+
+完整报告见 [STAGE4_RADAR_IMAGE_GEOMETRY_AUDIT.md](STAGE4_RADAR_IMAGE_GEOMETRY_AUDIT.md)。

@@ -71,6 +71,7 @@ def make_loader(
         num_workers=num_workers,
         pin_memory=bool(data_cfg["pin_memory"]),
         persistent_workers=bool(data_cfg["persistent_workers"]),
+        prefetch_factor=int(data_cfg.get("prefetch_factor", 2)),
         seed=int(config["experiment"]["seed"]),
         sampler=sampler,
     )

@@ -8,6 +8,7 @@ from typing import Any
 import torch
 from torch import nn
 from torchvision.ops import generalized_box_iou_loss
+from tqdm.auto import tqdm
 
 
 def cxcywh_to_xyxy(boxes: torch.Tensor) -> torch.Tensor:
@@ -18,6 +19,10 @@ def cxcywh_to_xyxy(boxes: torch.Tensor) -> torch.Tensor:
 
 def aligned_iou(boxes1: torch.Tensor, boxes2: torch.Tensor) -> torch.Tensor:
     """Pairwise-aligned IoU for normalized XYXY boxes."""
+    if boxes1.device.type == "cpu" and boxes1.dtype in {torch.float16, torch.bfloat16}:
+        boxes1 = boxes1.float()
+    if boxes2.device.type == "cpu" and boxes2.dtype in {torch.float16, torch.bfloat16}:
+        boxes2 = boxes2.float()
     top_left = torch.maximum(boxes1[..., :2], boxes2[..., :2])
     bottom_right = torch.minimum(boxes1[..., 2:], boxes2[..., 2:])
     intersection = (bottom_right - top_left).clamp(min=0).prod(dim=-1)
@@ -151,6 +156,7 @@ class LocalizationMetrics:
             "center_error_px_median": float(center_px.quantile(0.5)),
             "center_error_lt_2px": float((center_px < 2.0).double().mean()),
             "center_error_lt_4px": float((center_px < 4.0).double().mean()),
+            "center_error_lt_8px": float((center_px < 8.0).double().mean()),
             "normalized_center_error": float(center_norm.mean()),
             "center_abs_error_x": float(center_absolute[:, 0].mean()),
             "center_abs_error_y": float(center_absolute[:, 1].mean()),
@@ -198,6 +204,7 @@ def run_localization_epoch(
     amp: bool = False,
     grad_clip_norm: float | None = None,
     log_interval: int = 20,
+    progress_label: str | None = None,
 ) -> tuple[dict[str, Any], list[dict[str, Any]]]:
     training = optimizer is not None
     model.train(training)
@@ -206,10 +213,25 @@ def run_localization_epoch(
     predictions: list[dict[str, Any]] = []
     sample_count = 0
     start = time.perf_counter()
+    if device.type == "cuda":
+        torch.cuda.reset_peak_memory_stats(device)
     position_mean = position_mean.to(device)
     position_std = position_std.to(device)
 
-    for step, raw_batch in enumerate(loader, start=1):
+    iterator = loader
+    progress = None
+    if progress_label is not None:
+        progress = tqdm(
+            loader,
+            desc=progress_label,
+            unit="batch",
+            bar_format="{desc} | {n_fmt}/{total_fmt} | {percentage:3.0f}% | {postfix} | "
+            "{rate_fmt} | ETA {remaining}",
+        )
+        iterator = progress
+    running_center_sum = 0.0
+    running_center_lt8 = 0
+    for step, raw_batch in enumerate(iterator, start=1):
         batch = _move_batch(raw_batch, device)
         batch_size = int(batch["bbox"].shape[0])
         if training:
@@ -243,14 +265,25 @@ def run_localization_epoch(
 
         pred_position_m = outputs["position"] * position_std + position_mean
         meter.update(outputs["box"], batch["bbox"], pred_position_m, batch["position"])
+        pixel_scale = outputs["box"].new_tensor(
+            [processed_stitched_width, processed_height]
+        )
+        batch_center_error = (
+            (outputs["box"][:, :2] - batch["bbox"][:, :2]) * pixel_scale
+        ).norm(dim=1)
+        running_center_sum += float(batch_center_error.detach().sum())
+        running_center_lt8 += int((batch_center_error.detach() < 8.0).sum())
         for key, value in losses.items():
             totals[key] += float(value.detach()) * batch_size
         sample_count += batch_size
 
-        pred_box_cpu = outputs["box"].detach().cpu()
-        gt_box_cpu = raw_batch["bbox"].cpu()
-        pred_position_cpu = pred_position_m.detach().cpu()
-        gt_position_cpu = raw_batch["position"].cpu()
+        # AMP outputs can remain float16 after moving to CPU.  CPU reductions
+        # used by aligned_iou (notably prod) do not support Half in the pinned
+        # PyTorch build, so metric/prediction bookkeeping is always FP32.
+        pred_box_cpu = outputs["box"].detach().float().cpu()
+        gt_box_cpu = raw_batch["bbox"].float().cpu()
+        pred_position_cpu = pred_position_m.detach().float().cpu()
+        gt_position_cpu = raw_batch["position"].float().cpu()
         ious = aligned_iou(cxcywh_to_xyxy(pred_box_cpu), cxcywh_to_xyxy(gt_box_cpu))
         position_errors = (pred_position_cpu - gt_position_cpu).norm(dim=1)
         for index in range(batch_size):
@@ -269,7 +302,31 @@ def run_localization_epoch(
                     "gt_time": float(raw_batch["gt_time"][index]),
                 }
             )
-        if training and log_interval > 0 and step % log_interval == 0:
+        if progress is not None:
+            if training:
+                gpu_memory = (
+                    torch.cuda.max_memory_allocated(device) / (1024**3)
+                    if device.type == "cuda" else 0.0
+                )
+                assert optimizer is not None
+                lrs = {
+                    str(group.get("name", index)): float(group["lr"])
+                    for index, group in enumerate(optimizer.param_groups)
+                }
+                lr_backbone = lrs.get("backbone", float("nan"))
+                lr_new = lrs.get("new_modules", float("nan"))
+                samples_per_second = sample_count / max(time.perf_counter() - start, 1e-12)
+                progress.set_postfix_str(
+                    f"GPU_mem={gpu_memory:.2f}G | loss={totals['total_loss']/sample_count:.4f} "
+                    f"| lr_backbone={lr_backbone:.2e} | lr_new={lr_new:.2e} "
+                    f"| samples/s={samples_per_second:.1f}", refresh=False
+                )
+            else:
+                progress.set_postfix_str(
+                    f"mean center error={running_center_sum/sample_count:.2f}px "
+                    f"| P<8px={running_center_lt8/sample_count:.3f}", refresh=False
+                )
+        elif training and log_interval > 0 and step % log_interval == 0:
             print(
                 f"step={step}/{len(loader)} samples={sample_count} "
                 f"total={totals['total_loss']/sample_count:.4f} "
@@ -281,8 +338,18 @@ def run_localization_epoch(
                 flush=True,
             )
 
+    if progress is not None:
+        progress.close()
+
     result = meter.compute()
     divisor = max(sample_count, 1)
     result.update({key: value / divisor for key, value in totals.items()})
     result["seconds"] = time.perf_counter() - start
+    result["samples_per_s"] = sample_count / max(float(result["seconds"]), 1e-12)
+    if device.type == "cuda":
+        result["peak_gpu_allocated_gb"] = torch.cuda.max_memory_allocated(device) / (1024**3)
+        result["peak_gpu_reserved_gb"] = torch.cuda.max_memory_reserved(device) / (1024**3)
+    else:
+        result["peak_gpu_allocated_gb"] = 0.0
+        result["peak_gpu_reserved_gb"] = 0.0
     return result, predictions
