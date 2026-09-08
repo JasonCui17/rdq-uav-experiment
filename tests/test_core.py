@@ -48,6 +48,10 @@ from tools.radar_target_association_audit import (
     deterministic_shuffle_indices as association_shuffle_indices,
     score_candidates,
 )
+from tools.visualize_nearest_radar_projection import (
+    nearest_row as nearest_projection_row,
+    project_chain as nearest_projection_chain,
+)
 
 
 def model_config(variant: str) -> dict:
@@ -71,6 +75,26 @@ def model_config(variant: str) -> dict:
 
 
 class CoreTests(unittest.TestCase):
+    def test_nearest_projection_row_is_deterministic(self) -> None:
+        rows = [{"radar_time": "1.0"}, {"radar_time": "1.2"}, {"radar_time": "1.4"}]
+        self.assertEqual(nearest_projection_row(rows, 1.31, "radar_time")["radar_time"], "1.4")
+        self.assertEqual(nearest_projection_row(rows, 1.09, "radar_time")["radar_time"], "1.0")
+
+    def test_nearest_projection_transform_chain(self) -> None:
+        camera = OmniRadtanCamera(
+            xi=0.0, fu=100.0, fv=100.0, pu=50.0, pv=50.0,
+            k1=0.0, k2=0.0, p1=0.0, p2=0.0, width=100, height=100,
+        )
+        radar = np.asarray([[0.0, 0.0, 5.0], [10.0, 0.0, 5.0]])
+        gt, camera_points, pixels, valid = nearest_projection_chain(
+            radar, camera, np.eye(3), np.asarray([0.0, 0.0, 5.0]),
+            np.eye(3), np.zeros(3),
+        )
+        self.assertTrue(np.allclose(gt[0], [0.0, 0.0, 10.0]))
+        self.assertTrue(np.allclose(camera_points, gt))
+        self.assertTrue(np.allclose(pixels[0], [50.0, 50.0]))
+        self.assertEqual(valid.tolist(), [True, False])
+
     def test_target_association_rules_use_confirmed_xyz_and_range(self) -> None:
         points = np.asarray([[3.0, 4.0, 0.0], [30.0, 40.0, 1.0], [60.0, 0.0, 0.0]])
         rules = candidate_rules(max_range_m=50.0, gt_range_gate_m=0.5)
