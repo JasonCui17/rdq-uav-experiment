@@ -1,0 +1,83 @@
+project:
+  name: mmuav_paper_reproduction
+  seed: 42
+  output_root: /home/jasoncui/projects/rdq-uav-experiment/outputs/mmuav_paper_reproduction
+
+data:
+  official_train_root: /home/jasoncui/datasets/MMAUD/official/train
+  split_file: /home/jasoncui/projects/rdq-uav-experiment/outputs/mmuav_paper_reproduction/splits/splits.json
+  split_ratios: [0.70, 0.15, 0.15]
+  split_names: [train_sub, validation_sub, heldout_test_sub]
+
+public_9d_dataset:
+  sensor: lidar_360
+  window_frames: 20
+  window_stride: 20
+  include_incomplete_window: false
+  dbscan_eps: 1.0
+  dbscan_min_samples: 10
+  label_mode: public_code_label
+  label_distance_m: 1.0
+  gt_reference_time: first_frame
+  feature_order:
+    - mean_x
+    - mean_y
+    - mean_z
+    - std_x
+    - std_y
+    - std_z
+    - range_x
+    - range_y
+    - range_z
+
+public_lstm:
+  input_size: 9
+  hidden_size: 64
+  num_layers: 1
+  num_classes: 2
+  loss: cross_entropy
+  optimizer: Adam
+  learning_rate: 0.001
+  batch_size: 64
+  max_epochs: 100
+  early_stopping_patience: 15
+  early_stopping_min_delta: 0.0
+  checkpoint_selection: [validation_loss, validation_f1]
+  augmentation:
+    original_probability: 0.50
+    reverse_probability: 0.25
+    temporal_zero_probability: 0.25
+    temporal_zero_min_frames: 1
+    temporal_zero_max_frames: 3
+    preaugment_entire_training_set_once: true
+    augment_each_training_batch: true
+
+attention_lstm_m1:
+  experiment: 9D_attention_only_controlled_ablation
+  input_size: 9
+  hidden_size: 64
+  num_layers: 1
+  num_classes: 2
+  aggregation: scalar_attention_over_all_20_hidden_states
+  attention_score: Linear(64,1)
+  attention_normalization: softmax_over_time
+  classifier: Linear(64,2)
+  fixed_from_m0:
+    - dataset
+    - sequence_split
+    - feature_9d
+    - augmentation
+    - CrossEntropyLoss
+    - Adam
+    - learning_rate_0.001
+    - batch_size_64
+    - seed_42
+
+evidence:
+  window_frames: PAPER_SPECIFIED
+  dbscan_eps: CODE_SPECIFIED
+  dbscan_min_samples: CODE_SPECIFIED
+  public_9d_feature: CODE_SPECIFIED
+  public_code_label: CODE_SPECIFIED
+  public_lstm_architecture: CODE_SPECIFIED
+  public_lstm_training: CODE_SPECIFIED

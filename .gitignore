@@ -98,6 +98,12 @@ calibration/*.jpg
 *.safetensors
 *.npy
 *.npz
+*.bag
+
+# MMUAV paper-reproduction generated data and model weights stay local.
+outputs/mmuav_paper_reproduction/datasets/
+outputs/mmuav_paper_reproduction/checkpoints/
+outputs/mmuav_paper_reproduction/classification/*/*.pth
 
 # Local environment and editor files.
 .env
