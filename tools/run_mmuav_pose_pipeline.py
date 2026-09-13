@@ -21,6 +21,30 @@ from rdq_uav.mmuav.pose_trajectory import track_candidates,select_track,ar_compl
 BASE=ROOT/'outputs/mmuav_paper_reproduction'
 
 
+def validate_frozen(args):
+    """Read only config/checkpoints/code; no sequence or GT data access."""
+    path=args.frozen_config
+    frozen=json.loads(path.read_text())
+    sha=lambda p:hashlib.sha256(Path(p).read_bytes()).hexdigest()
+    mirror=ROOT/'results/mmuav_reproduction/frozen_reproduction_config.json'
+    if sha(path)!=sha(mirror): raise ValueError('Frozen config hash differs from committed mirror')
+    if frozen['status']!='FROZEN_AFTER_VALIDATION': raise ValueError('Config is not frozen')
+    for attr,key in [('splits','split_definition_hash'),('classifier_checkpoint','M1_checkpoint_sha256'),
+                     ('center_checkpoint','M2_checkpoint_sha256')]:
+        if sha(getattr(args,attr))!=frozen[key]: raise ValueError(f'Frozen {attr} hash mismatch')
+    if args.data_root.resolve()!=Path(frozen['data_root']).resolve(): raise ValueError('Frozen data-root mismatch')
+    for file,digest in frozen['pipeline_code_sha256'].items():
+        if sha(ROOT/file)!=digest: raise ValueError(f'Frozen pipeline code hash mismatch: {file}')
+    if args.smoke_no_ar_fit or args.sequence:
+        raise ValueError('Frozen formal run cannot use sequence/smoke overrides')
+    expected=dict(trajectory_selection='longest_lived_track',AR_order=3,AR_grid_seconds=.1,
+        max_gap_seconds=1.,spline_s=.5,nearest_evaluation_tolerance_seconds=.05,M3='BYPASSED',
+        tracker=dict(process_noise=.15,measurement_noise=.001,missed_distance=3.,covar_trace_thresh=30.,min_points=1))
+    for key,value in expected.items():
+        if frozen[key]!=value: raise ValueError(f'Frozen runtime config mismatch: {key}')
+    return sha(path)
+
+
 def write(path,rows,fields=None):
     with path.open('w',newline='') as f:
         keys=list(dict.fromkeys(k for r in rows for k in r))
@@ -70,10 +94,11 @@ def score(pred,gt):
         **errors)
 
 
-def main():
+def create_parser():
     p=argparse.ArgumentParser()
     p.add_argument('--mode',choices=['geometric','full','full_temporal'],required=True)
-    p.add_argument('--split',choices=['validation_sub'],default='validation_sub')
+    p.add_argument('--split',choices=['validation_sub','heldout_test_sub'],default='validation_sub')
+    p.add_argument('--frozen-config',type=Path,help='Required for heldout; strict checkpoint/config/code hash validation')
     p.add_argument('--data-root',type=Path,default=Path('/home/jasoncui/datasets/MMAUD/official/train'))
     p.add_argument('--splits',type=Path,default=BASE/'splits/splits.json')
     p.add_argument('--classifier-checkpoint',type=Path,default=BASE/'classification/attention_9d/best_val_loss.pth')
@@ -82,10 +107,18 @@ def main():
     p.add_argument('--output-dir',type=Path,required=True)
     p.add_argument('--sequence',help='Optional single validation sequence smoke')
     p.add_argument('--smoke-no-ar-fit',action='store_true',help='Single sequence only; fixed AR coefficients, not formal results')
+    return p
+
+
+def main():
+    p=create_parser()
     args=p.parse_args()
+    if args.split=='heldout_test_sub' and args.frozen_config is None:
+        p.error('heldout_test_sub requires --frozen-config')
+    frozen_hash=validate_frozen(args) if args.frozen_config else None
     split=json.loads(args.splits.read_text());sequences=split[args.split]
     if args.sequence:
-        if args.sequence not in sequences: p.error('Sequence must belong to validation_sub')
+        if args.sequence not in sequences: p.error('Sequence must belong to requested split')
         sequences=[args.sequence]
     if args.smoke_no_ar_fit and not args.sequence: p.error('Smoke flag requires one sequence')
     if args.output_dir.exists() and any(args.output_dir.iterdir()): raise FileExistsError('Refusing to overwrite output')
@@ -104,6 +137,7 @@ def main():
         design_status='RECONSTRUCTED_DESIGN',M3='BYPASSED',AR_order=3,AR_grid_seconds=.1,
         max_gap_seconds=1.,spline_s=.5,nearest_evaluation_tolerance_seconds=.05,
         tracker=dict(process_noise=.15,measurement_noise=.001,missed_distance=3.,covar_trace_thresh=30.,min_points=1))
+    config['frozen_config_sha256']=frozen_hash
     (args.output_dir/'run_config.json').write_text(json.dumps(config,indent=2))
     metrics=[];failures=[];all_pred=[];all_gt=[]
     for seq in sequences:

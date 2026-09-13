@@ -42,7 +42,12 @@ explicitly. MSE_coordinate=mean across samples and XYZ; MSE_3D=3*MSE_coordinate.
 Error is matched-only with missing counts and coverage alongside. Overall is
 frame-pooled; sequence mean coverage also reported. Nonfinite predictions fail.
 
-Only validation_sub is supported now. Heldout reading is prohibited by CLI.
+Heldout CLI is available only with --frozen-config. Before any sequence access,
+the runner verifies the frozen JSON against its committed mirror, checkpoint
+hashes, split hash, data root, code hashes and fixed runtime settings. No smoke
+or single-sequence overrides are allowed for a frozen formal run. Validation
+and heldout use exactly the same processing path; no heldout run was performed
+while preparing this entry point.
 No smoothing/tracker/AR search, no M3 or additional experiment matrix.
 Single-sequence smoke is functional only, never a formal research result.
 
@@ -52,3 +57,12 @@ remain processing failures. Seven necessary tests passed. Smoke did not fit AR
 parameters. Formal validation and AR fitting are manual-only; no background monitoring.
 Frozen final reproduction config is deliberately NOT created before formal A/B/C
 validation has been reviewed.
+
+After saved validation A/B/C integrity and exact matched timestamp checks,
+tools/freeze_mmuav_validation.py produces the frozen JSON and small validation
+summary. git_commit identifies the code revision at freezing; a subsequent
+summary-only commit may have a newer Git hash. Source file hashes lock the actual
+pipeline bytes. The mirror in results/mmuav_reproduction is identical to the
+output frozen JSON; outputs, checkpoints and trajectories remain untracked.
+Paper Pose MSE alignment remains unresolved. No method development follows this
+freeze. Any hash mismatch must stop execution, not silently alter the config.
