@@ -1,0 +1,16 @@
+{
+  "purpose": "FUNCTIONAL_SMOKE_ONLY_NOT_FORMAL_RESEARCH_RESULT",
+  "sequence": "seq0007",
+  "split": "validation_sub",
+  "modes_passed": ["geometric", "full", "full_temporal"],
+  "formal_training_performed": false,
+  "formal_ar_fit_performed": false,
+  "ar_smoke_coefficients": [2, -1, 0, 0],
+  "gt_used_for_selection": false,
+  "gt_xyz_loaded_after_final_prediction_saved": true,
+  "tests_passed": 7,
+  "output_root": "outputs/mmuav_paper_reproduction/final_reproduction/smoke_seq0007_v2",
+  "engineering_fix": "Accept source fusion valid-empty NPY shape (0,); no algorithm changes",
+  "heldout_read": false,
+  "M3": "BYPASSED"
+}
