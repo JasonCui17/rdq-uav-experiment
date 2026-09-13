@@ -1,0 +1,50 @@
+{
+  "repo_branch": "mmuav-paper-reproduction",
+  "final_commit": "5eb4b49a7e99b87c012ac82de6e9d0fb53719032",
+  "final_commit_scope": "Archive code/documentation revision; manifest is committed subsequently without algorithm changes",
+  "python_version": "3.10.20",
+  "versions": {
+    "torch": "2.5.1",
+    "numpy": "2.2.6",
+    "scipy": "1.15.3",
+    "stonesoup": "1.9.1"
+  },
+  "checkpoints": {
+    "M1": {
+      "path": "/home/jasoncui/projects/rdq-uav-experiment/outputs/mmuav_paper_reproduction/classification/attention_9d/best_val_loss.pth",
+      "sha256": "12acb04f8236bfc59bd892f3226af7659138afd470e8a54ef2b110b8b4749c4b"
+    },
+    "M2": {
+      "path": "/home/jasoncui/projects/rdq-uav-experiment/outputs/mmuav_paper_reproduction/center_regression/pointnet_m2/best_val_loss.pth",
+      "sha256": "e2820deba6e1c7365b62e86d8d363525a66606a7437c889ecbfa399dafc23eeb"
+    }
+  },
+  "split": {
+    "path": "/home/jasoncui/projects/rdq-uav-experiment/outputs/mmuav_paper_reproduction/splits/splits.json",
+    "sha256": "46c34a6972b8613fad87efde03aca5e3326c057182e5e1ecf78bbfecda83f1dc"
+  },
+  "frozen_config": {
+    "path": "/home/jasoncui/projects/rdq-uav-experiment/outputs/mmuav_paper_reproduction/final_reproduction/frozen_reproduction_config.json",
+    "sha256": "c192bc120b45d9851884c8ee21f6d1953d70d7293790a0d3e560197c0ef9b45f"
+  },
+  "commands": {
+    "validation_sub/geometric": "conda run --no-capture-output -n mmuav python tools/run_mmuav_pose_pipeline.py --split validation_sub --mode geometric --frozen-config outputs/mmuav_paper_reproduction/final_reproduction/frozen_reproduction_config.json --output-dir outputs/mmuav_paper_reproduction/final_reproduction/validation/geometric",
+    "validation_sub/full": "conda run --no-capture-output -n mmuav python tools/run_mmuav_pose_pipeline.py --split validation_sub --mode full --frozen-config outputs/mmuav_paper_reproduction/final_reproduction/frozen_reproduction_config.json --output-dir outputs/mmuav_paper_reproduction/final_reproduction/validation/full",
+    "validation_sub/full_temporal": "conda run --no-capture-output -n mmuav python tools/run_mmuav_pose_pipeline.py --split validation_sub --mode full_temporal --frozen-config outputs/mmuav_paper_reproduction/final_reproduction/frozen_reproduction_config.json --output-dir outputs/mmuav_paper_reproduction/final_reproduction/validation/full_temporal",
+    "heldout_test_sub/geometric": "conda run --no-capture-output -n mmuav python tools/run_mmuav_pose_pipeline.py --split heldout_test_sub --mode geometric --frozen-config outputs/mmuav_paper_reproduction/final_reproduction/frozen_reproduction_config.json --output-dir outputs/mmuav_paper_reproduction/final_reproduction/heldout/geometric",
+    "heldout_test_sub/full": "conda run --no-capture-output -n mmuav python tools/run_mmuav_pose_pipeline.py --split heldout_test_sub --mode full --frozen-config outputs/mmuav_paper_reproduction/final_reproduction/frozen_reproduction_config.json --output-dir outputs/mmuav_paper_reproduction/final_reproduction/heldout/full",
+    "heldout_test_sub/full_temporal": "conda run --no-capture-output -n mmuav python tools/run_mmuav_pose_pipeline.py --split heldout_test_sub --mode full_temporal --frozen-config outputs/mmuav_paper_reproduction/final_reproduction/frozen_reproduction_config.json --output-dir outputs/mmuav_paper_reproduction/final_reproduction/heldout/full_temporal"
+  },
+  "final_report": "results/mmuav_reproduction/MMUAV_3D_REPRODUCTION_FINAL.md",
+  "figures": [
+    "results/mmuav_reproduction/final_visuals/fig1_reproduction_pipeline.png",
+    "results/mmuav_reproduction/final_visuals/fig2_trajectory_examples.png",
+    "results/mmuav_reproduction/final_visuals/fig3_tracking_and_completion.png",
+    "results/mmuav_reproduction/final_visuals/fig4_seq0065_failure.png",
+    "results/mmuav_reproduction/final_visuals/fig5_final_results_summary.png",
+    "results/mmuav_reproduction/final_visuals/reproduction_pipeline_flowchart.png"
+  ],
+  "no_experiment_rerun": true,
+  "no_model_training_or_fitting": true,
+  "status": "MMUAV REPRODUCTION ARCHIVED AND CLOSED"
+}
