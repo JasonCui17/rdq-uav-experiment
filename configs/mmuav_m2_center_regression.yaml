@@ -1,0 +1,36 @@
+evaluation_mode: gt_conditioned_module_level
+design_status: RECONSTRUCTED_DESIGN
+splits: outputs/mmuav_paper_reproduction/splits/splits.json
+classifier_checkpoint: outputs/mmuav_paper_reproduction/classification/attention_9d/best_val_loss.pth
+mid360:
+  dbscan_eps: 2
+  dbscan_min_samples: 10
+  window_size: 20
+  stride: 20
+  final_window: source_extra_final20
+classifier_training_dbscan_eps: 1
+fusion:
+  dbscan_eps: 1
+  dbscan_min_samples: 10
+candidate:
+  dbscan_eps: 1
+  dbscan_min_samples: 1
+association:
+  timestamp_tolerance: train_P95
+  max_distance_m: 2
+  selection_basis: train_seq0001_pilot_quality_ceiling_not_paper_MSE_matching
+model:
+  num_points: 64
+  point_mlp: [3, 64, 128, 256]
+  regression_head: [259, 128, 64, 3]
+  auxiliary_input: observed_full_cluster_geometric_center
+  target: GT_minus_full_cluster_geometric_center
+training:
+  seed: 42
+  batch_size: 64
+  optimizer: Adam
+  learning_rate: 0.001
+  epochs: 100
+  patience: 15
+  monitor: validation_MSE_coord
+distance_grouping_status: DISABLED_REFERENCE_FRAME_UNVERIFIED
