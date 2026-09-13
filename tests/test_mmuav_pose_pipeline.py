@@ -45,6 +45,10 @@ class PipelineTests(unittest.TestCase):
         result=score(np.array([[1.,2.,3.],[np.nan]*3]),np.zeros((2,3)))
         self.assertEqual(result['missing_prediction_count'],1)
         self.assertEqual(result['coverage'],.5)
+        empty=score(np.full((2,3),np.nan),np.zeros((2,3)))
+        self.assertEqual(empty['coverage'],0.)
+        self.assertEqual(empty['missing_prediction_count'],2)
+        self.assertIsNone(empty['MSE_coord'])
 
     def test_source_empty_is_valid(self):
         with tempfile.TemporaryDirectory() as tmp:

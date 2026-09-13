@@ -23,7 +23,8 @@ BASE=ROOT/'outputs/mmuav_paper_reproduction'
 
 def write(path,rows,fields=None):
     with path.open('w',newline='') as f:
-        writer=csv.DictWriter(f,fieldnames=fields or list(rows[0] if rows else ['timestamp','x','y','z']))
+        keys=list(dict.fromkeys(k for r in rows for k in r))
+        writer=csv.DictWriter(f,fieldnames=fields or keys or ['timestamp','x','y','z'])
         writer.writeheader();writer.writerows(rows)
 
 
@@ -59,10 +60,14 @@ def infer_candidates(folder,model):
 
 def score(pred,gt):
     matched=np.isfinite(pred).all(1)
+    errors=regression_metrics(pred[matched],gt[matched])
+    if not matched.any():
+        errors.update({k:None for k in ['MSE_coord','MSE_3D','RMSE_coord','RMSE_3D',
+                                      'mean_3d_error','median_3d_error']})
     return dict(num_gt=len(gt),matched_timestamp_count=int(matched.sum()),
         missing_prediction_count=int((~matched).sum()),coverage=float(matched.mean()) if len(gt) else 0.,
         error_scope='matched timestamps only; missing predictions separately counted',
-        **regression_metrics(pred[matched],gt[matched]))
+        **errors)
 
 
 def main():
