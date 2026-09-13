@@ -229,6 +229,11 @@ def main():
                 write_csv(out / "processing_failures.csv", failures)
                 raise  # never turn a processing exception into a valid empty sequence
     config = freeze_config(rows, args.association_threshold_m)
+    if args.finalize_only and (out / "frozen_config.json").exists():
+        frozen = json.loads((out / "frozen_config.json").read_text())
+        for key in ("association_threshold_m", "timestamp_tolerance_ms", "preprocessing"):
+            if config[key] != frozen[key]:
+                raise ValueError(f"Cannot change frozen M2 config during finalization: {key}")
     for r in candidates:
         annotate_source(r)
         reason = ("not_oracle_selected" if not r["oracle_selected"] else
