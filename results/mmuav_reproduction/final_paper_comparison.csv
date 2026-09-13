@@ -1,0 +1,9 @@
+Section,Metric,Paper,Our_Reproduction,Comparison_Status,Notes
+Center regression before,MSE,0.27,0.27601726090584094,numerically_close,metric/sample alignment unresolved
+Center regression after,MSE,0.05,0.06259121335474785,numerically_close_not_exact,architecture alignment partial; not strict reproduction
+Center regression reduction,%,81.48%,77.32%,comparable_numerically,NUMERICAL COMPARISON only
+Final pose,Paper Pose MSE,2.21375,N/A,metric_unresolved,"Official challenge test, not local heldout; NUMERICAL REFERENCE ONLY"
+Final heldout,MSE_coord,N/A,1.3989066180747003,local_metric,FULL_TEMPORAL; not aligned to paper Pose MSE
+Final heldout,MSE_3D,N/A,4.1967198542241,local_metric,FULL_TEMPORAL; not aligned to paper Pose MSE
+Final heldout,mean 3D error (m),N/A,0.5484639146174587,local_metric,FULL_TEMPORAL; not aligned to paper Pose MSE
+Final heldout,coverage,N/A,0.912,local_metric,FULL_TEMPORAL; not aligned to paper Pose MSE
