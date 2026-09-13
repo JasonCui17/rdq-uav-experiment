@@ -50,6 +50,8 @@ def main():
     p.add_argument("--batch-size",type=int,default=64)
     p.add_argument("--learning-rate",type=float,default=.001)
     args=p.parse_args()
+    if min(args.epochs,args.patience,args.num_points,args.batch_size)<=0 or args.learning_rate<=0:
+        p.error("Training dimensions/limits and learning rate must be positive")
     out=args.output_dir
     if out.exists() and any(out.iterdir()): raise FileExistsError("Refusing to overwrite experiment")
     out.mkdir(parents=True,exist_ok=True)

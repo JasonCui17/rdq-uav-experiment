@@ -96,6 +96,32 @@ def test_gt_not_forward_input():
     assert list(inspect.signature(CenterRegressor().forward).parameters) == ["local_xyz","geometric_center"]
 
 
+def test_synthetic_trainer(tmp_path):
+    import json
+    from unittest.mock import patch
+    from build_mmuav_center_regression_dataset import write_csv
+    import train_mmuav_center_regressor as trainer
+    torch.set_num_threads(1)
+    rng=np.random.default_rng(42)
+    points=rng.normal(size=(48,3))
+    shard=tmp_path / "candidates.npz"
+    np.savez(shard,points=points,offsets=np.arange(0,49,8))
+    rows=[]
+    for i in range(6):
+        center=points[i*8:(i+1)*8].mean(0)
+        rows.append({"sample_id":str(i),"split":"train_sub" if i<4 else "validation_sub",
+                     "shard_path":str(shard),"shard_index":i,"accepted":True,
+                     **{f"geometric_{a}":center[j] for j,a in enumerate("xyz")},
+                     **{f"gt_{a}":center[j]+.1 for j,a in enumerate("xyz")}})
+    write_csv(tmp_path / "metadata.csv",rows)
+    write_csv(tmp_path / "evaluation_sample_ids.csv",[{"sample_id":"4"},{"sample_id":"5"}])
+    (tmp_path / "dataset_summary.json").write_text(json.dumps({"evaluation_mode":"synthetic"}))
+    with patch.object(sys,"argv",["trainer","--dataset-dir",str(tmp_path),"--output-dir",str(tmp_path / "run"),"--epochs","2"]):
+        trainer.main()
+    assert (tmp_path / "run/center_regression_comparison.csv").exists()
+    assert (tmp_path / "run/best_val_loss.pth").exists()
+
+
 if __name__ == "__main__":
     import tempfile
     tests = [v for k,v in list(globals().items()) if k.startswith("test_") and callable(v)]

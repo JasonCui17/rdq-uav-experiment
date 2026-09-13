@@ -214,6 +214,7 @@ def main():
     write_csv(out / "timestamps.csv", rows)
     write_csv(out / "evaluation_sample_ids.csv", [r for r in accepted if r["split"] == "validation_sub"])
     summary = {**config, "checkpoint_sha256": hashlib.sha256(args.checkpoint.read_bytes()).hexdigest(),
+               "source_root": str(args.data_root.resolve()), "splits_path": str(args.splits.resolve()),
                "git_commit": subprocess.check_output(["git","rev-parse","HEAD"],cwd=ROOT,text=True).strip(),
                "splits_sha256": hashlib.sha256(args.splits.read_bytes()).hexdigest(),
                "seed": 42, "valid_empty_sequences": [], "missing_input_sequences": [],
