@@ -1,0 +1,56 @@
+{
+  "selection": {
+    "representative": "seq0009",
+    "normal_mean_error_median": 0.2878463725661179,
+    "representative_rule": "Exclude seq0065 from presentation only; coverage>0; closest mean error to median; ties within1e-12 use sequence_id",
+    "good": "seq0020",
+    "hard": "seq0066",
+    "six": [
+      "seq0020",
+      "seq0078",
+      "seq0009",
+      "seq0036",
+      "seq0066",
+      "seq0065"
+    ]
+  },
+  "cache": {
+    "raw_window": [
+      "1706255287.800339",
+      "1706255287.900448",
+      "1706255288.000366",
+      "1706255288.100516",
+      "1706255288.200442",
+      "1706255288.300512",
+      "1706255288.400477",
+      "1706255288.500448",
+      "1706255288.600362",
+      "1706255288.700451",
+      "1706255288.800445",
+      "1706255288.900356",
+      "1706255289.000329",
+      "1706255289.100443",
+      "1706255289.200353",
+      "1706255289.300441",
+      "1706255289.400482",
+      "1706255289.500359",
+      "1706255289.600330",
+      "1706255289.700446"
+    ],
+    "raw_points": 84142,
+    "retained_points": 0,
+    "example_candidate_timestamp": "1706255287.915836",
+    "classification_reconstruction": "saved processed membership; DBSCAN labels unavailable",
+    "example_gt_time_gap_ms": 23.57029914855957
+  },
+  "no_model_inference": true,
+  "no_clustering_rerun": true,
+  "no_parameter_fitting": true,
+  "dpi": 300,
+  "colors": {
+    "gt": "#c62828",
+    "geometric": "#888888",
+    "full": "#1565c0",
+    "full_temporal": "#2e7d32"
+  }
+}

@@ -155,3 +155,11 @@ Frozen configuration和模型保持不变；未进行收尾训练、拟合、重
 This is a completed reconstruction, not strict paper-level numerical replication.
 
 **MMUAV 3D LOCALIZATION RECONSTRUCTION COMPLETE**
+# Archive interpretation and visualization
+
+Final read-only interpretation is documented in [pipeline and code mapping](MMUAV_REPRODUCTION_PIPELINE.md),
+[seq0065 diagnosis](seq0065_failure_diagnosis.md), [missing attribution](missing_reason_summary.csv),
+and [reproducibility manifest](reproducibility_manifest.json). Figures are in `final_visuals/`.
+No model inference, clustering rerun, parameter fitting, or prediction modification was used for this archive.
+
+MMUAV REPRODUCTION ARCHIVED AND CLOSED

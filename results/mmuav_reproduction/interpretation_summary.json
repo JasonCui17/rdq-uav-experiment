@@ -1,0 +1,45 @@
+{
+  "failure": {
+    "seq": "seq0065",
+    "diagnostic_threshold_m": 2,
+    "threshold_status": "post-hoc interpretation only, not pipeline parameter",
+    "first_full_error_above2_timestamp": 1706258442.4468682,
+    "peak_timestamp": 1706258447.8373666,
+    "peak_full_error": 24.032995123534192,
+    "peak_interval": [
+      1706258442.4468682,
+      1706258447.8373666
+    ],
+    "interval_candidate_timestamps": 54,
+    "interval_selected_states": 54,
+    "interval_selected_prediction_only_states": 54,
+    "interval_min_geometric_error_median": 0.9159190157486369,
+    "interval_min_corrected_error_median": 0.475373411120752,
+    "interval_max_correction_norm": 0.6957023597917887,
+    "full_peak": 24.032995123534192,
+    "temporal_peak": 23.979634362665646,
+    "most_likely_failure_stage": "B. tracker / trajectory selection \u4e0e\u53ef\u7528\u76ee\u6807\u5019\u9009\u4e0d\u4e00\u81f4",
+    "confidence": "medium"
+  },
+  "missing": {
+    "attribution": "Exclusive proximate support-rule attribution, NOT unique sensor-level root cause",
+    "precedence": [
+      "NO_VALID_TRACK",
+      "OUTSIDE_SELECTED_TRACK",
+      "OUTSIDE_INTERPOLATION_SUPPORT",
+      "GAP_TOO_LARGE",
+      "NO_CANDIDATE",
+      "OTHER"
+    ],
+    "missing_without_candidate_within_50ms": 337,
+    "missing_with_candidate_within_50ms": 191,
+    "counts": {
+      "NO_CANDIDATE": 0,
+      "NO_VALID_TRACK": 0,
+      "OUTSIDE_SELECTED_TRACK": 511,
+      "GAP_TOO_LARGE": 17,
+      "OUTSIDE_INTERPOLATION_SUPPORT": 0,
+      "OTHER": 0
+    }
+  }
+}

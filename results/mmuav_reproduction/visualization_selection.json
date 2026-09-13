@@ -1,0 +1,15 @@
+{
+  "representative": "seq0009",
+  "normal_mean_error_median": 0.2878463725661179,
+  "representative_rule": "Exclude seq0065 from presentation only; coverage>0; closest mean error to median; ties within1e-12 use sequence_id",
+  "good": "seq0020",
+  "hard": "seq0066",
+  "six": [
+    "seq0020",
+    "seq0078",
+    "seq0009",
+    "seq0036",
+    "seq0066",
+    "seq0065"
+  ]
+}
