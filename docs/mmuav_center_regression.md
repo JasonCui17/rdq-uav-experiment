@@ -28,8 +28,11 @@ unchanged. All excluded candidates remain available for later system evaluation.
 
 All valid candidate points determine the geometric mean before any sampling.
 Candidates are stored in per-sequence numeric point buffers and offsets, and
-all_candidates.csv records oracle associations and rejection reasons. Public
-fusion does not retain source identity; this is explicitly marked unknown.
+all_candidates.csv records oracle associations and rejection reasons. Source
+identity is recovered only through sidecar timestamp provenance: public fusion
+merges keys, with Mid360 overriding Avia at equal keys, and re-splits by time_ind.
+Thus each output frame's points retain its input stream identity. This is not a
+coordinate correction, temporal sensor alignment, or a change to fusion.
 
 Timestamp tolerance is frozen from training P95 nearest-GT gaps. Spatial pairing
 quality threshold is an explicit training-only decision; cumulative 0.5/1/2/3m

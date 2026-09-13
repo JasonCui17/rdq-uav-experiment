@@ -16,7 +16,7 @@ ROOT=Path(__file__).resolve().parents[1]
 sys.path.insert(0,str(ROOT / "src"))
 sys.path.insert(0,str(ROOT / "tools"))
 from rdq_uav.mmuav.center_regressor import CenterRegressor,sample_local,regression_metrics,verify_evaluation_ids
-from build_mmuav_center_regression_dataset import logits_only,freeze_config,preprocess
+from build_mmuav_center_regression_dataset import logits_only,freeze_config,preprocess,annotate_source
 
 
 def test_tuple_logits():
@@ -120,6 +120,16 @@ def test_synthetic_trainer(tmp_path):
         trainer.main()
     assert (tmp_path / "run/center_regression_comparison.csv").exists()
     assert (tmp_path / "run/best_val_loss.pth").exists()
+
+
+def test_source_sidecar_collision(tmp_path):
+    for sensor in ("lidar_360_processed","livox_avia_processed"):
+        (tmp_path / sensor).mkdir()
+        np.save(tmp_path / sensor / "0.npy",np.ones((2,3)))
+    row={"sample_id":"seq:0:3","shard_path":str(tmp_path / "candidates.npz"),"point_count":2}
+    annotate_source(row)
+    assert row["has_mid360"] and not row["has_livox"]
+    assert row["mid360_point_count"]==2 and row["livox_point_count"]==0
 
 
 if __name__ == "__main__":

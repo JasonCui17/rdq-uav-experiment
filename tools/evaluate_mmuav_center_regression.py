@@ -11,13 +11,17 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0,str(ROOT / "src"))
-from rdq_uav.mmuav.center_regressor import regression_metrics
+from rdq_uav.mmuav.center_regressor import regression_metrics, verify_evaluation_ids
 from build_mmuav_center_regression_dataset import write_csv, MODE
 
 
 def accepted_rows(directory):
     with (directory / "metadata.csv").open() as f:
-        return [r for r in csv.DictReader(f) if r["accepted"] == "True"]
+        rows = [r for r in csv.DictReader(f) if r["accepted"] == "True"]
+    with (directory / "evaluation_sample_ids.csv").open() as f:
+        frozen = [r["sample_id"] for r in csv.DictReader(f)]
+    verify_evaluation_ids([r["sample_id"] for r in rows if r["split"] == "validation_sub"], frozen)
+    return rows
 
 
 def arrays(rows):
@@ -65,6 +69,7 @@ def main():
         ax.scatter(*points.T,s=8,label="raw cluster")
         ax.scatter(*geom[0],s=80,label="geometric center")
         ax.scatter(*gt[0],s=80,marker="x",label="GT")
+        ax.set_xlabel("X (m)");ax.set_ylabel("Y (m)");ax.set_zlabel("Z (m)")
         ax.set_title(f'{r["sequence_id"]} {r["timestamp"]}\nN={r["point_count"]} error={float(r["distance_to_gt"]):.3f}m gap={float(r["time_gap_ms"]):.2f}ms')
         ax.legend(); fig.savefig(figures / f"sample_{i:02d}.png"); plt.close(fig)
     print(json.dumps(result,indent=2))

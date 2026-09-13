@@ -48,6 +48,26 @@ def logits_only(output):
     return output[0] if isinstance(output, tuple) else output
 
 
+def annotate_source(row):
+    """Read-only sidecar: source fusion merges timestamps, never mixes a frame.
+
+    At equal keys {**avia, **mid360} retains Mid360, including empty inputs.
+    This records existing merge semantics; it does not change fusion/points.
+    """
+    work = Path(row["shard_path"]).parent
+    timestamp = row["sample_id"].rsplit(":",2)[1]
+    mid = (work / "lidar_360_processed" / f"{timestamp}.npy").exists()
+    avia = (work / "livox_avia_processed" / f"{timestamp}.npy").exists()
+    if not (mid or avia):
+        raise FileNotFoundError("Cannot verify fusion timestamp source")
+    row.update(source_identity="MID360" if mid else "LIVOX_AVIA",
+               source_basis="PUBLIC_TIMESTAMP_MERGE_MID360_OVERWRITES_AVIA",
+               mid360_point_count=int(row["point_count"]) if mid else 0,
+               livox_point_count=0 if mid else int(row["point_count"]),
+               has_mid360=mid,has_livox=not mid)
+    return row
+
+
 def preprocess(sequence, output, model):
     """Adapter for M1 logits; original preprocessing module is untouched."""
     mid = {p.stem: load_xyz(p) for p in timestamp_files(sequence / "lidar_360")}
@@ -106,13 +126,15 @@ def main():
     p.add_argument("--association-threshold-m", type=float, required=True,
                    help="Train-only pairing quality decision; never chosen from validation MSE")
     p.add_argument("--limit-sequences", type=int)
+    p.add_argument("--finalize-only", action="store_true",
+                   help="Re-export existing per-sequence records only; no DBSCAN/LSTM/GT reads")
     args = p.parse_args()
     torch.set_num_threads(1)  # Avoid CPU oversubscription in tiny LSTM inference.
     if args.association_threshold_m <= 0:
         p.error("Association threshold must be positive")
     out = args.output_dir
     out.mkdir(parents=True, exist_ok=True)
-    if (out / "dataset_summary.json").exists():
+    if (out / "dataset_summary.json").exists() and not args.finalize_only:
         raise FileExistsError("Completed dataset is frozen; use a new directory")
     model = AttentionLSTMClassifier()
     payload = torch.load(args.checkpoint, map_location="cpu")
@@ -139,6 +161,8 @@ def main():
                         raise ValueError("Cached sequence provenance mismatch")
                     rows.extend(record["timestamps"])
                     candidates.extend(record["candidates"])
+                    if args.finalize_only:
+                        continue
                     state = record.get("numpy_rng_state")
                     if state is None:
                         # Source NumPy FPS consumes exactly one randint for each
@@ -150,6 +174,8 @@ def main():
                     else:
                         np.random.set_state((state[0],np.asarray(state[1],dtype=np.uint32),state[2],state[3],state[4]))
                     continue
+                if args.finalize_only:
+                    raise FileNotFoundError(f"Missing finalized sequence records for {seq}")
                 audit = preprocess(args.data_root / seq, work, model)
                 gt_times, gt_xyz = load_gt(args.data_root / seq)  # after preprocessing
                 buffer, offsets = [], [0]
@@ -204,6 +230,7 @@ def main():
                 raise  # never turn a processing exception into a valid empty sequence
     config = freeze_config(rows, args.association_threshold_m)
     for r in candidates:
+        annotate_source(r)
         reason = ("not_oracle_selected" if not r["oracle_selected"] else
                   "rejected_timestamp_gap" if r["time_gap_ms"] > config["timestamp_tolerance_ms"] else
                   "rejected_spatial_distance" if r["distance_to_gt"] > args.association_threshold_m else "")
