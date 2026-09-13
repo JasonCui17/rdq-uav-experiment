@@ -1,0 +1,164 @@
+{
+  "status": "FROZEN_AFTER_VALIDATION",
+  "git_commit": "ee5ba1ffbfaebd68057b0e2f16d14ce161e63a6d",
+  "validation_git_commit": "dd262901cc62b283b01eb87c4b6f0195d3edb276",
+  "split_definition_hash": "46c34a6972b8613fad87efde03aca5e3326c057182e5e1ecf78bbfecda83f1dc",
+  "data_root": "/home/jasoncui/datasets/MMAUD/official/train",
+  "M1_checkpoint": "/home/jasoncui/projects/rdq-uav-experiment/outputs/mmuav_paper_reproduction/classification/attention_9d/best_val_loss.pth",
+  "M1_checkpoint_sha256": "12acb04f8236bfc59bd892f3226af7659138afd470e8a54ef2b110b8b4749c4b",
+  "M2_checkpoint": "/home/jasoncui/projects/rdq-uav-experiment/outputs/mmuav_paper_reproduction/center_regression/pointnet_m2/best_val_loss.pth",
+  "M2_checkpoint_sha256": "e2820deba6e1c7365b62e86d8d363525a66606a7437c889ecbfa399dafc23eeb",
+  "preprocessing": {
+    "mid360_eps": 2,
+    "mid360_min_samples": 10,
+    "window_size": 20,
+    "window_stride": 20,
+    "final_window": "extra final20; source overwrite",
+    "accumulation": "nonoverlap",
+    "livox_FPS_max_points": 100,
+    "fusion_eps": 1,
+    "fusion_min_samples": 10
+  },
+  "candidate_DBSCAN": {
+    "eps": 1,
+    "min_samples": 1
+  },
+  "M2": {
+    "variant": "full",
+    "num_points": 64,
+    "sampling_seed": "42 + per-frame cluster_id",
+    "geometric_center": "full cluster mean before sampling"
+  },
+  "tracker": {
+    "process_noise": 0.15,
+    "measurement_noise": 0.001,
+    "missed_distance": 3.0,
+    "covar_trace_thresh": 30.0,
+    "min_points": 1
+  },
+  "trajectory_selection": "longest_lived_track",
+  "AR_order": 3,
+  "AR_grid_seconds": 0.1,
+  "max_gap_seconds": 1.0,
+  "AR_fit": "per selected predicted trajectory, per-axis OLS; no GT; <8 states fallback [2,-1,0,0]",
+  "interpolation_method": "linear; support and maximum1s gap mask",
+  "spline_s": 0.5,
+  "spline_degree": 3,
+  "spline_short_track_fallback": "linear if fewer than4 states",
+  "nearest_evaluation_tolerance_seconds": 0.05,
+  "evaluation_timestamp_only": true,
+  "evaluation_definition": "frame-pooled matched-only MSE_coord; MSE_3D=3*MSE_coord; missing and coverage explicit",
+  "M3": "BYPASSED",
+  "seed": 42,
+  "heldout_used_for_selection": false,
+  "pipeline_code_sha256": {
+    "tools/run_mmuav_pose_pipeline.py": "4debce0b1cf1f3727bad51ccb7e12becde6789c261a440983bc6833a61c2fa00",
+    "src/rdq_uav/mmuav/pose_trajectory.py": "a6c471a6c187cfd668e8e2b6bc8dcd27a457730adbe912ad0ae26d86c4c66c68",
+    "tools/build_mmuav_center_regression_dataset.py": "0f7f1a8b1791401cb7a752969f9a3c951face49b36616ce14486775b535f10df",
+    "tools/build_mmuav_cluster_dataset.py": "36ebfb07f31e28b2949905f30c2270718b4cd6c0077366af6a15b079ff20ffe4",
+    "src/rdq_uav/baselines/mmuav_preprocess.py": "596740d0241313fd7d95bbdf8f36e0cb24d36f5d87a2eef846b3d651fa3d3f2c",
+    "src/rdq_uav/mmuav/attention_lstm.py": "2c73b5a8701a3987ec99cb5811ee5c9e30b6d973214a70d2b28dac81d52c410c",
+    "src/rdq_uav/mmuav/center_regressor.py": "da1cf54ac5f41227a334e7cea031d18bd391faed6959188f648981f42a6169e7"
+  },
+  "validation_results": {
+    "validation_audit_passed": true,
+    "same_matched_timestamp_set": true,
+    "matched_timestamp_differences": [],
+    "GEOMETRIC": {
+      "num_gt": 6000,
+      "matched_timestamp_count": 4853,
+      "missing_prediction_count": 1147,
+      "coverage": 0.8088333333333333,
+      "error_scope": "matched timestamps only; missing predictions separately counted",
+      "samples": 4853,
+      "MSE_coord": 0.3771612727769836,
+      "MSE_3D": 1.1314838183309506,
+      "RMSE_coord": 0.6141345722046461,
+      "RMSE_3D": 1.063712281743024,
+      "mean_3d_error": 0.8988113909203117,
+      "median_3d_error": 0.7069024076799211,
+      "MSE_x": 0.13160288804000514,
+      "MSE_y": 0.8454457795055872,
+      "MSE_z": 0.15443515078535808,
+      "MAE_x": 0.2329124149378039,
+      "MAE_y": 0.6975690676680075,
+      "MAE_z": 0.3518974005912646
+    },
+    "FULL": {
+      "num_gt": 6000,
+      "matched_timestamp_count": 4853,
+      "missing_prediction_count": 1147,
+      "coverage": 0.8088333333333333,
+      "error_scope": "matched timestamps only; missing predictions separately counted",
+      "samples": 4853,
+      "MSE_coord": 0.058697520787336116,
+      "MSE_3D": 0.17609256236200835,
+      "RMSE_coord": 0.2422757123348028,
+      "RMSE_3D": 0.4196338432038202,
+      "mean_3d_error": 0.34812757691936463,
+      "median_3d_error": 0.29620603333496426,
+      "MSE_x": 0.0653674474339117,
+      "MSE_y": 0.0880350342856316,
+      "MSE_z": 0.022690080642465055,
+      "MAE_x": 0.18405553082167583,
+      "MAE_y": 0.21080013573772055,
+      "MAE_z": 0.11218465094642467
+    },
+    "FULL_TEMPORAL": {
+      "num_gt": 6000,
+      "matched_timestamp_count": 5445,
+      "missing_prediction_count": 555,
+      "coverage": 0.9075,
+      "error_scope": "matched timestamps only; missing predictions separately counted",
+      "samples": 5445,
+      "MSE_coord": 0.058619533285354936,
+      "MSE_3D": 0.1758585998560648,
+      "RMSE_coord": 0.2421147110056614,
+      "RMSE_3D": 0.41935498072166116,
+      "mean_3d_error": 0.3459122664817594,
+      "median_3d_error": 0.3031907021845136,
+      "MSE_x": 0.064518502805619,
+      "MSE_y": 0.09184834886735418,
+      "MSE_z": 0.01949174818309161,
+      "MAE_x": 0.18092249110527436,
+      "MAE_y": 0.2152023497550782,
+      "MAE_z": 0.10234809770521323
+    },
+    "full_vs_geometric": {
+      "MSE_coord_relative_reduction": 0.8443702335736785,
+      "mean_3d_error_relative_reduction": 0.6126800567548332
+    },
+    "temporal_vs_full": {
+      "coverage_absolute_improvement": 0.09866666666666668,
+      "additional_matched_timestamps": 592
+    },
+    "findings": [
+      "Learned center correction remains valuable in the full trajectory pipeline.",
+      "Temporal processing primarily improves trajectory coverage.",
+      "M2 module-level improvement survives integration into the tracker.",
+      "Paper Pose MSE 2.21375 cannot be directly compared to local metrics."
+    ],
+    "metric_alignment": "unresolved",
+    "artifact_sha256": {
+      "geometric": {
+        "overall_metrics.json": "f534ff9d2d7701944677c3fa06bef0127f8723c18fd5818e55a16050c3758c5b",
+        "per_sequence_metrics.csv": "c5f7848c42679c01336a467d5563203bf9a84519551d998a4413036541f4bccc",
+        "processing_failures.csv": "50923b8d09a5e6fa54bd6b6e8770d9bd44902a0df8ea160e14b85beb4f99f662",
+        "run_config.json": "c1371fcd6911ba22a8af64e7a6bd57c3f438580e2a31c097447a9c88709502e0"
+      },
+      "full": {
+        "overall_metrics.json": "b11d72a82b78288e0cea382fffda31654ae760ad7e526f373ebc606aa8ea59fc",
+        "per_sequence_metrics.csv": "f3ca0113e08d60c2d16c43c7ee50e3a103257592f236aca6e23bb41737cc01ad",
+        "processing_failures.csv": "50923b8d09a5e6fa54bd6b6e8770d9bd44902a0df8ea160e14b85beb4f99f662",
+        "run_config.json": "440aa76f022577d13c41ee9155a56f9854c4d12b1cb85015638db4d284f427e9"
+      },
+      "full_temporal": {
+        "overall_metrics.json": "bc4ddfa5b0f9fb109f357c002ede909444ca89b0ed8b500534c4e358633d26df",
+        "per_sequence_metrics.csv": "06efcf2713c1ca4ff467df459f2572e54cadd37b0a4806c86a7d3a0ca323e414",
+        "processing_failures.csv": "50923b8d09a5e6fa54bd6b6e8770d9bd44902a0df8ea160e14b85beb4f99f662",
+        "run_config.json": "a2de0c7db51039378c10ef6756c1e3f86dba9dddf72b85c49153263b8f10be7a"
+      }
+    },
+    "heldout_used_for_selection": false
+  }
+}
