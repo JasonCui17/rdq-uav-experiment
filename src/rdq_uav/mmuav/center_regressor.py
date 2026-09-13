@@ -5,16 +5,40 @@ from torch import nn
 
 
 class CenterRegressor(nn.Module):
-    def __init__(self):
+    def __init__(self, variant="full"):
         super().__init__()
+        if variant not in ("full", "points_only", "center_only"):
+            raise ValueError(variant)
+        self.variant = variant
+        if variant == "center_only":
+            self.head = nn.Sequential(nn.Linear(3, 128), nn.ReLU(), nn.Linear(128, 64),
+                                      nn.ReLU(), nn.Linear(64, 3))
+            return
         self.point_mlp = nn.Sequential(nn.Linear(3, 64), nn.ReLU(), nn.Linear(64, 128),
                                        nn.ReLU(), nn.Linear(128, 256), nn.ReLU())
-        self.head = nn.Sequential(nn.Linear(259, 128), nn.ReLU(), nn.Linear(128, 64),
+        self.head = nn.Sequential(nn.Linear(259 if variant == "full" else 256, 128), nn.ReLU(), nn.Linear(128, 64),
                                   nn.ReLU(), nn.Linear(64, 3))
 
-    def forward(self, local_xyz, geometric_center):
+    def forward(self, local_xyz, geometric_center=None):
+        # Single-input variants: points_only(local_xyz), center_only(center).
+        if self.variant == "center_only":
+            if geometric_center is not None:
+                raise ValueError("center_only accepts only the observed center")
+            return self.head(local_xyz)
+        if self.variant == "points_only" and geometric_center is not None:
+            raise ValueError("Absolute center must not enter points_only forward")
         features = self.point_mlp(local_xyz).amax(dim=1)
+        if self.variant == "points_only":
+            return self.head(features)
         return self.head(torch.cat([features, geometric_center], dim=-1))
+
+
+def predict_delta(model, local_xyz, center):
+    if model.variant == "center_only":
+        return model(center)
+    if model.variant == "points_only":
+        return model(local_xyz)
+    return model(local_xyz, center)
 
 
 def sample_local(points, center, n, seed):

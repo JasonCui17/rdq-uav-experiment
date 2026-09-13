@@ -1,0 +1,392 @@
+{
+  "evaluation_mode": "gt_conditioned_module_level",
+  "best_epoch": 3,
+  "stopped_epoch": 18,
+  "samples": 2359,
+  "checkpoint": "best_val_loss.pth",
+  "frozen_files_sha256": {
+    "training_history.csv": "809a4f43e91be9503428bd8b26a2df5e08ce0e01cc8b03cf222ad31dae6b6c99",
+    "best_val_loss.pth": "e2820deba6e1c7365b62e86d8d363525a66606a7437c889ecbfa399dafc23eeb",
+    "last.pth": "9c3a0990c7dc374db695e44c0193402d530592f24f218e18781f96226da570f4",
+    "center_regression_comparison.csv": "bc7c55e1f6b50dfc2faf858fbe87633ac5837cb2ced0055bdebb1a541e0a48fa",
+    "evaluation_summary.json": "3b5b9834c7e4451352d0ff3e2ad93561f2fed045032adf16da3af492446ab406",
+    "evaluation_sample_ids.csv": "44928f40557868591004499bc13eb681376604853953fef35ba5366f94fc91f9"
+  },
+  "improved_samples": 2122,
+  "degraded_samples": 237,
+  "unchanged_samples": 0,
+  "improvement_rate": 0.8995337007206443,
+  "axes": [
+    {
+      "axis": "X",
+      "geometric_MSE": 0.10022941390982845,
+      "pointnet_MSE": 0.05701821394752187,
+      "absolute_reduction": 0.04321119996230658,
+      "relative_reduction": 0.43112294362193526
+    },
+    {
+      "axis": "Y",
+      "geometric_MSE": 0.5846434646834402,
+      "pointnet_MSE": 0.09781277874627006,
+      "absolute_reduction": 0.48683068593717016,
+      "relative_reduction": 0.8326967037949675
+    },
+    {
+      "axis": "Z",
+      "geometric_MSE": 0.14317890412425419,
+      "pointnet_MSE": 0.03294264725386131,
+      "absolute_reduction": 0.11023625687039287,
+      "relative_reduction": 0.769919685757108
+    }
+  ],
+  "point_counts": [
+    {
+      "point_count_bin": "1-5",
+      "samples": 1539,
+      "geometric_MSE_coord": 0.33104932322498004,
+      "pointnet_MSE_coord": 0.0835666813396375,
+      "geometric_MSE_3D": 0.9931479696749399,
+      "pointnet_MSE_3D": 0.2507000440189125,
+      "geometric_mean_3d_error": 0.8890330391952107,
+      "pointnet_mean_3d_error": 0.43507970295693743,
+      "relative_reduction": 0.7475703000218917
+    },
+    {
+      "point_count_bin": "6-10",
+      "samples": 244,
+      "geometric_MSE_coord": 0.33473678360319953,
+      "pointnet_MSE_coord": 0.035171223108559836,
+      "geometric_MSE_3D": 1.0042103508095988,
+      "pointnet_MSE_3D": 0.10551366932567952,
+      "geometric_mean_3d_error": 0.9349277308711379,
+      "pointnet_mean_3d_error": 0.2796003973140246,
+      "relative_reduction": 0.8949287176330996
+    },
+    {
+      "point_count_bin": "11-20",
+      "samples": 121,
+      "geometric_MSE_coord": 0.2436784776213864,
+      "pointnet_MSE_coord": 0.021157141816988884,
+      "geometric_MSE_3D": 0.7310354328641591,
+      "pointnet_MSE_3D": 0.06347142545096664,
+      "geometric_mean_3d_error": 0.7841110251366488,
+      "pointnet_mean_3d_error": 0.2220584550311438,
+      "relative_reduction": 0.9131759931221269
+    },
+    {
+      "point_count_bin": "21-50",
+      "samples": 107,
+      "geometric_MSE_coord": 0.13722842532668164,
+      "pointnet_MSE_coord": 0.02365890097631742,
+      "geometric_MSE_3D": 0.41168527598004495,
+      "pointnet_MSE_3D": 0.07097670292895226,
+      "geometric_mean_3d_error": 0.6168475165373513,
+      "pointnet_mean_3d_error": 0.2267363200203969,
+      "relative_reduction": 0.8275947499944287
+    },
+    {
+      "point_count_bin": "51-100",
+      "samples": 348,
+      "geometric_MSE_coord": 0.0453893607250321,
+      "pointnet_MSE_coord": 0.015431766171433929,
+      "geometric_MSE_3D": 0.1361680821750963,
+      "pointnet_MSE_3D": 0.04629529851430177,
+      "geometric_mean_3d_error": 0.3409426156685405,
+      "pointnet_mean_3d_error": 0.17823139500118224,
+      "relative_reduction": 0.6600135819290498
+    }
+  ],
+  "sequences": [
+    {
+      "sequence_id": "seq0007",
+      "samples": 95,
+      "geometric_MSE_coord": 1.0431186514500268,
+      "pointnet_MSE_coord": 0.09493235276870698,
+      "geometric_MSE_3D": 3.1293559543500806,
+      "pointnet_MSE_3D": 0.28479705830612095,
+      "geometric_mean_3d_error": 1.7608563055758224,
+      "pointnet_mean_3d_error": 0.5189783963764638,
+      "relative_reduction": 0.9089917981652973
+    },
+    {
+      "sequence_id": "seq0012",
+      "samples": 199,
+      "geometric_MSE_coord": 0.5963955858035197,
+      "pointnet_MSE_coord": 0.04996367441718231,
+      "geometric_MSE_3D": 1.7891867574105595,
+      "pointnet_MSE_3D": 0.14989102325154693,
+      "geometric_mean_3d_error": 1.3166864573834058,
+      "pointnet_mean_3d_error": 0.3586109697381858,
+      "relative_reduction": 0.9162239365841942
+    },
+    {
+      "sequence_id": "seq0031",
+      "samples": 105,
+      "geometric_MSE_coord": 0.39846207180658466,
+      "pointnet_MSE_coord": 0.12786999873233135,
+      "geometric_MSE_3D": 1.195386215419754,
+      "pointnet_MSE_3D": 0.38360999619699404,
+      "geometric_mean_3d_error": 1.0265997068056312,
+      "pointnet_mean_3d_error": 0.5863552830694265,
+      "relative_reduction": 0.6790911663120598
+    },
+    {
+      "sequence_id": "seq0035",
+      "samples": 160,
+      "geometric_MSE_coord": 0.1893020705202477,
+      "pointnet_MSE_coord": 0.019460337920684856,
+      "geometric_MSE_3D": 0.5679062115607432,
+      "pointnet_MSE_3D": 0.05838101376205457,
+      "geometric_mean_3d_error": 0.740049661870226,
+      "pointnet_mean_3d_error": 0.20573591466380048,
+      "relative_reduction": 0.8971995506060596
+    },
+    {
+      "sequence_id": "seq0042",
+      "samples": 198,
+      "geometric_MSE_coord": 0.24937662892199763,
+      "pointnet_MSE_coord": 0.15759786517298927,
+      "geometric_MSE_3D": 0.7481298867659929,
+      "pointnet_MSE_3D": 0.4727935955189678,
+      "geometric_mean_3d_error": 0.8161989773996358,
+      "pointnet_mean_3d_error": 0.607318537591047,
+      "relative_reduction": 0.36803273885667853
+    },
+    {
+      "sequence_id": "seq0050",
+      "samples": 162,
+      "geometric_MSE_coord": 0.11157521276503712,
+      "pointnet_MSE_coord": 0.06640789386766427,
+      "geometric_MSE_3D": 0.3347256382951114,
+      "pointnet_MSE_3D": 0.1992236816029928,
+      "geometric_mean_3d_error": 0.5610834863118671,
+      "pointnet_mean_3d_error": 0.42098002435254095,
+      "relative_reduction": 0.40481499230917306
+    },
+    {
+      "sequence_id": "seq0055",
+      "samples": 199,
+      "geometric_MSE_coord": 0.2656335846196658,
+      "pointnet_MSE_coord": 0.059420195130822924,
+      "geometric_MSE_3D": 0.7969007538589974,
+      "pointnet_MSE_3D": 0.17826058539246878,
+      "geometric_mean_3d_error": 0.8666624548997317,
+      "pointnet_mean_3d_error": 0.3840761521568438,
+      "relative_reduction": 0.7763076712762027
+    },
+    {
+      "sequence_id": "seq0059",
+      "samples": 205,
+      "geometric_MSE_coord": 0.08624998152270545,
+      "pointnet_MSE_coord": 0.02500290665498177,
+      "geometric_MSE_3D": 0.25874994456811634,
+      "pointnet_MSE_3D": 0.0750087199649453,
+      "geometric_mean_3d_error": 0.5016801504660336,
+      "pointnet_mean_3d_error": 0.24669107061256754,
+      "relative_reduction": 0.7101111650858765
+    },
+    {
+      "sequence_id": "seq0068",
+      "samples": 112,
+      "geometric_MSE_coord": 0.7909329663953503,
+      "pointnet_MSE_coord": 0.1206175418624691,
+      "geometric_MSE_3D": 2.372798899186051,
+      "pointnet_MSE_3D": 0.36185262558740733,
+      "geometric_mean_3d_error": 1.4918062978597288,
+      "pointnet_mean_3d_error": 0.5053058318528035,
+      "relative_reduction": 0.8474996656010187
+    },
+    {
+      "sequence_id": "seq0075",
+      "samples": 199,
+      "geometric_MSE_coord": 0.020178558272072492,
+      "pointnet_MSE_coord": 0.006826420492570158,
+      "geometric_MSE_3D": 0.06053567481621747,
+      "pointnet_MSE_3D": 0.020479261477710467,
+      "geometric_mean_3d_error": 0.2408595346889798,
+      "pointnet_mean_3d_error": 0.13256130646633796,
+      "relative_reduction": 0.6616992948392129
+    },
+    {
+      "sequence_id": "seq0084",
+      "samples": 109,
+      "geometric_MSE_coord": 0.6089789996957706,
+      "pointnet_MSE_coord": 0.05181407931738377,
+      "geometric_MSE_3D": 1.8269369990873117,
+      "pointnet_MSE_3D": 0.15544223795215134,
+      "geometric_mean_3d_error": 1.3413595439905228,
+      "pointnet_mean_3d_error": 0.33799428262785697,
+      "relative_reduction": 0.914916476030752
+    },
+    {
+      "sequence_id": "seq0087",
+      "samples": 173,
+      "geometric_MSE_coord": 0.09254991540687196,
+      "pointnet_MSE_coord": 0.12714720885468342,
+      "geometric_MSE_3D": 0.2776497462206159,
+      "pointnet_MSE_3D": 0.3814416265640503,
+      "geometric_mean_3d_error": 0.5089163356213489,
+      "pointnet_mean_3d_error": 0.5982913592223736,
+      "relative_reduction": -0.3738230693751943
+    },
+    {
+      "sequence_id": "seq0090",
+      "samples": 163,
+      "geometric_MSE_coord": 0.14477602780555546,
+      "pointnet_MSE_coord": 0.029555019293825216,
+      "geometric_MSE_3D": 0.43432808341666634,
+      "pointnet_MSE_3D": 0.08866505788147566,
+      "geometric_mean_3d_error": 0.6485786383137645,
+      "pointnet_mean_3d_error": 0.26788131802944315,
+      "relative_reduction": 0.7958569540703264
+    },
+    {
+      "sequence_id": "seq0092",
+      "samples": 184,
+      "geometric_MSE_coord": 0.09703189718276357,
+      "pointnet_MSE_coord": 0.01604292903816191,
+      "geometric_MSE_3D": 0.29109569154829074,
+      "pointnet_MSE_3D": 0.04812878711448572,
+      "geometric_mean_3d_error": 0.5258398865734786,
+      "pointnet_mean_3d_error": 0.19262995183595488,
+      "relative_reduction": 0.8346633477860956
+    },
+    {
+      "sequence_id": "seq0101",
+      "samples": 96,
+      "geometric_MSE_coord": 0.07065162882032879,
+      "pointnet_MSE_coord": 0.030806890810558905,
+      "geometric_MSE_3D": 0.21195488646098637,
+      "pointnet_MSE_3D": 0.09242067243167673,
+      "geometric_mean_3d_error": 0.4252019279279932,
+      "pointnet_mean_3d_error": 0.18681253779984974,
+      "relative_reduction": 0.5639606428762933
+    }
+  ],
+  "top_10_improvement": [
+    {
+      "sequence_id": "seq0012",
+      "samples": 199,
+      "geometric_MSE_coord": 0.5963955858035197,
+      "pointnet_MSE_coord": 0.04996367441718231,
+      "geometric_MSE_3D": 1.7891867574105595,
+      "pointnet_MSE_3D": 0.14989102325154693,
+      "geometric_mean_3d_error": 1.3166864573834058,
+      "pointnet_mean_3d_error": 0.3586109697381858,
+      "relative_reduction": 0.9162239365841942
+    },
+    {
+      "sequence_id": "seq0084",
+      "samples": 109,
+      "geometric_MSE_coord": 0.6089789996957706,
+      "pointnet_MSE_coord": 0.05181407931738377,
+      "geometric_MSE_3D": 1.8269369990873117,
+      "pointnet_MSE_3D": 0.15544223795215134,
+      "geometric_mean_3d_error": 1.3413595439905228,
+      "pointnet_mean_3d_error": 0.33799428262785697,
+      "relative_reduction": 0.914916476030752
+    },
+    {
+      "sequence_id": "seq0007",
+      "samples": 95,
+      "geometric_MSE_coord": 1.0431186514500268,
+      "pointnet_MSE_coord": 0.09493235276870698,
+      "geometric_MSE_3D": 3.1293559543500806,
+      "pointnet_MSE_3D": 0.28479705830612095,
+      "geometric_mean_3d_error": 1.7608563055758224,
+      "pointnet_mean_3d_error": 0.5189783963764638,
+      "relative_reduction": 0.9089917981652973
+    },
+    {
+      "sequence_id": "seq0035",
+      "samples": 160,
+      "geometric_MSE_coord": 0.1893020705202477,
+      "pointnet_MSE_coord": 0.019460337920684856,
+      "geometric_MSE_3D": 0.5679062115607432,
+      "pointnet_MSE_3D": 0.05838101376205457,
+      "geometric_mean_3d_error": 0.740049661870226,
+      "pointnet_mean_3d_error": 0.20573591466380048,
+      "relative_reduction": 0.8971995506060596
+    },
+    {
+      "sequence_id": "seq0068",
+      "samples": 112,
+      "geometric_MSE_coord": 0.7909329663953503,
+      "pointnet_MSE_coord": 0.1206175418624691,
+      "geometric_MSE_3D": 2.372798899186051,
+      "pointnet_MSE_3D": 0.36185262558740733,
+      "geometric_mean_3d_error": 1.4918062978597288,
+      "pointnet_mean_3d_error": 0.5053058318528035,
+      "relative_reduction": 0.8474996656010187
+    },
+    {
+      "sequence_id": "seq0092",
+      "samples": 184,
+      "geometric_MSE_coord": 0.09703189718276357,
+      "pointnet_MSE_coord": 0.01604292903816191,
+      "geometric_MSE_3D": 0.29109569154829074,
+      "pointnet_MSE_3D": 0.04812878711448572,
+      "geometric_mean_3d_error": 0.5258398865734786,
+      "pointnet_mean_3d_error": 0.19262995183595488,
+      "relative_reduction": 0.8346633477860956
+    },
+    {
+      "sequence_id": "seq0090",
+      "samples": 163,
+      "geometric_MSE_coord": 0.14477602780555546,
+      "pointnet_MSE_coord": 0.029555019293825216,
+      "geometric_MSE_3D": 0.43432808341666634,
+      "pointnet_MSE_3D": 0.08866505788147566,
+      "geometric_mean_3d_error": 0.6485786383137645,
+      "pointnet_mean_3d_error": 0.26788131802944315,
+      "relative_reduction": 0.7958569540703264
+    },
+    {
+      "sequence_id": "seq0055",
+      "samples": 199,
+      "geometric_MSE_coord": 0.2656335846196658,
+      "pointnet_MSE_coord": 0.059420195130822924,
+      "geometric_MSE_3D": 0.7969007538589974,
+      "pointnet_MSE_3D": 0.17826058539246878,
+      "geometric_mean_3d_error": 0.8666624548997317,
+      "pointnet_mean_3d_error": 0.3840761521568438,
+      "relative_reduction": 0.7763076712762027
+    },
+    {
+      "sequence_id": "seq0059",
+      "samples": 205,
+      "geometric_MSE_coord": 0.08624998152270545,
+      "pointnet_MSE_coord": 0.02500290665498177,
+      "geometric_MSE_3D": 0.25874994456811634,
+      "pointnet_MSE_3D": 0.0750087199649453,
+      "geometric_mean_3d_error": 0.5016801504660336,
+      "pointnet_mean_3d_error": 0.24669107061256754,
+      "relative_reduction": 0.7101111650858765
+    },
+    {
+      "sequence_id": "seq0031",
+      "samples": 105,
+      "geometric_MSE_coord": 0.39846207180658466,
+      "pointnet_MSE_coord": 0.12786999873233135,
+      "geometric_MSE_3D": 1.195386215419754,
+      "pointnet_MSE_3D": 0.38360999619699404,
+      "geometric_mean_3d_error": 1.0265997068056312,
+      "pointnet_mean_3d_error": 0.5863552830694265,
+      "relative_reduction": 0.6790911663120598
+    }
+  ],
+  "top_10_degradation": [
+    {
+      "sequence_id": "seq0087",
+      "samples": 173,
+      "geometric_MSE_coord": 0.09254991540687196,
+      "pointnet_MSE_coord": 0.12714720885468342,
+      "geometric_MSE_3D": 0.2776497462206159,
+      "pointnet_MSE_3D": 0.3814416265640503,
+      "geometric_mean_3d_error": 0.5089163356213489,
+      "pointnet_mean_3d_error": 0.5982913592223736,
+      "relative_reduction": -0.3738230693751943
+    }
+  ],
+  "metric_alignment": "unresolved; numerically close is not strict reproduction"
+}
