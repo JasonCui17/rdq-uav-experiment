@@ -1,0 +1,98 @@
+{
+  "seed": 42,
+  "device": "cpu",
+  "dtype": "float32",
+  "strict_state_dict_load": "<All keys matched successfully>",
+  "sample_index": 1,
+  "sample_id": "seq0001_valref_000001",
+  "sequence_id": "seq0001",
+  "t0": 1706255621.6135716,
+  "input_point_count": 4111,
+  "event_count": 1,
+  "v1_params": 1047722,
+  "v2_params": 1047722,
+  "v1_config_sha256": "ea35eed6274464441a605c5a3cde5a1579a5b96975adb1c7e8a7d0b9757447ea",
+  "v2_config_sha256": "df5733b2b9313b49b03f1ed3a55090c42569530071fe9bf347d2862259bce530",
+  "config_differences": [
+    "model.name: lidar_uav_v1 -> lidar_uav_v2"
+  ],
+  "config_equal_excluding_model_name": true,
+  "token_counts_v1": [
+    2566,
+    1487,
+    724
+  ],
+  "token_counts_v2": [
+    2566,
+    1487,
+    724
+  ],
+  "shapes_v1": {
+    "logits": [
+      2566
+    ],
+    "residual_xyz": [
+      2566,
+      3
+    ],
+    "pred_xyz": [
+      2566,
+      3
+    ],
+    "fine_features": [
+      2566,
+      128
+    ]
+  },
+  "shapes_v2": {
+    "logits": [
+      2566
+    ],
+    "residual_xyz": [
+      2566,
+      3
+    ],
+    "pred_xyz": [
+      2566,
+      3
+    ],
+    "fine_features": [
+      2566,
+      128
+    ]
+  },
+  "max_abs_diff": {
+    "voxel_centers": 0.0,
+    "logits": 0.0,
+    "residual_xyz": 0.0,
+    "pred_xyz": 0.0,
+    "fine_features": 0.0
+  },
+  "v1_loss": 1.3139147758483887,
+  "v2_loss": 1.3139147758483887,
+  "loss_abs_diff": 0.0,
+  "v1_loss_cls": 1.1298915147781372,
+  "v2_loss_cls": 1.1298915147781372,
+  "v1_loss_reg": 0.09201160073280334,
+  "v2_loss_reg": 0.09201160073280334,
+  "positive_mask_equal": true,
+  "ignore_mask_equal": true,
+  "negative_mask_equal": true,
+  "candidates": {
+    "raw": {
+      "count_v1": 20,
+      "count_v2": 20,
+      "score_max_abs_diff": 0.0,
+      "xyz_max_abs_diff": 0.0,
+      "source_token_id_equal": true
+    },
+    "nms": {
+      "count_v1": 20,
+      "count_v2": 20,
+      "score_max_abs_diff": 0.0,
+      "xyz_max_abs_diff": 0.0,
+      "source_token_id_equal": true
+    }
+  },
+  "pass": true
+}
