@@ -1,0 +1,84 @@
+{
+  "freeze_date": "2026-09-19",
+  "source_branch": "archive/lidar-uav-v1-pilot-3epoch-seed42",
+  "source_head_before_freeze_commit": "f1f5f5814a5ff94db4e4295bf3a25cf07689f5c8",
+  "model_name": "lidar_uav_v1",
+  "parameters": 1047722,
+  "data": {
+    "train_root": "/home/jasoncui/datasets/MMAUD/official/train",
+    "val_root": "/home/jasoncui/datasets/MMAUD/official/val",
+    "val_reference": "/home/jasoncui/datasets/MMAUD/official/validation_ref_new (for your ref).csv",
+    "t0": "exact GT timestamp",
+    "event_rule": "latest 20 merged Avia+Mid360 events with event_timestamp <= t0",
+    "recent_events": 4,
+    "denoise": false
+  },
+  "architecture": {
+    "dim": 128,
+    "voxel_scales_m": [
+      0.5,
+      1.0,
+      2.0
+    ],
+    "l2_attention": "global",
+    "outputs": [
+      "objectness logit",
+      "XYZ residual",
+      "XYZ prediction",
+      "128D candidate feature"
+    ]
+  },
+  "supervision": {
+    "positive": "d_recent <= 1m",
+    "ignore": "not positive and d_all <= 2m",
+    "negative": "d_all > 2m",
+    "classification_csv_semantics": "UAV model 0/1/2/3; metadata only; excluded from CandidateLoss"
+  },
+  "loss": {
+    "objectness": "sigmoid focal loss",
+    "xyz": "SmoothL1 beta=1",
+    "total": "loss_cls + 2 * loss_reg"
+  },
+  "formal_100_epoch_status": "FORMAL_100_EPOCH_TRAINING_NOT_FOUND",
+  "available_baseline": {
+    "run": "pilot_3epoch_seed42",
+    "epochs": 3,
+    "best_checkpoint": "outputs/own_multimodal_research/lidar_uav_v1/pilot_3epoch_seed42/best.pt",
+    "checkpoint_selection_nms_recall_at_10_1m": 0.931875,
+    "final_reload_nms_recall_at_10_1m": 0.93375
+  },
+  "source_files": [
+    "configs/lidar_uav_v1.yaml",
+    "src/rdq_uav/lidar_v1/__init__.py",
+    "src/rdq_uav/lidar_v1/data.py",
+    "src/rdq_uav/lidar_v1/geometry.py",
+    "src/rdq_uav/lidar_v1/loss.py",
+    "src/rdq_uav/lidar_v1/model.py",
+    "src/rdq_uav/lidar_v1/runtime.py",
+    "src/rdq_uav/lidar_v1/selector.py",
+    "src/rdq_uav/lidar_v1/training.py",
+    "src/rdq_uav/multimodal/merged_lidar.py",
+    "tools/train_lidar_uav_v1.py",
+    "tools/evaluate_lidar_uav_v1.py",
+    "tools/export_lidar_uav_candidates.py",
+    "tools/smoke_lidar_uav_v1.py",
+    "tools/audit_lidar_v1_failures.py",
+    "tests/test_lidar_uav_v1.py",
+    "tests/test_lidar_uav_training.py",
+    "tests/test_merged_lidar.py",
+    "outputs/mmuav_paper_reproduction/splits/splits.json"
+  ],
+  "frozen_results": "outputs/own_multimodal_research/lidar_uav_v1_frozen_20260919",
+  "frozen_results_files_before_checksum_manifest": 89,
+  "critical_results_sha256": {
+    "best.pt": "c01de2146039a09451711372a6c725cb2d6f7fac9a94a13f8705b2baac54e090",
+    "latest.pt": "e9b9d18bcab13ca949ea0b17dfd52c8c98ed9b16d432dfbd3a5363d710aa5726",
+    "metrics.csv": "1b556192c48b09b8eb3c8019381b556587c3d52d5909db38e83cc3ed675ab551"
+  },
+  "tests": {
+    "py_compile": "PASS",
+    "formal_training_unittest": "4/4 PASS",
+    "lidar_v1_direct_regression": "9/9 PASS",
+    "merged_lidar_direct_regression": "10/10 PASS"
+  }
+}

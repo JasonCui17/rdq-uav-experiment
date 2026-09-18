@@ -1,0 +1,11 @@
+V1 PRE-FREEZE TEST REPORT — 2026-09-19
+
+PASS py_compile: lidar_v1, merged_lidar, train/eval/export/audit tools, V1 tests
+PASS tests/test_lidar_uav_training.py: 4/4
+PASS tests/test_lidar_uav_v1.py direct regression harness: 9/9
+PASS tests/test_merged_lidar.py direct regression harness: 10/10
+PASS parameter count: 1,047,722
+PASS static contract: events=20, dim=128, denoise=false, L2 global
+PASS label provenance: CandidateLoss uses GT XYZ point distances only; validation Classification is not read by CandidateLoss
+NOTE pytest package was unavailable in the rdq environment; pytest-style no-argument tests were executed directly and all passed.
+NOTE CUDA/NVML visibility was blocked in the freeze audit shell. The frozen training artifact records NVIDIA GeForce RTX 3070 Laptop GPU, PyTorch 2.1.1+cu118, CUDA 11.8.
