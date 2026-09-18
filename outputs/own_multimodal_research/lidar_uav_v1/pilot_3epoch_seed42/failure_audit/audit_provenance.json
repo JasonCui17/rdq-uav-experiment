@@ -1,0 +1,16 @@
+{
+  "future_event_violations": 0,
+  "gt_export_mismatches": 0,
+  "current_support_mismatches": 0,
+  "prediction_rows": 1600,
+  "candidate_rows": 63006,
+  "case_studies": 20,
+  "sources": {
+    "dataset": "rdq_uav.lidar_v1.data.LiDARUAVValidationDataset",
+    "event_selection": "rdq_uav.multimodal.merged_lidar.select_last_history",
+    "point_reader": "rdq_uav.multimodal.merged_lidar.load_released_xyz",
+    "current_support": "CandidateLoss/evaluate_batch equivalent: <=1m in last four selected events",
+    "predictions": "/home/jasoncui/projects/rdq-uav-experiment/outputs/own_multimodal_research/lidar_uav_v1/pilot_3epoch_seed42/validation_predictions.csv",
+    "candidates": "/home/jasoncui/projects/rdq-uav-experiment/outputs/own_multimodal_research/lidar_uav_v1/pilot_3epoch_seed42/candidate_exports/candidates.csv"
+  }
+}
