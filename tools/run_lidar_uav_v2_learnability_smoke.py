@@ -318,11 +318,15 @@ def empty_robustness(cfg,batches,device):
 
 def summarize_diagnostics(rows):
     result={}
-    for group in ('A','B'):
-      result[group]={}
-      for stage in ('initial','final'):
-        selected=[r for r in rows if r['group']==group and r['stage']==stage]
-        result[group][stage]={key:float(np.mean([r[key] for r in selected])) for key in ('pool_entropy','max_objectness_probability','gt_near_pool_weight','pooled_xyz_error','reference_xyz_error','spatial_top1_error','temporal_error')} if selected else {}
+    for experiment in ('A','B','MIX'):
+      result[experiment]={}
+      for group in ('A','B'):
+        selected_group=[r for r in rows if r.get('experiment')==experiment and r['group']==group]
+        if not selected_group:continue
+        result[experiment][group]={}
+        for stage in ('initial','final'):
+          selected=[r for r in selected_group if r['stage']==stage]
+          result[experiment][group][stage]={key:float(np.mean([r[key] for r in selected])) for key in ('pool_entropy','max_objectness_probability','gt_near_pool_weight','pooled_xyz_error','reference_xyz_error','spatial_top1_error','temporal_error')} if selected else {}
     return result
 
 
@@ -369,7 +373,7 @@ def main():
     for name in ('A','B'):
         groups=[['A' if name=='A' else 'B']*len(batch['query_valid_mask']) for batch in batch_groups[name]]
         model,curve,gradients,start,end,start_diag,end_diag,steps,seconds=train_smoke_accum(cfg,batch_groups[name],groups,device,a.lr,a.steps,a.max_steps,a.log_every,name)
-        curves[name]=curve;gradient_rows.extend(gradients);all_diagnostics.extend([dict(stage='initial',**x) for x in start_diag]);all_diagnostics.extend([dict(stage='final',**x) for x in end_diag])
+        curves[name]=curve;gradient_rows.extend(gradients);all_diagnostics.extend([dict(experiment=name,stage='initial',**x) for x in start_diag]);all_diagnostics.extend([dict(experiment=name,stage='final',**x) for x in end_diag])
         experiments[name]=dict(initial=start,final=end,steps=steps,seconds=seconds)
         final_states[name]={k:v.detach().cpu() for k,v in model.state_dict().items()};del model
         if device.type=='cuda':torch.cuda.empty_cache()
@@ -377,7 +381,7 @@ def main():
     mix_groups=[['A']*len(batch['query_valid_mask']) for batch in batch_groups['A']]+[['B']*len(batch['query_valid_mask']) for batch in batch_groups['B']]
     model,curve,gradients,start,end,start_diag,end_diag,steps,seconds=train_smoke_accum(cfg,mix_batches,mix_groups,
         device,a.lr,a.steps,a.steps,a.log_every,'MIX')
-    curves['MIX']=curve;gradient_rows.extend(gradients);all_diagnostics.extend([dict(stage='initial',**x) for x in start_diag]);all_diagnostics.extend([dict(stage='final',**x) for x in end_diag])
+    curves['MIX']=curve;gradient_rows.extend(gradients);all_diagnostics.extend([dict(experiment='MIX',stage='initial',**x) for x in start_diag]);all_diagnostics.extend([dict(experiment='MIX',stage='final',**x) for x in end_diag])
     experiments['MIX']=dict(initial=start,final=end,steps=steps,seconds=seconds,
         group_metrics=dict(initial=group_errors(start_diag),final=group_errors(end_diag)))
     final_states['MIX']={k:v.detach().cpu() for k,v in model.state_dict().items()};del model
