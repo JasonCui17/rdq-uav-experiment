@@ -4,3 +4,5 @@ from .data import (LiDARUAVDataset, LiDARUAVValidationDataset, ValidationReferen
 from .loss import CandidateLoss, TemporalPositionLoss, QueryCausalLoss
 from .model import LiDARUAVDetector
 from .selector import CandidateSelector
+
+from .isolation import assert_temporal_clip_integrity

@@ -4,6 +4,7 @@ import math
 from typing import Any
 import torch
 from torch import nn
+from .isolation import assert_temporal_batch_integrity
 from .sbe import SBELiteVoxelEmbed
 from .temporal import CandidateAwareQueryPool, TimeEncoding, CausalTemporalTransformer, TemporalXYZHead
 from .geometry import HierarchyBuilder, SparseHierarchy, SparseLevel
@@ -183,6 +184,7 @@ class LiDARUAVDetector(nn.Module):
         Does not inspect target XYZ/timestamps. Real missing-observation slots
         remain valid; only actual padding is excluded from temporal keys.
         """
+        assert_temporal_batch_integrity(batch)
         out=self.spatial_forward(batch)
         token,observed=self.query_pool(out,int(batch['num_samples']))
         valid=batch['query_valid_mask'];B,T=valid.shape
@@ -190,7 +192,10 @@ class LiDARUAVDetector(nn.Module):
         if not torch.isfinite(times[valid]).all():raise ValueError('Non-finite query time')
         if T>1 and bool(((times[:,1:]<=times[:,:-1])&valid[:,1:]&valid[:,:-1]).any()):
             raise ValueError('Non-increasing query time')
-        token=token.reshape(B,T,-1);observed=observed.reshape(B,T)&valid
+        cb,cp=batch['clip_batch_index'],batch['clip_position']
+        restored=token.new_zeros((B,T,token.shape[-1]));restored[cb,cp]=token
+        observation=torch.zeros((B,T),dtype=torch.bool,device=observed.device);observation[cb,cp]=observed
+        token=restored;observed=observation&valid
         x=token+self.time_encoding(times,valid)+self.presence_embedding(observed.long())
         hidden=self.temporal_transformer(x,valid)
         prediction=self.temporal_head(hidden).masked_fill(~valid[:,:,None],0.)

@@ -9,6 +9,8 @@ import torch
 from torch.utils.data import Dataset
 from rdq_uav.multimodal.merged_lidar import LidarFrameEvent, load_released_xyz, merge_frame_streams, select_last_history
 
+from .isolation import assert_temporal_clip_integrity, assert_temporal_batch_integrity
+
 SENSORS = ((0, "Avia", "livox_avia"), (1, "Mid360", "lidar_360"))
 def _paths(directory):
     return sorted(Path(directory).glob("*.npy"), key=lambda p: (float(p.stem), str(p)))
@@ -33,11 +35,21 @@ class LiDARQueryBuilder:
                  for p in _paths(self.root/sequence_id/directory)]
                 for sid,name,directory in SENSORS])
         return self.streams[sequence_id]
+    def select_events(self,sequence_id,query_time):
+        """Return causal metadata, explicitly verifying each event's sequence."""
+        if not isinstance(sequence_id,str) or not sequence_id.strip():raise AssertionError('empty_sequence_id')
+        if not np.isfinite(query_time):raise AssertionError('invalid_query_timestamp')
+        events=select_last_history(self.stream(sequence_id),query_time,self.max_events)
+        for event in events:
+            if event.sequence_id!=sequence_id:
+                raise AssertionError(f'event_sequence_mismatch: query={sequence_id}@{query_time}, event={event}')
+            if event.timestamp>query_time:raise AssertionError(f'future_event: query={sequence_id}@{query_time}, event={event}')
+        return events
     def build(self, sequence_id, query_time, target_xyz=None, target_timestamp=None,
               target_valid=False, sample_id=None, **metadata):
         query_time=float(query_time)
         if not np.isfinite(query_time): raise ValueError("Non-finite query_time")
-        events=select_last_history(self.stream(sequence_id),query_time,self.max_events)
+        events=self.select_events(sequence_id,query_time)
         parts=[]; sensors=[]; times=[]; recent=[]
         for i,event in enumerate(events):
             assert event.timestamp<=query_time, "Future event violation"
@@ -51,6 +63,7 @@ class LiDARQueryBuilder:
                 "sequence_id":sequence_id,"query_time":query_time,"num_samples":1,
                 "sample_id":sample_id or f"{sequence_id}_query_{query_time:.9f}",
                 "event_count":len(events),"event_timestamps":[e.timestamp for e in events],
+                "event_sequence_ids":[e.sequence_id for e in events],
                 "has_observation":sum(len(p) for p in parts)>0,"target_valid":bool(target_valid),
                 "query_valid":True,"metadata":metadata}
         if target_valid:
@@ -59,6 +72,7 @@ class LiDARQueryBuilder:
             if xyz.shape!=(3,) or not torch.isfinite(xyz).all() or not np.isfinite(target_timestamp):
                 raise ValueError("Invalid target")
             result.update(target_xyz=xyz,target_timestamp=float(target_timestamp))
+        assert_temporal_clip_integrity([result],clip_index=sample_id,require_events=True)
         return result
     def build_inference_query(self,sequence_id,query_time):
         return self.build(sequence_id,query_time)
@@ -125,12 +139,16 @@ class TemporalQueryClipDataset(Dataset):
         for seq,ids in sorted(groups.items()):
             ids.sort(key=lambda i:queries.records[i]['query_time'])
             times=[queries.records[i]['query_time'] for i in ids]
-            if any(b<=a for a,b in zip(times,times[1:])):raise ValueError('Queries must increase strictly within sequence')
+            assert_temporal_clip_integrity([queries.records[i] for i in ids],clip_index=f'sequence:{seq}')
             for end in range(0,len(ids),1 if validation else stride):
-                self.windows.append(ids[max(0,end-clip_length+1):end+1])
+                window=ids[max(0,end-clip_length+1):end+1]
+                assert_temporal_clip_integrity([queries.records[i] for i in window],clip_index=len(self.windows))
+                self.windows.append(window)
     def __len__(self):return len(self.windows)
     def __getitem__(self,index):
-        return {'queries':[self.queries[i] for i in self.windows[index]],'clip_length':self.clip_length,
+        queries=[self.queries[i] for i in self.windows[index]]
+        assert_temporal_clip_integrity(queries,clip_index=index,require_events=True)
+        return {'queries':queries,'clip_length':self.clip_length,
                 'score_last_only':self.validation}
 
 def collate_temporal_queries(items):
@@ -143,9 +161,8 @@ def collate_temporal_queries(items):
     T=max(i.get('clip_length',len(i['queries'])) for i in items)
     samples=[];valid=torch.zeros((B,T),dtype=torch.bool);score=valid.clone()
     for b,clip in enumerate(clips):
-        if not clip:raise ValueError('Empty query history')
-        if len({q['sequence_id'] for q in clip})!=1:raise ValueError('Cross-sequence clip')
-        if any(y['query_time']<=x['query_time'] for x,y in zip(clip,clip[1:])):raise ValueError('Non-increasing query history')
+        assert_temporal_clip_integrity(clip,clip_index=b,require_events=True)
+        if len(clip)>T:raise AssertionError('clip_length truncates real queries')
         for t in range(T):
             if t<len(clip):
                 q=clip[t];valid[b,t]=True;score[b,t]=not items[b].get('score_last_only',False) or t==len(clip)-1
@@ -153,7 +170,7 @@ def collate_temporal_queries(items):
                 q={'points':torch.empty((0,3)),'sensor_id':torch.empty(0,dtype=torch.long),
                    'delta_t':torch.empty(0),'recent_mask':torch.empty(0,dtype=torch.bool),
                    'query_time':clip[-1]['query_time'],'sequence_id':clip[0]['sequence_id'],
-                   'sample_id':'PADDING','event_count':0,'event_timestamps':[],
+                   'sample_id':'PADDING','event_count':0,'event_timestamps':[],'event_sequence_ids':[],
                    'has_observation':False,'target_valid':False}
             if any(ts>q['query_time'] for ts in q['event_timestamps']) or bool((q['delta_t']>0).any()):
                 raise ValueError('Future event violation')
@@ -168,17 +185,24 @@ def collate_temporal_queries(items):
                  target_valid=torch.tensor([q.get('target_valid',False) for q in samples],dtype=torch.bool),
                  sample_id=[q['sample_id'] for q in samples],sequence_id=[q['sequence_id'] for q in samples],
                  event_count=torch.tensor([q['event_count'] for q in samples]),
-                 event_timestamps=[q['event_timestamps'] for q in samples])
+                 event_timestamps=[q['event_timestamps'] for q in samples],
+                 event_sequence_ids=[q['event_sequence_ids'] for q in samples])
     batch['query_time_clip']=batch['query_time'].reshape(B,T)
     batch['target_valid_clip']=batch['target_valid'].reshape(B,T)&valid
     if bool(batch['target_valid'].any()):
         xyz=torch.stack([torch.as_tensor(q['target_xyz']).float() if q.get('target_valid',False) else torch.zeros(3) for q in samples])
         batch.update(target_xyz=xyz,target_xyz_clip=xyz.reshape(B,T,3),
                      target_timestamp=torch.tensor([q.get('target_timestamp',float('nan')) for q in samples],dtype=torch.float64))
+    assert_temporal_batch_integrity(batch)
     return batch
 
 def collate_lidar_samples(samples):
     return collate_temporal_queries([{'queries':[q]} for q in samples])
 
 def build_query_history(builder,sequence_id,query_times,clip_length=8):
-    return collate_temporal_queries([{'queries':[builder.build_inference_query(sequence_id,t) for t in query_times[-clip_length:]]}])
+    if clip_length<1:raise ValueError('Positive clip length required')
+    requests=[dict(sequence_id=sequence_id,query_time=float(t),sample_id=f'{sequence_id}@{float(t)!r}') for t in query_times]
+    assert_temporal_clip_integrity(requests,clip_index='inference_history')
+    queries=[builder.build_inference_query(sequence_id,q['query_time']) for q in requests[-clip_length:]]
+    assert_temporal_clip_integrity(queries,clip_index='inference_history',require_events=True)
+    return collate_temporal_queries([{'queries':queries}])

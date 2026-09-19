@@ -17,7 +17,7 @@ def query(i,points=None,target=True,valid=True):
     n=len(points)
     q=dict(points=points.float(),sensor_id=torch.arange(n)%2,delta_t=torch.full((n,),-.01),
            recent_mask=torch.ones(n,dtype=torch.bool),sequence_id='synthetic',sample_id=f'q{i}',
-           query_time=100.+i*.07,event_count=1,event_timestamps=[100.+i*.07-.01],has_observation=n>0,target_valid=target)
+           query_time=100.+i*.07,event_count=1,event_timestamps=[100.+i*.07-.01],event_sequence_ids=['synthetic'],has_observation=n>0,target_valid=target)
     if target:q.update(target_xyz=torch.tensor([.2,.1,.1]),target_timestamp=q['query_time'])
     return q
 
@@ -107,9 +107,9 @@ class QueryCausalTests(unittest.TestCase):
         for p in (ROOT/'src/rdq_uav/lidar_v2').glob('*.py'):self.assertNotIn('from rdq_uav.lidar_v1',p.read_text())
     def test_validation_scores_endpoint_once_and_temporal_groups(self):
         class D:
-            records=[dict(sequence_id=s,query_time=i) for s in ('a','b') for i in range(3)]
+            records=[dict(sequence_id=s,query_time=i,sample_id=f'{s}{i}') for s in ('a','b') for i in range(3)]
             def __getitem__(self,i):
-                q=query(i%3);q['sequence_id']=self.records[i]['sequence_id'];q['sample_id']=str(i);return q
+                q=query(i%3);q['sequence_id']=self.records[i]['sequence_id'];q['event_sequence_ids']=[q['sequence_id']];q['sample_id']=str(i);return q
         ds=TemporalQueryClipDataset(D(),8,validation=True);self.assertEqual(len(ds),6)
         m=model();rows=[]
         with torch.no_grad():

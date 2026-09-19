@@ -12,7 +12,9 @@ def batch(points,batch_index=None,gt=None,recent=None):
     n=len(points);batch_index=torch.zeros(n,dtype=torch.long) if batch_index is None else batch_index; b=int(batch_index.max())+1 if n else 1
     return {"points":points.float(),"sensor_id":torch.arange(n)%2,"delta_t":-torch.linspace(0,1,n) if n else torch.empty(0),"recent_mask":torch.ones(n,dtype=torch.bool) if recent is None else recent,"point_batch_index":batch_index,"num_samples":b,"target_xyz":torch.zeros((b,3)) if gt is None else gt,
             "target_valid":torch.ones(b,dtype=torch.bool),"query_valid_mask":torch.ones((b,1),dtype=torch.bool),
-            "query_time_clip":torch.zeros((b,1),dtype=torch.float64)}
+            "query_time_clip":torch.zeros((b,1),dtype=torch.float64),"query_time":torch.zeros(b,dtype=torch.float64),
+            "clip_batch_index":torch.arange(b),"clip_position":torch.zeros(b,dtype=torch.long),
+            "sequence_id":[f"seq{i}" for i in range(b)],"sample_id":[f"sample{i}" for i in range(b)]}
 
 def test_voxel_floor_parent_maps_child_positions_and_counts():
     p=torch.tensor([[-.1,0,0],[.1,0,0],[1.1,0,0],[2.1,0,0]])

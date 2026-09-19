@@ -7,6 +7,7 @@ from pathlib import Path
 import numpy as np
 import torch
 from tqdm.auto import tqdm
+from .isolation import assert_temporal_clip_integrity
 from .runtime import move_batch,evaluate_batch,summarize_metrics
 
 def write_csv(path,rows):
@@ -22,6 +23,7 @@ def inspect_dataset_timing(dataset,indices):
     rows=[]
     for i in indices:
         q=dataset[int(i)];times=q['event_timestamps'];t=q['query_time']
+        assert_temporal_clip_integrity([q],clip_index=int(i),require_events=True)
         if any(x>t for x in times) or bool((q['delta_t']>0).any()):raise AssertionError('Future event violation')
         if q['target_valid']:
             if not math.isfinite(q['target_timestamp']) or not torch.isfinite(q['target_xyz']).all():raise AssertionError('Invalid target')
