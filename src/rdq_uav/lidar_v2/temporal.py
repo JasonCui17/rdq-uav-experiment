@@ -21,6 +21,25 @@ class CandidateAwareQueryPool(nn.Module):
             else:tokens.append(self.missing_lidar_token)
         return torch.stack(tokens),torch.tensor(observed,device=outputs['logits'].device,dtype=torch.bool)
 
+    @torch.no_grad()
+    def diagnostics(self,outputs,num_samples,gt_xyz=None,radius_m=1.):
+        """Small per-query readout diagnostics; never changes forward or loss."""
+        rows=[]
+        for spatial_query_idx in range(num_samples):
+            mask=outputs['batch_index']==spatial_query_idx;count=int(mask.sum())
+            if not count:
+                rows.append(dict(candidate_count=0,pool_entropy=0.,max_objectness_probability=0.,
+                    reference_xyz=None,pooled_xyz=None,gt_near_pool_weight=None));continue
+            logits=outputs['logits'][mask].float();weights=torch.softmax(logits,0);xyz=outputs['pred_xyz'][mask].float()
+            reference=xyz[torch.argmax(logits)];pooled=(weights[:,None]*xyz).sum(0)
+            near=None
+            if gt_xyz is not None:
+                near=float(weights[torch.linalg.vector_norm(xyz-gt_xyz[spatial_query_idx].float(),dim=1)<=radius_m].sum())
+            rows.append(dict(candidate_count=count,pool_entropy=float(-(weights*weights.clamp_min(1e-12).log()).sum()),
+                max_objectness_probability=float(torch.sigmoid(logits.max())),reference_xyz=reference.cpu().tolist(),
+                pooled_xyz=pooled.cpu().tolist(),gt_near_pool_weight=near))
+        return rows
+
 class TimeEncoding(nn.Module):
     """Float64 timestamp differences first, then FP32 [tau,dt_prev] -> [B,T,D]."""
     def __init__(self,dim=128,hidden_dim=32):

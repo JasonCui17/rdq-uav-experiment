@@ -5,6 +5,7 @@ from collections import defaultdict
 from typing import Any
 import numpy as np
 import torch
+from .contracts import require_occurrence_aligned_evaluation
 
 def move_batch(batch,device):
     return {k:(v.to(device,non_blocking=True) if torch.is_tensor(v) else v) for k,v in batch.items()}
@@ -46,6 +47,7 @@ class UpdateScheduler:
 
 @torch.no_grad()
 def evaluate_batch(outputs,batch,selector,criterion):
+    require_occurrence_aligned_evaluation(batch)
     selected=selector(outputs); pos,_,_,_=criterion.labels(outputs,batch); rows=[]
     for b,item in enumerate(selected):
         if not bool(batch['score_mask'].flatten()[b]) or not bool(batch['target_valid'][b]):continue

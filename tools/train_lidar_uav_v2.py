@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Manual V2 QueryCausal training entry. Structure verification uses --precheck-only."""
-import argparse,functools,json,math,os,sys,time
+import argparse,functools,json,os,subprocess,sys,time
 from pathlib import Path
 import numpy as np
 import torch,yaml
@@ -11,7 +11,9 @@ from rdq_uav.lidar_v2 import (LiDARUAVDetector,LiDARUAVDataset,LiDARUAVValidatio
     TemporalQueryClipDataset,collate_temporal_queries,QueryCausalLoss,CandidateSelector,
     EpochCyclicQuerySampler,OverlapAwareBatchSampler,planned_epoch_stats)
 from rdq_uav.lidar_v2.runtime import move_batch,optimizer_groups,UpdateScheduler
-from rdq_uav.lidar_v2.training import inspect_dataset_timing,write_csv,validate,finite_or_raise,save_checkpoint
+from rdq_uav.lidar_v2.training import (inspect_dataset_timing,write_csv,validate,finite_or_raise,save_checkpoint,
+    spatial_selection_metrics,temporal_selection_metrics,better_spatial,better_temporal)
+from rdq_uav.lidar_v2.contracts import effective_config,validate_frozen_v2_config
 from rdq_uav.utils.seed import seed_everything
 
 def parse_args():
@@ -27,7 +29,7 @@ def parse_args():
     return p.parse_args()
 
 def main():
-    args=parse_args();cfg=yaml.safe_load(args.config.read_text());seed_everything(cfg['experiment']['seed'])
+    args=parse_args();cfg=yaml.safe_load(args.config.read_text());validate_frozen_v2_config(cfg);seed_everything(cfg['experiment']['seed'])
     if int(os.environ.get('WORLD_SIZE','1'))>1:raise RuntimeError('DDP not implemented; use single device')
     output=(args.output or ROOT/cfg['experiment']['output_dir']/'query_causal_v1').resolve()
     protected=(ROOT/'outputs/own_multimodal_research/lidar_uav_v1').resolve()
@@ -35,6 +37,10 @@ def main():
     if output.exists() and not args.precheck_only and not args.resume:raise FileExistsError(output)
     output.mkdir(parents=True,exist_ok=True)
     cfg['data'].update(root=str(args.train_root),val_root=str(args.val_root),val_reference=str(args.val_reference))
+    device=torch.device('cpu' if args.device=='cpu' else f'cuda:{args.device}')
+    effective_cfg,training_precision,evaluation_precision=effective_config(cfg,device)
+    (output/'effective_config.yaml').write_text(yaml.safe_dump(effective_cfg,sort_keys=False))
+    (output/'effective_config.json').write_text(json.dumps(effective_cfg,indent=2))
     trainq=LiDARUAVDataset(args.train_root,ROOT/cfg['data']['split_file'],cfg['data']['train_split'],cfg['data']['num_merged_frames'])
     valq=LiDARUAVValidationDataset(args.val_root,args.val_reference,cfg['data']['num_merged_frames'])
     tc=cfg['temporal'];train=TemporalQueryClipDataset(trainq,tc['clip_length'],stride=1);val=TemporalQueryClipDataset(valq,tc['clip_length'],validation=True)
@@ -48,13 +54,13 @@ def main():
         rows=inspect_dataset_timing(ds,np.linspace(0,len(ds)-1,min(32,len(ds)),dtype=int))
         checks.extend(dict(source=name,**r) for r in rows)
     write_csv(output/'precheck_samples.csv',checks)
-    (output/'resolved_config.yaml').write_text(yaml.safe_dump(cfg,sort_keys=False))
+    (output/'resolved_config.yaml').write_text(yaml.safe_dump(effective_cfg,sort_keys=False))
     train_sampler.set_epoch(1)
     print(f'QUERY CAUSAL PRECHECK PASS: train queries={len(trainq)}, full clips={len(train)}, '
           f'epoch1 selected clips={len(train_sampler)}, val endpoints={len(val)}, future events=0; '
           'query and target times are independent interfaces')
+    print(f'Training precision: {training_precision.effective}\nEvaluation precision: {evaluation_precision.effective}')
     if args.precheck_only:return
-    device=torch.device('cpu' if args.device=='cpu' else f'cuda:{args.device}')
     model=LiDARUAVDetector(cfg).to(device);criterion=QueryCausalLoss(cfg);selector=CandidateSelector(cfg)
     batch_size=args.batch_size or cfg['train']['per_gpu_batch_size'];accum=args.accumulate or cfg['train']['single_gpu_accumulate']
     if batch_size<1 or accum<1:raise ValueError('Invalid batch/accumulation')
@@ -66,7 +72,7 @@ def main():
         loader=DataLoader(train,batch_sampler=overlap_sampler,num_workers=args.num_workers,collate_fn=collate)
     else:
         loader=DataLoader(train,batch_size=batch_size,shuffle=False,sampler=train_sampler,num_workers=args.num_workers,collate_fn=collate)
-    vloader=DataLoader(val,batch_size=1,shuffle=False,num_workers=args.num_workers,collate_fn=collate_temporal_queries)
+    vloader=DataLoader(val,batch_size=cfg['evaluation']['batch_size'],shuffle=False,num_workers=args.num_workers,collate_fn=collate_temporal_queries)
     opt=torch.optim.AdamW(optimizer_groups(model,cfg['train']['weight_decay']),lr=cfg['train']['lr'],betas=tuple(cfg['train']['betas']),eps=cfg['train']['eps'])
     epochs=args.epochs or cfg['train']['epochs']
     update_plan=planned_epoch_stats(train_sampler,epochs,batch_size,accum)
@@ -78,11 +84,12 @@ def main():
           f"Selection ratio : {first['selected_clips']/len(train):.2%}\n"
           f"Unique query packing : {bool(uqp['enabled'])}\nOverlap-aware batching : {bool(overlap_sampler is not None)}\n"
           f"Validation endpoints : {len(val)} (full)\nPlanned optimizer updates : {total_planned_updates}")
-    start=step=0;best=(-math.inf,-math.inf,-math.inf);history=[]
+    start=step=0;best_spatial=best_temporal=None;history=[]
     if args.resume:
         state=torch.load(args.resume,map_location=device);model.load_state_dict(state['model_state'],strict=True)
         opt.load_state_dict(state['optimizer_state']);sched.load_state_dict(state['scheduler_state'])
-        start=state['epoch'];step=state['global_step'];best=tuple(state['best_metric'])
+        start=state['epoch'];step=state.get('global_optimizer_step',state['global_step'])
+        selection=state.get('checkpoint_selection',{});best_spatial=selection.get('spatial');best_temporal=selection.get('temporal')
         if (output/'metrics.json').exists():history=json.loads((output/'metrics.json').read_text())
         for record in history:
             record.setdefault('query_stride',None);record.setdefault('query_offset',None)
@@ -90,7 +97,7 @@ def main():
             record.setdefault('selection_ratio',None);record.setdefault('valid_query_slots',None)
             record.setdefault('query_occurrences',None);record.setdefault('unique_spatial_queries',None)
             record.setdefault('spatial_dedup_ratio',None)
-    amp=device.type=='cuda' and torch.cuda.is_bf16_supported();completed=start
+    completed=start;git_commit=subprocess.check_output(['git','rev-parse','HEAD'],cwd=ROOT,text=True).strip();run_id=output.name
     try:
         for epoch in range(start+1,epochs+1):
             if overlap_sampler is not None:overlap_sampler.set_epoch(epoch)
@@ -103,7 +110,7 @@ def main():
             for raw in bar:
                 occurrences+=int(raw['query_valid_mask'].sum());unique_queries+=int(raw['spatial_num_samples'])
                 batch=move_batch(raw,device)
-                with torch.autocast(device_type=device.type,dtype=torch.bfloat16,enabled=amp):out=model(batch)
+                with training_precision.context(device):out=model(batch)
                 for key in ('logits','pred_xyz','temporal_pred_xyz'):finite_or_raise(key,out[key])
                 loss=criterion(out,batch);finite_or_raise('loss',loss['loss'])
                 if loss['num_temporal_supervised']==0:continue
@@ -123,10 +130,11 @@ def main():
                     if p.grad is not None:p.grad.mul_(accum/pending);finite_or_raise('gradient',p.grad)
                 torch.nn.utils.clip_grad_norm_(model.parameters(),cfg['train']['grad_clip_norm'])
                 opt.step();sched.step();opt.zero_grad(set_to_none=True);step+=1
-            metrics,rows,health=validate(model,vloader,criterion,selector,device,amp)
-            # Retain the existing spatial checkpoint criterion; temporal metrics are also logged.
-            score=(metrics['all']['nms_recall_at_10_1m'],metrics['all']['nms_top1_success_1m'],-health['loss'])
-            improved=score>best;best=max(best,score)
+            metrics,rows,health=validate(model,vloader,criterion,selector,device,evaluation_precision)
+            spatial_candidate=spatial_selection_metrics(metrics,epoch);temporal_candidate=temporal_selection_metrics(metrics,epoch)
+            improved_spatial=better_spatial(spatial_candidate,best_spatial);improved_temporal=better_temporal(temporal_candidate,best_temporal)
+            if improved_spatial:best_spatial=spatial_candidate
+            if improved_temporal:best_temporal=temporal_candidate
             record=dict(epoch=epoch,global_step=step,query_stride=query_stride,query_offset=offset,
                         selected_clips=selected_clips,full_clips=len(train),selection_ratio=ratio,
                         valid_query_slots=valid_query_slots,query_occurrences=occurrences,unique_spatial_queries=unique_queries,
@@ -139,12 +147,19 @@ def main():
                 unique_spatial_queries=r.get('unique_spatial_queries'),spatial_dedup_ratio=r.get('spatial_dedup_ratio'),
                 **r['train'],**r['validation']['all']) for r in history])
             write_csv(output/f'validation_epoch_{epoch:03d}.csv',rows)
-            save_checkpoint(output/'latest.pt',model,opt,sched,epoch,step,best,cfg)
-            if improved:save_checkpoint(output/'best.pt',model,opt,sched,epoch,step,best,cfg)
+            selection=dict(spatial=best_spatial,temporal=best_temporal)
+            metadata=dict(git_commit=git_commit,run_id=run_id,eqs=dict(stride=query_stride,current_offset=offset,
+                completed_coverage_cycles=epoch//query_stride))
+            save_checkpoint(output/'last.pt',model,opt,sched,epoch,step,selection,effective_cfg,metadata)
+            if improved_spatial:save_checkpoint(output/'best_spatial.pt',model,opt,sched,epoch,step,selection,effective_cfg,metadata)
+            if improved_temporal:save_checkpoint(output/'best_temporal.pt',model,opt,sched,epoch,step,selection,effective_cfg,metadata)
             print('ALL',metrics['all']);print('NO_CURRENT_SUPPORT',metrics['no_current_support']);completed=epoch
             if stop:break
     except KeyboardInterrupt:
-        save_checkpoint(output/'interrupt.pt',model,opt,sched,completed,step,best,cfg)
+        selection=dict(spatial=best_spatial,temporal=best_temporal)
+        metadata=dict(git_commit=git_commit,run_id=run_id,eqs=dict(stride=query_stride,
+            current_offset=train_sampler.offset_for_epoch(max(1,completed)),completed_coverage_cycles=completed//query_stride))
+        save_checkpoint(output/'interrupt.pt',model,opt,sched,completed,step,selection,effective_cfg,metadata)
         print('Interrupted; checkpoint saved. Resume restarts unfinished epoch.')
 
 if __name__=='__main__':main()

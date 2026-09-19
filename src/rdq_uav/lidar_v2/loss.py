@@ -3,6 +3,7 @@ from __future__ import annotations
 import torch
 from torch import nn
 from torch.nn import functional as F
+from .geometry import encode_residual
 
 class CandidateLoss(nn.Module):
     def __init__(self,cfg):
@@ -22,7 +23,7 @@ class CandidateLoss(nn.Module):
         if len(ridx): recent_min.scatter_reduce_(0,ridx,rdist,reduce="amin",include_self=True)
         positive=recent_min<=1.; ignore=(~positive)&(all_min<=2.); negative=all_min>2.
         valid=spatial_valid[outputs['batch_index']]
-        return positive&valid,ignore&valid,negative&valid,(gt-outputs["voxel_centers"])/1.0
+        return positive&valid,ignore&valid,negative&valid,encode_residual(gt,outputs["voxel_centers"],1.0)
     def forward(self,outputs,batch):
         pos,ignore,neg,target=self.labels(outputs,batch);spatial_n=int(batch.get('spatial_num_samples',batch['num_samples']))
         spatial_valid=batch.get('spatial_target_valid',batch['target_valid']);zero=outputs["logits"].sum()*0
@@ -41,7 +42,9 @@ class CandidateLoss(nn.Module):
             reg=F.smooth_l1_loss(outputs["residual_xyz"][p].float(),target[p].float(),beta=self.beta,reduction="none").sum()/max(1,np_)
             sample_cls[b]=cls;sample_reg[b]=reg;sample_total[b]=cls+self.reg_weight*reg
         occurrence=batch.get('occurrence_to_unique',torch.arange(spatial_n,device=sample_total.device))
-        occurrence_valid=batch['query_valid_mask'].flatten();mapped=occurrence[occurrence_valid]
+        occurrence_valid=batch['query_valid_mask'].flatten()
+        occurrence_supervise=batch.get('spatial_supervise_mask_occurrence',occurrence_valid)&occurrence_valid
+        mapped=occurrence[occurrence_supervise]
         supervised_occurrence=sample_supervised[mapped];supervised_ids=mapped[supervised_occurrence]
         mean=lambda x:x[supervised_ids].mean() if len(supervised_ids) else zero
         num_pos=int(sample_pos[mapped].sum());num_neg=int(sample_neg[mapped].sum());num_ignore=int(sample_ignore[mapped].sum())

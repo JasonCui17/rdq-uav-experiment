@@ -3,6 +3,22 @@ from __future__ import annotations
 from dataclasses import dataclass
 import torch
 
+
+def _residual_scale(scale):
+    scale=float(scale)
+    if scale!=1.0:raise ValueError('residual_scale_m must equal 1.0 for current LiDAR V2 coordinate contract')
+    return scale
+
+
+def encode_residual(gt_xyz:torch.Tensor,center_xyz:torch.Tensor,scale=1.0)->torch.Tensor:
+    """Reference-frame meters -> dimensionless residual; V2 currently fixes scale=1m."""
+    return (gt_xyz-center_xyz)/_residual_scale(scale)
+
+
+def decode_residual(residual_xyz:torch.Tensor,center_xyz:torch.Tensor,scale=1.0)->torch.Tensor:
+    """Dimensionless residual -> reference-frame XYZ meters."""
+    return center_xyz+residual_xyz*_residual_scale(scale)
+
 @dataclass
 class SparseLevel:
     coords: torch.Tensor       # [N,3] integer voxel coordinate

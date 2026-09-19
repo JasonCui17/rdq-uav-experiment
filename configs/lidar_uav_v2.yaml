@@ -19,7 +19,6 @@ model:
   dim: 128
   voxel:
     scales: [0.5, 1.0, 2.0]
-    point_dims: [5, 32, 64]  # Only instantiated when embedding=legacy.
     embedding: sbe_lite
     sbe:
       subdivisions: 2
@@ -81,7 +80,6 @@ train:
   single_gpu_accumulate: 2
   dual_gpu_accumulate: 1
   amp_dtype: bfloat16
-  checkpoint_metric: nms_recall_at_10_1m
   query_subsampling:
     enabled: true
     stride: 4
@@ -94,9 +92,18 @@ train:
     overlap_aware_batching: true
     dedup_key: sequence_query_uid
 evaluation:
+  precision: fp32
   batch_size: 1
   k: [1, 5, 10, 20]
   radii_m: [0.5, 1.0, 2.0]
+checkpoint_policy:
+  last: last.pt
+  spatial:
+    filename: best_spatial.pt
+    order: [nms_recall_at_10_1m, nms_top1_success_1m, negative_nms_top1_error_median, earlier_epoch]
+  temporal:
+    filename: best_temporal.pt
+    order: [temporal_success_1m, negative_temporal_error_median, negative_temporal_error_p90, earlier_epoch]
 tiny:
   max_samples: 32
   updates: 500

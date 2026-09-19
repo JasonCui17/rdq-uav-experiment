@@ -34,7 +34,7 @@ class QueryCausalTests(unittest.TestCase):
         loader=[collate_temporal_queries([c]) for c in clips]
         with tempfile.TemporaryDirectory() as directory:
             metrics,rows,health=validate(model(),loader,QueryCausalLoss(CFG),CandidateSelector(CFG),
-                                       torch.device('cpu'),export_dir=Path(directory)/'export')
+                                       torch.device('cpu'),precision='fp32',export_dir=Path(directory)/'export')
             self.assertEqual(len(rows),2)
             self.assertEqual(metrics['all']['samples'],2)
             self.assertEqual(metrics['no_current_support']['samples'],1)

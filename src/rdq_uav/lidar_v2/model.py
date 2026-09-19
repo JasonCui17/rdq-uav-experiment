@@ -7,7 +7,7 @@ from torch import nn
 from .isolation import assert_temporal_batch_integrity
 from .sbe import SBELiteVoxelEmbed
 from .temporal import CandidateAwareQueryPool, TimeEncoding, CausalTemporalTransformer, TemporalXYZHead
-from .geometry import HierarchyBuilder, SparseHierarchy, SparseLevel
+from .geometry import HierarchyBuilder, SparseHierarchy, SparseLevel, decode_residual
 
 def segment_sum(x,index,n):
     out=x.new_zeros((n,)+x.shape[1:]); return out.index_add_(0,index,x)
@@ -159,10 +159,12 @@ class SparseUp(nn.Module):
 
 class CandidateHead(nn.Module):
     def __init__(self,dim=128,hidden=64,residual_scale_m=1.):
-        super().__init__(); self.residual_scale_m=residual_scale_m
+        super().__init__()
+        if float(residual_scale_m)!=1.:raise ValueError('residual_scale_m must equal 1.0 for current LiDAR V2 coordinate contract')
+        self.residual_scale_m=float(residual_scale_m)
         self.cls=nn.Sequential(nn.Linear(dim,hidden),nn.GELU(),nn.Linear(hidden,1)); self.reg=nn.Sequential(nn.Linear(dim,hidden),nn.GELU(),nn.Linear(hidden,3))
     def forward(self,q,centers):
-        logits=self.cls(q).squeeze(-1); residual=self.reg(q); return logits,residual,centers+residual*self.residual_scale_m
+        logits=self.cls(q).squeeze(-1); residual=self.reg(q); return logits,residual,decode_residual(residual,centers,self.residual_scale_m)
 
 class LiDARUAVDetector(nn.Module):
     """Public V2-base interface: packed point batch -> fine-token candidate fields."""
@@ -173,7 +175,8 @@ class LiDARUAVDetector(nn.Module):
         if embedding=='sbe_lite':
             self.voxel_embed=SBELiteVoxelEmbed(d,m['voxel']['scales'][0],m['voxel'].get('sbe'))
         elif embedding=='legacy':
-            ph=m['voxel']['point_dims']
+            # Archived compatibility path only; the frozen V2 contract rejects it.
+            ph=m['voxel'].get('point_dims',(5,32,64))
             self.voxel_embed=LegacyVoxelEmbed(d,ph[1],ph[2],m['voxel']['scales'][0])
         else:raise ValueError(f'Unknown voxel embedding: {embedding}')
         self.merge01=SparseMerge(d); self.merge12=SparseMerge(d)

@@ -226,6 +226,8 @@ def collate_temporal_queries(items,unique_query_packing=False):
                  event_sequence_ids=[q['event_sequence_ids'] for q in samples])
     batch['query_time_clip']=batch['query_time'].reshape(B,T)
     batch['target_valid_clip']=batch['target_valid'].reshape(B,T)&valid
+    # Occurrence-space contract: validation history is context, not a loss row.
+    batch['spatial_supervise_mask_occurrence']=batch['target_valid']&score.flatten()&occurrence_valid
     batch['spatial_target_valid']=torch.tensor([q.get('target_valid',False) for q in spatial_samples],dtype=torch.bool)
     if bool(batch['target_valid'].any()):
         xyz=torch.stack([torch.as_tensor(q['target_xyz']).float() if q.get('target_valid',False) else torch.zeros(3) for q in samples])

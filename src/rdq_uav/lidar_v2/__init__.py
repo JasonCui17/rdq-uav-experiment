@@ -8,3 +8,5 @@ from .selector import CandidateSelector
 
 from .isolation import assert_temporal_clip_integrity
 from .sampling import EpochCyclicQuerySampler, OverlapAwareBatchSampler, planned_epoch_stats
+from .contracts import (validate_frozen_v2_config, effective_config, resolve_precision,
+                        require_occurrence_aligned_evaluation)

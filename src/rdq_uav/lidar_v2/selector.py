@@ -11,11 +11,13 @@ class CandidateSelector:
         # stable preserves ascending source id as tie break after its pre-sort.
         base=torch.argsort(ids,stable=True); return base[torch.argsort(scores[base],descending=True,stable=True)]
     def _gather(self,o,idx):
-        return {"xyz":o["pred_xyz"][idx],"score":torch.sigmoid(o["logits"][idx]),"feature":o["fine_features"][idx],"source_token_id":o["source_token_id"][idx]}
+        return {"xyz":o["pred_xyz"][idx],"score":torch.sigmoid(o["logits"][idx].float()),"feature":o["fine_features"][idx],"source_token_id":o["source_token_id"][idx]}
     def __call__(self,o):
         results=[]
         for b in range(int(o.get("aux_stats",{}).get("num_samples",int(o["batch_index"].max())+1 if len(o["batch_index"]) else 1))):
-            ids=torch.nonzero(o["batch_index"]==b).flatten(); order=ids[self._order(torch.sigmoid(o["logits"][ids]),o["source_token_id"][ids])]
+            ids=torch.nonzero(o["batch_index"]==b).flatten()
+            rank_logits=o["logits"][ids].float()
+            order=ids[self._order(rank_logits,o["source_token_id"][ids])]
             raw=order[:self.raw_topk]; pool=order[:self.pre]; kept=[]
             for idx in pool:
                 if not kept or torch.all(torch.linalg.vector_norm(o["pred_xyz"][torch.stack(kept)]-o["pred_xyz"][idx],dim=1)>self.radius): kept.append(idx)
