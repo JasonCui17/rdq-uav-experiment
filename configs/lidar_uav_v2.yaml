@@ -1,8 +1,8 @@
 experiment:
-  name: lidar_uav_v1
-  version: lidar_uav_v1
+  name: lidar_uav_v2
+  version: lidar_uav_v2_query_causal_v1
   seed: 42
-  output_dir: outputs/own_multimodal_research/lidar_uav_v1
+  output_dir: outputs/own_multimodal_research/lidar_uav_v2
 data:
   root: /home/jasoncui/datasets/MMAUD/official/train
   split_file: outputs/mmuav_paper_reproduction/splits/splits.json
@@ -10,6 +10,7 @@ data:
   val_split: validation_sub
   test_split: heldout_test_sub
   num_merged_frames: 20
+  query_mode: gt_timestamp
   coordinate_config_id: EXISTING_MMUAV_COORDINATE_ASSUMPTION
   denoise: false
   num_workers: 0
@@ -46,6 +47,8 @@ loss:
   focal_gamma: 2.0
   smooth_l1_beta: 1.0
   reg_weight: 2.0
+  temporal_weight: 1.0
+  temporal_smooth_l1_beta: 1.0
 selector:
   version: stable_topk100_radius1m_v1
   raw_topk: 20
@@ -76,3 +79,20 @@ tiny:
   updates: 500
   lr: 0.0002
   weight_decay: 0.0
+
+temporal:
+  enabled: true
+  clip_length: 8
+  stride: 1
+  dim: 128
+  heads: 4
+  ffn_dim: 256
+  blocks: 2
+  dropout: 0.0
+  time_encoding:
+    input_dim: 2
+    hidden_dim: 32
+  candidate_pool: softmax_objectness
+  use_xyz_embedding: true
+  use_presence_embedding: true
+  causal: true

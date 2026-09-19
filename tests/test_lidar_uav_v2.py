@@ -10,7 +10,9 @@ from rdq_uav.lidar_v2.model import RelativeBias,SpatialBlock,local_groups,morton
 CFG=yaml.safe_load((ROOT/"configs/lidar_uav_v2.yaml").read_text())
 def batch(points,batch_index=None,gt=None,recent=None):
     n=len(points);batch_index=torch.zeros(n,dtype=torch.long) if batch_index is None else batch_index; b=int(batch_index.max())+1 if n else 1
-    return {"points":points.float(),"sensor_id":torch.arange(n)%2,"delta_t":-torch.linspace(0,1,n) if n else torch.empty(0),"recent_mask":torch.ones(n,dtype=torch.bool) if recent is None else recent,"point_batch_index":batch_index,"gt_xyz":torch.zeros((b,3)) if gt is None else gt}
+    return {"points":points.float(),"sensor_id":torch.arange(n)%2,"delta_t":-torch.linspace(0,1,n) if n else torch.empty(0),"recent_mask":torch.ones(n,dtype=torch.bool) if recent is None else recent,"point_batch_index":batch_index,"num_samples":b,"target_xyz":torch.zeros((b,3)) if gt is None else gt,
+            "target_valid":torch.ones(b,dtype=torch.bool),"query_valid_mask":torch.ones((b,1),dtype=torch.bool),
+            "query_time_clip":torch.zeros((b,1),dtype=torch.float64)}
 
 def test_voxel_floor_parent_maps_child_positions_and_counts():
     p=torch.tensor([[-.1,0,0],[.1,0,0],[1.1,0,0],[2.1,0,0]])
@@ -45,7 +47,7 @@ def test_loss_ignore_no_support_decode_and_finite_backward():
     assert loss["num_pos"]>=1 and loss["num_ignore"]>=1 and torch.isfinite(loss["loss"]);loss["loss"].backward()
     for name in ("voxel_embed.proj.weight","merge01.parent.weight","encoder2.blocks.0.qkv.weight","up10.parent.weight","head.reg.2.weight"):
         grad=dict(model.named_parameters())[name].grad;assert grad is not None and torch.isfinite(grad).all()
-    decoded=out["voxel_centers"]+(b["gt_xyz"][out["batch_index"]]-out["voxel_centers"]);assert torch.allclose(decoded,b["gt_xyz"][out["batch_index"]])
+    decoded=out["voxel_centers"]+(b["target_xyz"][out["batch_index"]]-out["voxel_centers"]);assert torch.allclose(decoded,b["target_xyz"][out["batch_index"]])
     b2=batch(torch.tensor([[10.,0,0]]),gt=torch.zeros((1,3)));l2=criterion(model(b2),b2);assert l2["num_no_current_support"]==1 and l2["num_supervised_samples"]==0
 
 def test_selector_keeps_xyz_score_feature_identity_and_stable_tie():
