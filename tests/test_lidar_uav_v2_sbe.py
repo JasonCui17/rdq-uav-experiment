@@ -70,7 +70,8 @@ class SBETests(unittest.TestCase):
         cfg=copy.deepcopy(CFG);cfg['model']['voxel']['embedding']='legacy';old=LiDARUAVDetector(cfg);new=LiDARUAVDetector(CFG)
         state=old.state_dict();report=new.load_pre_sbe_weights(state)
         self.assertEqual(report['unexpected_missing_keys'],[])
-        self.assertEqual(report['expected_missing_keys'],['voxel_embed.norm.bias','voxel_embed.norm.weight','voxel_embed.proj.bias','voxel_embed.proj.weight'])
+        expected=sorted(k for k in new.state_dict() if k.startswith('voxel_embed.'))
+        self.assertEqual(report['expected_missing_keys'],expected)
         for k,v in state.items():
             if not k.startswith('voxel_embed.'):self.assertTrue(torch.equal(v,new.state_dict()[k]),k)
         missing=dict(state);del missing['head.cls.0.weight']
@@ -87,7 +88,7 @@ class SBETests(unittest.TestCase):
         b,h=build(torch.rand(100,3));calls=[]
         hook=model.voxel_embed.proj.register_forward_pre_hook(lambda m,args:calls.append(tuple(args[0].shape)))
         with torch.no_grad():model.voxel_embed(b,h)
-        hook.remove();self.assertEqual(calls,[(len(h.levels[0].coords),88)])
+        hook.remove();self.assertEqual(calls,[(len(h.levels[0].coords),104)])
         self.assertEqual(len(SLOT_DESCRIPTOR),11)
     def test_14_amp_statistics_fp32(self):
         b,h=build([[.1,.1,.1]]*3,dt=[-.1,-.2,-.3])

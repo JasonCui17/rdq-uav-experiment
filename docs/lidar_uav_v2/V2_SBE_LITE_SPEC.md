@@ -1,5 +1,9 @@
 # SBE-Lite v1 — Structure Before Expansion
 
+> This document records SBE-Lite before VQSA. The current model preserves all
+> 11D slot statistics and the ordered 88D path, then adds VQSA before the final
+> L0 projection. See `V2_VQSA_SPEC.md` for the active `104→128` embedding.
+
 ## Scope and hypothesis
 Only the point→L0 token embedding is replaced. The hypothesis is that point-wise
 5→32→64 learned expansion followed by symmetric max/mean pooling may create

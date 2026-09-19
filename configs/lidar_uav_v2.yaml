@@ -27,6 +27,11 @@ model:
       slot_dim: 11
       flattened_dim: 88
       output_dim: 128
+      vqsa:
+        enabled: true
+        embed_dim: 16
+        heads: 2
+        dropout: 0.0
   transformer:
     heads: 4
     ffn_dim: 256

@@ -3,6 +3,7 @@ from .data import (LiDARUAVDataset, LiDARUAVValidationDataset, ValidationReferen
                    collate_lidar_samples, collate_temporal_queries, build_query_history)
 from .loss import CandidateLoss, TemporalPositionLoss, QueryCausalLoss
 from .model import LiDARUAVDetector
+from .sbe import SBELiteVoxelEmbed, VoxelQuerySlotAggregation
 from .selector import CandidateSelector
 
 from .isolation import assert_temporal_clip_integrity
