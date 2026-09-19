@@ -61,5 +61,5 @@ def test_empty_input_returns_empty_prediction():
 
 def test_architecture_contract_and_initialization():
     model=LiDARUAVDetector(CFG);assert model.encoder2.global_attention and not model.encoder0.global_attention
-    assert torch.equal(model.voxel_embed.sensor_embedding.weight.detach().flatten(),torch.tensor([0.,1.]));assert torch.all(model.encoder0.bias.tables==0)
+    assert not hasattr(model.voxel_embed,'sensor_embedding') if CFG['model']['voxel'].get('embedding')=='sbe_lite' else torch.equal(model.voxel_embed.sensor_embedding.weight.detach().flatten(),torch.tensor([0.,1.]));assert torch.all(model.encoder0.bias.tables==0)
     source=(ROOT/"src/rdq_uav/lidar_v2/model.py").read_text().lower();assert "attentionpool" not in source and "dbscan" not in source and "occupancy_mask" not in source

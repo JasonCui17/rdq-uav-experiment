@@ -9,6 +9,9 @@ from rdq_uav.lidar_v2 import (LiDARUAVDetector,LiDARUAVDataset,LiDARQueryBuilder
 from rdq_uav.multimodal.merged_lidar import select_last_history
 
 def main():
+    cfg=yaml.safe_load((ROOT/'configs/lidar_uav_v2.yaml').read_text())
+    if cfg['model']['voxel'].get('embedding','legacy')!='legacy':
+        raise SystemExit('Historical spatial equality check requires legacy embedding. Use tools/check_lidar_uav_v2_sbe.py for SBE; historical outputs are preserved.')
     torch.set_num_threads(4);torch.manual_seed(42)
     output=ROOT/'outputs/own_multimodal_research/lidar_uav_v2/query_causal_v1_structure_smoke'
     output.mkdir(parents=True,exist_ok=True)

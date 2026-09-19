@@ -19,7 +19,14 @@ model:
   dim: 128
   voxel:
     scales: [0.5, 1.0, 2.0]
-    point_dims: [5, 32, 64]
+    point_dims: [5, 32, 64]  # Only instantiated when embedding=legacy.
+    embedding: sbe_lite
+    sbe:
+      subdivisions: 2
+      slots: 8
+      slot_dim: 11
+      flattened_dim: 88
+      output_dim: 128
   transformer:
     heads: 4
     ffn_dim: 256

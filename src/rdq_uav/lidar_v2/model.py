@@ -1,9 +1,10 @@
-"""LiDAR UAV Transformer V2-base, copied exactly from frozen V1."""
+"""LiDAR UAV V2 Query-Causal with selectable SBE-Lite / legacy voxel embedding."""
 from __future__ import annotations
 import math
 from typing import Any
 import torch
 from torch import nn
+from .sbe import SBELiteVoxelEmbed
 from .temporal import CandidateAwareQueryPool, TimeEncoding, CausalTemporalTransformer, TemporalXYZHead
 from .geometry import HierarchyBuilder, SparseHierarchy, SparseLevel
 
@@ -12,7 +13,7 @@ def segment_sum(x,index,n):
 def segment_max(x,index,n):
     out=x.new_full((n,)+x.shape[1:],-torch.inf); out.scatter_reduce_(0,index.view(-1,*([1]*(x.ndim-1))).expand_as(x),x,reduce="amax",include_self=True); return out
 
-class VoxelEmbed(nn.Module):
+class LegacyVoxelEmbed(nn.Module):
     """Packed points [P,3]+sensor+seconds -> L0 tokens [N0,D]."""
     def __init__(self,dim=128,point_hidden=32,point_out=64,voxel_size=.5):
         super().__init__(); self.voxel_size=voxel_size
@@ -135,8 +136,15 @@ class LiDARUAVDetector(nn.Module):
     """Public V2-base interface: packed point batch -> fine-token candidate fields."""
     def __init__(self,cfg:dict[str,Any]):
         super().__init__(); m=cfg["model"] if "model" in cfg else cfg; d=m["dim"]; tr=m["transformer"]
-        self.version=m["name"]; self.hierarchy=HierarchyBuilder(tuple(m["voxel"]["scales"])); ph=m["voxel"]["point_dims"]
-        self.voxel_embed=VoxelEmbed(d,ph[1],ph[2],m["voxel"]["scales"][0]); self.merge01=SparseMerge(d); self.merge12=SparseMerge(d)
+        self.version=m["name"]; self.hierarchy=HierarchyBuilder(tuple(m["voxel"]["scales"]))
+        embedding=m['voxel'].get('embedding','legacy')
+        if embedding=='sbe_lite':
+            self.voxel_embed=SBELiteVoxelEmbed(d,m['voxel']['scales'][0],m['voxel'].get('sbe'))
+        elif embedding=='legacy':
+            ph=m['voxel']['point_dims']
+            self.voxel_embed=LegacyVoxelEmbed(d,ph[1],ph[2],m['voxel']['scales'][0])
+        else:raise ValueError(f'Unknown voxel embedding: {embedding}')
+        self.merge01=SparseMerge(d); self.merge12=SparseMerge(d)
         common=(d,tr["heads"],tr["ffn_dim"],tr["blocks_per_level"][0],tr["window_size"],tr["window_shift"],tr["relative_range"])
         self.encoder0=SpatialTransformer(*common,global_attention=False)
         self.encoder1=SpatialTransformer(d,tr["heads"],tr["ffn_dim"],tr["blocks_per_level"][1],tr["window_size"],tr["window_shift"],tr["relative_range"],False)
@@ -149,7 +157,10 @@ class LiDARUAVDetector(nn.Module):
         self.presence_embedding=nn.Embedding(2,d)
         self.temporal_transformer=CausalTemporalTransformer(d,tc['heads'],tc['ffn_dim'],tc['blocks'],tc['dropout'])
         self.temporal_head=TemporalXYZHead(d)
-        self.apply(self._init); nn.init.constant_(self.voxel_embed.sensor_embedding.weight[0],0); nn.init.constant_(self.voxel_embed.sensor_embedding.weight[1],1)
+        self.apply(self._init)
+        if isinstance(self.voxel_embed,LegacyVoxelEmbed):
+            nn.init.constant_(self.voxel_embed.sensor_embedding.weight[0],0)
+            nn.init.constant_(self.voxel_embed.sensor_embedding.weight[1],1)
         for module in self.modules():
             if isinstance(module,RelativeBias): nn.init.zeros_(module.tables)
         nn.init.constant_(self.head.cls[-1].bias,math.log(.01/.99))
@@ -197,3 +208,27 @@ class LiDARUAVDetector(nn.Module):
         if result.unexpected_keys or any(not k.startswith(prefixes) for k in result.missing_keys):
             raise ValueError(str(result))
         return result
+
+    def load_pre_sbe_weights(self,state_dict):
+        """Load all Query-Causal downstream weights; skip only legacy voxel_embed.*.
+
+        Checks full key coverage and shapes before mutating parameters. Does not
+        accept an incomplete spatial-only checkpoint or unexplained new keys.
+        Returns the explicit skipped/missing key report; SBE keeps initialization.
+        """
+        if not isinstance(self.voxel_embed,SBELiteVoxelEmbed):
+            raise ValueError('load_pre_sbe_weights requires SBE-Lite model')
+        own=self.state_dict();prefix='voxel_embed.'
+        downstream={k for k in own if not k.startswith(prefix)}
+        provided={k for k in state_dict if not k.startswith(prefix)}
+        missing=sorted(downstream-provided);unexpected=sorted(provided-downstream)
+        mismatched=sorted(k for k in downstream&provided if own[k].shape!=state_dict[k].shape)
+        if missing or unexpected or mismatched:
+            raise ValueError(f'Downstream mismatch: missing={missing}, unexpected={unexpected}, shapes={mismatched}')
+        selected={k:state_dict[k] for k in downstream}
+        result=self.load_state_dict(selected,strict=False)
+        expected_missing=sorted(k for k in own if k.startswith(prefix))
+        if sorted(result.missing_keys)!=expected_missing or result.unexpected_keys:
+            raise RuntimeError(f'Unexpected load result: {result}')
+        return dict(skipped_source_keys=sorted(k for k in state_dict if k.startswith(prefix)),
+                    expected_missing_keys=expected_missing,unexpected_missing_keys=[],unexpected_keys=[])
