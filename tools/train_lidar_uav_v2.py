@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Manual V2 QueryCausal training entry. Structure verification uses --precheck-only."""
-import argparse,json,math,os,sys,time
+import argparse,functools,json,math,os,sys,time
 from pathlib import Path
 import numpy as np
 import torch,yaml
@@ -9,7 +9,7 @@ from tqdm.auto import tqdm
 ROOT=Path(__file__).resolve().parents[1];sys.path.insert(0,str(ROOT/'src'))
 from rdq_uav.lidar_v2 import (LiDARUAVDetector,LiDARUAVDataset,LiDARUAVValidationDataset,
     TemporalQueryClipDataset,collate_temporal_queries,QueryCausalLoss,CandidateSelector,
-    EpochCyclicQuerySampler,planned_epoch_stats)
+    EpochCyclicQuerySampler,OverlapAwareBatchSampler,planned_epoch_stats)
 from rdq_uav.lidar_v2.runtime import move_batch,optimizer_groups,UpdateScheduler
 from rdq_uav.lidar_v2.training import inspect_dataset_timing,write_csv,validate,finite_or_raise,save_checkpoint
 from rdq_uav.utils.seed import seed_everything
@@ -58,7 +58,14 @@ def main():
     model=LiDARUAVDetector(cfg).to(device);criterion=QueryCausalLoss(cfg);selector=CandidateSelector(cfg)
     batch_size=args.batch_size or cfg['train']['per_gpu_batch_size'];accum=args.accumulate or cfg['train']['single_gpu_accumulate']
     if batch_size<1 or accum<1:raise ValueError('Invalid batch/accumulation')
-    loader=DataLoader(train,batch_size=batch_size,shuffle=False,sampler=train_sampler,num_workers=args.num_workers,collate_fn=collate_temporal_queries)
+    uqp=cfg['train']['unique_query_packing']
+    if uqp['dedup_key']!='sequence_query_uid':raise ValueError('UQP-v1 requires sequence_query_uid')
+    collate=functools.partial(collate_temporal_queries,unique_query_packing=bool(uqp['enabled']))
+    overlap_sampler=OverlapAwareBatchSampler(train_sampler,batch_size,cfg['experiment']['seed'],eqs['shuffle_selected']) if uqp['overlap_aware_batching'] else None
+    if overlap_sampler is not None:
+        loader=DataLoader(train,batch_sampler=overlap_sampler,num_workers=args.num_workers,collate_fn=collate)
+    else:
+        loader=DataLoader(train,batch_size=batch_size,shuffle=False,sampler=train_sampler,num_workers=args.num_workers,collate_fn=collate)
     vloader=DataLoader(val,batch_size=1,shuffle=False,num_workers=args.num_workers,collate_fn=collate_temporal_queries)
     opt=torch.optim.AdamW(optimizer_groups(model,cfg['train']['weight_decay']),lr=cfg['train']['lr'],betas=tuple(cfg['train']['betas']),eps=cfg['train']['eps'])
     epochs=args.epochs or cfg['train']['epochs']
@@ -69,6 +76,7 @@ def main():
     print(f"Query stride : {query_stride}\nQuery offset : {first['offset']}\n"
           f"Selected clips : {first['selected_clips']} / {len(train)}\n"
           f"Selection ratio : {first['selected_clips']/len(train):.2%}\n"
+          f"Unique query packing : {bool(uqp['enabled'])}\nOverlap-aware batching : {bool(overlap_sampler is not None)}\n"
           f"Validation endpoints : {len(val)} (full)\nPlanned optimizer updates : {total_planned_updates}")
     start=step=0;best=(-math.inf,-math.inf,-math.inf);history=[]
     if args.resume:
@@ -80,16 +88,20 @@ def main():
             record.setdefault('query_stride',None);record.setdefault('query_offset',None)
             record.setdefault('selected_clips',None);record.setdefault('full_clips',None)
             record.setdefault('selection_ratio',None);record.setdefault('valid_query_slots',None)
+            record.setdefault('query_occurrences',None);record.setdefault('unique_spatial_queries',None)
+            record.setdefault('spatial_dedup_ratio',None)
     amp=device.type=='cuda' and torch.cuda.is_bf16_supported();completed=start
     try:
         for epoch in range(start+1,epochs+1):
-            train_sampler.set_epoch(epoch)
+            if overlap_sampler is not None:overlap_sampler.set_epoch(epoch)
+            else:train_sampler.set_epoch(epoch)
             selected_clips=len(train_sampler);valid_query_slots=sum(train.clip_metadata[i]['valid_query_slots'] for i in train_sampler.selected_indices(shuffle=False))
-            model.train();opt.zero_grad(set_to_none=True);pending=0;totals=np.zeros(5);batches=0;stop=False;begin=time.perf_counter()
+            model.train();opt.zero_grad(set_to_none=True);pending=0;totals=np.zeros(5);batches=0;occurrences=unique_queries=0;stop=False;begin=time.perf_counter()
             names=('loss','spatial_loss','loss_cls','loss_reg','temporal_loss')
             offset=train_sampler.offset_for_epoch();ratio=selected_clips/len(train)
             bar=tqdm(loader,desc=f'TRAIN {epoch}/{epochs} EQS s={query_stride} o={offset} clips={selected_clips}/{len(train)}',dynamic_ncols=True)
             for raw in bar:
+                occurrences+=int(raw['query_valid_mask'].sum());unique_queries+=int(raw['spatial_num_samples'])
                 batch=move_batch(raw,device)
                 with torch.autocast(device_type=device.type,dtype=torch.bfloat16,enabled=amp):out=model(batch)
                 for key in ('logits','pred_xyz','temporal_pred_xyz'):finite_or_raise(key,out[key])
@@ -103,7 +115,8 @@ def main():
                         if p.grad is not None:finite_or_raise('gradient',p.grad)
                     torch.nn.utils.clip_grad_norm_(model.parameters(),cfg['train']['grad_clip_norm'])
                     opt.step();sched.step();opt.zero_grad(set_to_none=True);step+=1;pending=0
-                bar.set_postfix_str(' '.join(f'{k}={v/batches:.4f}' for k,v in zip(names,totals)))
+                bar.set_postfix_str(' '.join(f'{k}={v/batches:.4f}' for k,v in zip(names,totals))+
+                    f' UQP={1-unique_queries/max(1,occurrences):.1%}')
                 if args.max_updates and step>=args.max_updates:stop=True;break
             if pending:
                 for p in model.parameters():
@@ -116,12 +129,15 @@ def main():
             improved=score>best;best=max(best,score)
             record=dict(epoch=epoch,global_step=step,query_stride=query_stride,query_offset=offset,
                         selected_clips=selected_clips,full_clips=len(train),selection_ratio=ratio,
-                        valid_query_slots=valid_query_slots,train=dict(zip(names,(totals/max(1,batches)).tolist())),
+                        valid_query_slots=valid_query_slots,query_occurrences=occurrences,unique_spatial_queries=unique_queries,
+                        spatial_dedup_ratio=1-unique_queries/max(1,occurrences),train=dict(zip(names,(totals/max(1,batches)).tolist())),
                         validation=metrics,val_loss=health,seconds=time.perf_counter()-begin)
             history.append(record);(output/'metrics.json').write_text(json.dumps(history,indent=2))
             write_csv(output/'metrics.csv',[dict(epoch=r['epoch'],query_stride=r.get('query_stride'),query_offset=r.get('query_offset'),
                 selected_clips=r.get('selected_clips'),full_clips=r.get('full_clips'),selection_ratio=r.get('selection_ratio'),
-                valid_query_slots=r.get('valid_query_slots'),**r['train'],**r['validation']['all']) for r in history])
+                valid_query_slots=r.get('valid_query_slots'),query_occurrences=r.get('query_occurrences'),
+                unique_spatial_queries=r.get('unique_spatial_queries'),spatial_dedup_ratio=r.get('spatial_dedup_ratio'),
+                **r['train'],**r['validation']['all']) for r in history])
             write_csv(output/f'validation_epoch_{epoch:03d}.csv',rows)
             save_checkpoint(output/'latest.pt',model,opt,sched,epoch,step,best,cfg)
             if improved:save_checkpoint(output/'best.pt',model,opt,sched,epoch,step,best,cfg)

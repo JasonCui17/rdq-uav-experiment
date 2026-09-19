@@ -176,7 +176,7 @@ class LiDARUAVDetector(nn.Module):
         d1=self.up21(f1,f2,h.parent_l1_to_l2); q=self.final_norm(self.up10(f0,d1,h.parent_l0_to_l1)); logits,residual,pred=self.head(q,l0.centers)
         return {"logits":logits,"residual_xyz":residual,"pred_xyz":pred,"fine_features":q,"voxel_centers":l0.centers,
                 "source_token_id":torch.arange(len(q),device=q.device),"batch_index":l0.batch_index,"layouts":h,
-                "aux_stats":{"token_counts":[len(x.coords) for x in h.levels],"num_samples":int(batch["num_samples"]),"attention_backend":"explicit_pytorch_scaled_dot_product_with_additive_axis_bias"}}
+                "aux_stats":{"token_counts":[len(x.coords) for x in h.levels],"num_samples":int(batch["spatial_num_samples"]),"attention_backend":"explicit_pytorch_scaled_dot_product_with_additive_axis_bias"}}
 
     def forward(self,batch):
         """Packed query points -> spatial candidates plus causal [B,T,3] XYZ.
@@ -186,15 +186,17 @@ class LiDARUAVDetector(nn.Module):
         """
         assert_temporal_batch_integrity(batch)
         out=self.spatial_forward(batch)
-        token,observed=self.query_pool(out,int(batch['num_samples']))
+        token,observed=self.query_pool(out,int(batch['spatial_num_samples']))
         valid=batch['query_valid_mask'];B,T=valid.shape
         times=batch['query_time_clip']
         if not torch.isfinite(times[valid]).all():raise ValueError('Non-finite query time')
         if T>1 and bool(((times[:,1:]<=times[:,:-1])&valid[:,1:]&valid[:,:-1]).any()):
             raise ValueError('Non-increasing query time')
-        cb,cp=batch['clip_batch_index'],batch['clip_position']
-        restored=token.new_zeros((B,T,token.shape[-1]));restored[cb,cp]=token
-        observation=torch.zeros((B,T),dtype=torch.bool,device=observed.device);observation[cb,cp]=observed
+        cb,cp=batch['clip_batch_index'],batch['clip_position'];mapping=batch['occurrence_to_unique']
+        occurrence=token.new_zeros((B*T,token.shape[-1]));occurrence_observed=torch.zeros(B*T,dtype=torch.bool,device=observed.device)
+        flat_valid=valid.flatten();occurrence[flat_valid]=token[mapping[flat_valid]];occurrence_observed[flat_valid]=observed[mapping[flat_valid]]
+        restored=token.new_zeros((B,T,token.shape[-1]));restored[cb,cp]=occurrence
+        observation=torch.zeros((B,T),dtype=torch.bool,device=observed.device);observation[cb,cp]=occurrence_observed
         token=restored;observed=observation&valid
         x=token+self.time_encoding(times,valid)+self.presence_embedding(observed.long())
         hidden=self.temporal_transformer(x,valid)

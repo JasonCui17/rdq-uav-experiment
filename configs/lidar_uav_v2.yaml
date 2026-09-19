@@ -84,6 +84,10 @@ train:
     anchor: clip_end
     dense_clip_context: true
     shuffle_selected: true
+  unique_query_packing:
+    enabled: true
+    overlap_aware_batching: true
+    dedup_key: sequence_query_uid
 evaluation:
   batch_size: 1
   k: [1, 5, 10, 20]

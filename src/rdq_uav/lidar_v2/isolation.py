@@ -39,14 +39,20 @@ def assert_temporal_batch_integrity(batch):
     Times are not identities. Every (clip_batch_index,clip_position) occurs once;
     each valid clip is one sequence with strictly increasing query times.
     """
-    valid=batch['query_valid_mask'];B,T=valid.shape;n=int(batch['num_samples'])
+    valid=batch['query_valid_mask'];B,T=valid.shape;n=B*T
     cb=batch['clip_batch_index'];cp=batch['clip_position']
-    if n!=B*T or cb.shape!=(n,) or cp.shape!=(n,):raise AssertionError('Invalid flattened clip layout')
+    if cb.shape!=(n,) or cp.shape!=(n,):raise AssertionError('Invalid flattened clip layout')
     key=cb*T+cp
     if bool(((cb<0)|(cb>=B)|(cp<0)|(cp>=T)).any()) or not torch.equal(torch.sort(key).values,torch.arange(n,device=key.device)):
         raise AssertionError('Duplicate/out-of-range flattened query identity')
     if len(batch['sequence_id'])!=n or len(batch['sample_id'])!=n:raise AssertionError('Missing query identities')
     if not torch.equal(batch['query_time'],batch['query_time_clip'][cb,cp]):raise AssertionError('Query time/layout mismatch')
+    mapping=batch.get('occurrence_to_unique')
+    if mapping is None or mapping.shape!=(n,):raise AssertionError('Missing occurrence_to_unique mapping')
+    spatial_n=int(batch.get('spatial_num_samples',batch['num_samples']))
+    if bool((mapping[valid.flatten()]<0).any()) or bool((mapping[valid.flatten()]>=spatial_n).any()):
+        raise AssertionError('Invalid valid occurrence mapping')
+    if bool((mapping[~valid.flatten()]!=-1).any()):raise AssertionError('Padding occurrence must map to -1')
     for b in range(B):
         ids=torch.nonzero((cb==b)&valid[cb,cp]).flatten()
         ids=ids[torch.argsort(cp[ids])].tolist()

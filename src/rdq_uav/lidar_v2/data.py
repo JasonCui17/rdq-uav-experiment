@@ -46,7 +46,7 @@ class LiDARQueryBuilder:
             if event.timestamp>query_time:raise AssertionError(f'future_event: query={sequence_id}@{query_time}, event={event}')
         return events
     def build(self, sequence_id, query_time, target_xyz=None, target_timestamp=None,
-              target_valid=False, sample_id=None, **metadata):
+              target_valid=False, sample_id=None, query_uid=None, **metadata):
         query_time=float(query_time)
         if not np.isfinite(query_time): raise ValueError("Non-finite query_time")
         events=self.select_events(sequence_id,query_time)
@@ -62,6 +62,7 @@ class LiDARQueryBuilder:
                 "delta_t":cat(times,(0,),np.float32),"recent_mask":cat(recent,(0,),bool),
                 "sequence_id":sequence_id,"query_time":query_time,"num_samples":1,
                 "sample_id":sample_id or f"{sequence_id}_query_{query_time:.9f}",
+                "query_uid":query_uid if query_uid is not None else (sample_id or f"query_{query_time:.9f}"),
                 "event_count":len(events),"event_timestamps":[e.timestamp for e in events],
                 "event_sequence_ids":[e.sequence_id for e in events],
                 "has_observation":sum(len(p) for p in parts)>0,"target_valid":bool(target_valid),
@@ -88,7 +89,7 @@ class LiDARUAVDataset(Dataset):
             paths=_paths(self.root/seq/"ground_truth")
             indices=range(len(paths)) if deterministic_indices is None else [i for i in deterministic_indices if i<len(paths)]
             for i in indices:
-                p=paths[i];self.records.append(dict(sequence_id=seq,query_time=float(p.stem),target_timestamp=float(p.stem),
+                p=paths[i];self.records.append(dict(sequence_id=seq,query_uid=i,query_time=float(p.stem),target_timestamp=float(p.stem),
                     target_path=p,target_valid=True,sample_id=f"{seq}_g{i:06d}"))
     def __len__(self):return len(self.records)
     def __getitem__(self,index):
@@ -122,6 +123,9 @@ class LiDARUAVValidationDataset(Dataset):
         self.adapter=ValidationReferenceAdapter(reference)
         if self.adapter.invalid_rows: raise ValueError(f"Invalid validation references: {self.adapter.invalid_rows[:5]}")
         self.records=sorted(self.adapter.records,key=lambda r:(r['sequence_id'],r['query_time']))
+        ordinal={}
+        for record in self.records:
+            sequence=record['sequence_id'];record['query_uid']=ordinal.get(sequence,0);ordinal[sequence]=record['query_uid']+1
     def __len__(self):return len(self.records)
     def __getitem__(self,index):return self.builder.build(**self.records[index],gt_source='validation_ref_csv')
 
@@ -151,6 +155,7 @@ class TemporalQueryClipDataset(Dataset):
                     anchor_query_ordinal=end,
                     anchor_query_time=float(anchor['query_time']),
                     anchor_sample_id=anchor['sample_id'],
+                    anchor_query_uid=anchor.get('query_uid',anchor['sample_id']),
                     valid_query_slots=len(window),
                     query_indices=tuple(window),
                 ))
@@ -161,7 +166,7 @@ class TemporalQueryClipDataset(Dataset):
         return {'queries':queries,'clip_length':self.clip_length,
                 'score_last_only':self.validation}
 
-def collate_temporal_queries(items):
+def collate_temporal_queries(items,unique_query_packing=False):
     """[B,T] queries -> packed points and explicit [B,T] causal metadata.
 
     Right padding has no points and no target. Missing real observations are
@@ -180,29 +185,53 @@ def collate_temporal_queries(items):
                 q={'points':torch.empty((0,3)),'sensor_id':torch.empty(0,dtype=torch.long),
                    'delta_t':torch.empty(0),'recent_mask':torch.empty(0,dtype=torch.bool),
                    'query_time':clip[-1]['query_time'],'sequence_id':clip[0]['sequence_id'],
-                   'sample_id':'PADDING','event_count':0,'event_timestamps':[],'event_sequence_ids':[],
+                   'sample_id':'PADDING','query_uid':'PADDING','event_count':0,'event_timestamps':[],'event_sequence_ids':[],
                    'has_observation':False,'target_valid':False}
             if any(ts>q['query_time'] for ts in q['event_timestamps']) or bool((q['delta_t']>0).any()):
                 raise ValueError('Future event violation')
             samples.append(q)
-    counts=torch.tensor([len(q['points']) for q in samples],dtype=torch.long)
-    batch={k:torch.cat([q[k] for q in samples]) for k in ('points','sensor_id','delta_t','recent_mask')}
-    batch.update(num_samples=B*T,point_batch_index=torch.repeat_interleave(torch.arange(B*T),counts),
+    occurrence_valid=valid.flatten();unique_samples=[];occurrence_to_unique=torch.full((B*T,),-1,dtype=torch.long);unique_by_key={}
+    if unique_query_packing:
+        for occurrence,q in enumerate(samples):
+            if not occurrence_valid[occurrence]:continue
+            uid=q.get('query_uid',q['sample_id']);key=(q['sequence_id'],uid)
+            if key in unique_by_key:
+                reference=unique_samples[unique_by_key[key]]
+                same_metadata=(reference['sample_id']==q['sample_id'] and reference['query_time']==q['query_time'] and
+                    reference['event_timestamps']==q['event_timestamps'] and reference['event_sequence_ids']==q['event_sequence_ids'])
+                same_tensors=all(torch.equal(reference[name],q[name]) for name in ('points','sensor_id','delta_t','recent_mask'))
+                if not same_metadata or not same_tensors:raise AssertionError(f'query_uid collision with inconsistent query: {key}')
+            else:unique_by_key[key]=len(unique_samples);unique_samples.append(q)
+            occurrence_to_unique[occurrence]=unique_by_key[key]
+        spatial_samples=unique_samples
+    else:
+        spatial_samples=samples;occurrence_to_unique[occurrence_valid]=torch.arange(B*T)[occurrence_valid]
+    counts=torch.tensor([len(q['points']) for q in spatial_samples],dtype=torch.long)
+    batch={k:torch.cat([q[k] for q in spatial_samples]) for k in ('points','sensor_id','delta_t','recent_mask')}
+    batch.update(num_samples=len(spatial_samples),spatial_num_samples=len(spatial_samples),
+                 point_batch_index=torch.repeat_interleave(torch.arange(len(spatial_samples)),counts),
                  clip_batch_index=torch.arange(B).repeat_interleave(T),clip_position=torch.arange(T).repeat(B),
                  query_valid_mask=valid,score_mask=score,point_counts=counts,
                  query_time=torch.tensor([q['query_time'] for q in samples],dtype=torch.float64),
                  has_observation=torch.tensor([len(q['points'])>0 for q in samples]).reshape(B,T),
                  target_valid=torch.tensor([q.get('target_valid',False) for q in samples],dtype=torch.bool),
                  sample_id=[q['sample_id'] for q in samples],sequence_id=[q['sequence_id'] for q in samples],
+                 query_uid=[q.get('query_uid',q['sample_id']) for q in samples],
+                 occurrence_to_unique=occurrence_to_unique,unique_query_packing=bool(unique_query_packing),
+                 spatial_occurrence_count=torch.bincount(occurrence_to_unique[occurrence_valid],minlength=len(spatial_samples)),
+                 spatial_sequence_id=[q['sequence_id'] for q in spatial_samples],
+                 spatial_sample_id=[q['sample_id'] for q in spatial_samples],
                  event_count=torch.tensor([q['event_count'] for q in samples]),
                  event_timestamps=[q['event_timestamps'] for q in samples],
                  event_sequence_ids=[q['event_sequence_ids'] for q in samples])
     batch['query_time_clip']=batch['query_time'].reshape(B,T)
     batch['target_valid_clip']=batch['target_valid'].reshape(B,T)&valid
+    batch['spatial_target_valid']=torch.tensor([q.get('target_valid',False) for q in spatial_samples],dtype=torch.bool)
     if bool(batch['target_valid'].any()):
         xyz=torch.stack([torch.as_tensor(q['target_xyz']).float() if q.get('target_valid',False) else torch.zeros(3) for q in samples])
         batch.update(target_xyz=xyz,target_xyz_clip=xyz.reshape(B,T,3),
                      target_timestamp=torch.tensor([q.get('target_timestamp',float('nan')) for q in samples],dtype=torch.float64))
+        batch['spatial_target_xyz']=torch.stack([torch.as_tensor(q['target_xyz']).float() if q.get('target_valid',False) else torch.zeros(3) for q in spatial_samples])
     assert_temporal_batch_integrity(batch)
     return batch
 
