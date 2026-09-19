@@ -133,7 +133,7 @@ class TemporalQueryClipDataset(Dataset):
     """
     def __init__(self,queries,clip_length=8,stride=1,validation=False):
         if clip_length<1 or stride<1:raise ValueError('Positive clip length and stride required')
-        self.queries=queries;self.clip_length=clip_length;self.validation=validation;self.windows=[]
+        self.queries=queries;self.clip_length=clip_length;self.validation=validation;self.windows=[];self.clip_metadata=[]
         groups={}
         for i,r in enumerate(queries.records):groups.setdefault(r['sequence_id'],[]).append(i)
         for seq,ids in sorted(groups.items()):
@@ -144,6 +144,16 @@ class TemporalQueryClipDataset(Dataset):
                 window=ids[max(0,end-clip_length+1):end+1]
                 assert_temporal_clip_integrity([queries.records[i] for i in window],clip_index=len(self.windows))
                 self.windows.append(window)
+                anchor=queries.records[window[-1]]
+                self.clip_metadata.append(dict(
+                    dataset_index=len(self.windows)-1,
+                    sequence_id=seq,
+                    anchor_query_ordinal=end,
+                    anchor_query_time=float(anchor['query_time']),
+                    anchor_sample_id=anchor['sample_id'],
+                    valid_query_slots=len(window),
+                    query_indices=tuple(window),
+                ))
     def __len__(self):return len(self.windows)
     def __getitem__(self,index):
         queries=[self.queries[i] for i in self.windows[index]]

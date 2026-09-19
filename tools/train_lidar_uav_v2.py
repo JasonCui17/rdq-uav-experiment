@@ -8,7 +8,8 @@ from torch.utils.data import DataLoader
 from tqdm.auto import tqdm
 ROOT=Path(__file__).resolve().parents[1];sys.path.insert(0,str(ROOT/'src'))
 from rdq_uav.lidar_v2 import (LiDARUAVDetector,LiDARUAVDataset,LiDARUAVValidationDataset,
-    TemporalQueryClipDataset,collate_temporal_queries,QueryCausalLoss,CandidateSelector)
+    TemporalQueryClipDataset,collate_temporal_queries,QueryCausalLoss,CandidateSelector,
+    EpochCyclicQuerySampler,planned_epoch_stats)
 from rdq_uav.lidar_v2.runtime import move_batch,optimizer_groups,UpdateScheduler
 from rdq_uav.lidar_v2.training import inspect_dataset_timing,write_csv,validate,finite_or_raise,save_checkpoint
 from rdq_uav.utils.seed import seed_everything
@@ -36,35 +37,58 @@ def main():
     cfg['data'].update(root=str(args.train_root),val_root=str(args.val_root),val_reference=str(args.val_reference))
     trainq=LiDARUAVDataset(args.train_root,ROOT/cfg['data']['split_file'],cfg['data']['train_split'],cfg['data']['num_merged_frames'])
     valq=LiDARUAVValidationDataset(args.val_root,args.val_reference,cfg['data']['num_merged_frames'])
-    tc=cfg['temporal'];train=TemporalQueryClipDataset(trainq,tc['clip_length'],tc['stride']);val=TemporalQueryClipDataset(valq,tc['clip_length'],validation=True)
+    tc=cfg['temporal'];train=TemporalQueryClipDataset(trainq,tc['clip_length'],stride=1);val=TemporalQueryClipDataset(valq,tc['clip_length'],validation=True)
+    eqs=cfg['train']['query_subsampling']
+    if eqs['offset_policy']!='cyclic_epoch' or eqs['anchor']!='clip_end' or not eqs['dense_clip_context']:
+        raise ValueError('EQS-v1 requires cyclic_epoch, clip_end, and dense_clip_context=true')
+    query_stride=int(eqs['stride']) if eqs['enabled'] else 1
+    train_sampler=EpochCyclicQuerySampler(train,query_stride,cfg['experiment']['seed'],eqs['shuffle_selected'])
     checks=[]
     for name,ds in (('train',trainq),('val',valq)):
         rows=inspect_dataset_timing(ds,np.linspace(0,len(ds)-1,min(32,len(ds)),dtype=int))
         checks.extend(dict(source=name,**r) for r in rows)
     write_csv(output/'precheck_samples.csv',checks)
     (output/'resolved_config.yaml').write_text(yaml.safe_dump(cfg,sort_keys=False))
-    print(f'QUERY CAUSAL PRECHECK PASS: train queries={len(trainq)}, val endpoints={len(val)}, future events=0; query and target times are independent interfaces')
+    train_sampler.set_epoch(1)
+    print(f'QUERY CAUSAL PRECHECK PASS: train queries={len(trainq)}, full clips={len(train)}, '
+          f'epoch1 selected clips={len(train_sampler)}, val endpoints={len(val)}, future events=0; '
+          'query and target times are independent interfaces')
     if args.precheck_only:return
     device=torch.device('cpu' if args.device=='cpu' else f'cuda:{args.device}')
     model=LiDARUAVDetector(cfg).to(device);criterion=QueryCausalLoss(cfg);selector=CandidateSelector(cfg)
     batch_size=args.batch_size or cfg['train']['per_gpu_batch_size'];accum=args.accumulate or cfg['train']['single_gpu_accumulate']
     if batch_size<1 or accum<1:raise ValueError('Invalid batch/accumulation')
-    loader=DataLoader(train,batch_size=batch_size,shuffle=True,num_workers=args.num_workers,collate_fn=collate_temporal_queries,generator=torch.Generator().manual_seed(42))
+    loader=DataLoader(train,batch_size=batch_size,shuffle=False,sampler=train_sampler,num_workers=args.num_workers,collate_fn=collate_temporal_queries)
     vloader=DataLoader(val,batch_size=1,shuffle=False,num_workers=args.num_workers,collate_fn=collate_temporal_queries)
     opt=torch.optim.AdamW(optimizer_groups(model,cfg['train']['weight_decay']),lr=cfg['train']['lr'],betas=tuple(cfg['train']['betas']),eps=cfg['train']['eps'])
-    epochs=args.epochs or cfg['train']['epochs'];sched=UpdateScheduler(opt,epochs*math.ceil(len(loader)/accum),cfg['train']['warmup_fraction'],cfg['train']['lr'],cfg['train']['final_lr']);sched.prepare_first_update()
+    epochs=args.epochs or cfg['train']['epochs']
+    update_plan=planned_epoch_stats(train_sampler,epochs,batch_size,accum)
+    total_planned_updates=sum(row['optimizer_updates'] for row in update_plan)
+    sched=UpdateScheduler(opt,total_planned_updates,cfg['train']['warmup_fraction'],cfg['train']['lr'],cfg['train']['final_lr']);sched.prepare_first_update()
+    first=update_plan[0]
+    print(f"Query stride : {query_stride}\nQuery offset : {first['offset']}\n"
+          f"Selected clips : {first['selected_clips']} / {len(train)}\n"
+          f"Selection ratio : {first['selected_clips']/len(train):.2%}\n"
+          f"Validation endpoints : {len(val)} (full)\nPlanned optimizer updates : {total_planned_updates}")
     start=step=0;best=(-math.inf,-math.inf,-math.inf);history=[]
     if args.resume:
         state=torch.load(args.resume,map_location=device);model.load_state_dict(state['model_state'],strict=True)
         opt.load_state_dict(state['optimizer_state']);sched.load_state_dict(state['scheduler_state'])
         start=state['epoch'];step=state['global_step'];best=tuple(state['best_metric'])
         if (output/'metrics.json').exists():history=json.loads((output/'metrics.json').read_text())
+        for record in history:
+            record.setdefault('query_stride',None);record.setdefault('query_offset',None)
+            record.setdefault('selected_clips',None);record.setdefault('full_clips',None)
+            record.setdefault('selection_ratio',None);record.setdefault('valid_query_slots',None)
     amp=device.type=='cuda' and torch.cuda.is_bf16_supported();completed=start
     try:
         for epoch in range(start+1,epochs+1):
+            train_sampler.set_epoch(epoch)
+            selected_clips=len(train_sampler);valid_query_slots=sum(train.clip_metadata[i]['valid_query_slots'] for i in train_sampler.selected_indices(shuffle=False))
             model.train();opt.zero_grad(set_to_none=True);pending=0;totals=np.zeros(5);batches=0;stop=False;begin=time.perf_counter()
             names=('loss','spatial_loss','loss_cls','loss_reg','temporal_loss')
-            bar=tqdm(loader,desc=f'TRAIN {epoch}/{epochs}',dynamic_ncols=True)
+            offset=train_sampler.offset_for_epoch();ratio=selected_clips/len(train)
+            bar=tqdm(loader,desc=f'TRAIN {epoch}/{epochs} EQS s={query_stride} o={offset} clips={selected_clips}/{len(train)}',dynamic_ncols=True)
             for raw in bar:
                 batch=move_batch(raw,device)
                 with torch.autocast(device_type=device.type,dtype=torch.bfloat16,enabled=amp):out=model(batch)
@@ -90,9 +114,14 @@ def main():
             # Retain the existing spatial checkpoint criterion; temporal metrics are also logged.
             score=(metrics['all']['nms_recall_at_10_1m'],metrics['all']['nms_top1_success_1m'],-health['loss'])
             improved=score>best;best=max(best,score)
-            record=dict(epoch=epoch,global_step=step,train=dict(zip(names,(totals/max(1,batches)).tolist())),validation=metrics,val_loss=health,seconds=time.perf_counter()-begin)
+            record=dict(epoch=epoch,global_step=step,query_stride=query_stride,query_offset=offset,
+                        selected_clips=selected_clips,full_clips=len(train),selection_ratio=ratio,
+                        valid_query_slots=valid_query_slots,train=dict(zip(names,(totals/max(1,batches)).tolist())),
+                        validation=metrics,val_loss=health,seconds=time.perf_counter()-begin)
             history.append(record);(output/'metrics.json').write_text(json.dumps(history,indent=2))
-            write_csv(output/'metrics.csv',[dict(epoch=r['epoch'],**r['train'],**r['validation']['all']) for r in history])
+            write_csv(output/'metrics.csv',[dict(epoch=r['epoch'],query_stride=r.get('query_stride'),query_offset=r.get('query_offset'),
+                selected_clips=r.get('selected_clips'),full_clips=r.get('full_clips'),selection_ratio=r.get('selection_ratio'),
+                valid_query_slots=r.get('valid_query_slots'),**r['train'],**r['validation']['all']) for r in history])
             write_csv(output/f'validation_epoch_{epoch:03d}.csv',rows)
             save_checkpoint(output/'latest.pt',model,opt,sched,epoch,step,best,cfg)
             if improved:save_checkpoint(output/'best.pt',model,opt,sched,epoch,step,best,cfg)

@@ -77,6 +77,13 @@ train:
   dual_gpu_accumulate: 1
   amp_dtype: bfloat16
   checkpoint_metric: nms_recall_at_10_1m
+  query_subsampling:
+    enabled: true
+    stride: 4
+    offset_policy: cyclic_epoch
+    anchor: clip_end
+    dense_clip_context: true
+    shuffle_selected: true
 evaluation:
   batch_size: 1
   k: [1, 5, 10, 20]

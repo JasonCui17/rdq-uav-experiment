@@ -6,3 +6,4 @@ from .model import LiDARUAVDetector
 from .selector import CandidateSelector
 
 from .isolation import assert_temporal_clip_integrity
+from .sampling import EpochCyclicQuerySampler, planned_epoch_stats
