@@ -41,9 +41,9 @@ model:
   merge:
     use_child_position: true
     use_log_point_count: true
-    use_child_ratio: true
+    explicit_octant_occupancy: true
+    occupancy_slots: 8
     attention_pool: false
-    occupancy_mask_input: false
   up:
     adjacent_only: true
   head:

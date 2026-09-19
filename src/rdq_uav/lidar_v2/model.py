@@ -28,16 +28,47 @@ class LegacyVoxelEmbed(nn.Module):
         return self.norm(self.proj(torch.cat((maximum,mean,torch.log1p(level.point_count.float())[:,None]),1)))
 
 class SparseMerge(nn.Module):
-    """Child tokens [Nc,D] plus octant position -> parent tokens [Np,D]."""
+    """Geometry-preserving child-to-parent sparse aggregation.
+
+    Existing children retain their signed octant position in ``self.child``.
+    The parent projection additionally receives the complete ordered eight-slot
+    occupancy topology and log raw-point density.  Slot order is shared with
+    SBE-Lite: ``4*x + 2*y + z``.
+    """
     def __init__(self,dim=128):
         super().__init__(); self.child_norm=nn.LayerNorm(dim,eps=1e-5); self.child=nn.Sequential(nn.Linear(dim+3,dim),nn.GELU())
-        self.parent=nn.Linear(2*dim+2,dim); self.out_norm=nn.LayerNorm(dim,eps=1e-5)
-    def forward(self,x,child_level,parent_level,parent_map):
-        rel=child_level.coords.float()-2*parent_level.coords[parent_map].float()-.5
+        self.occupancy_slots=8; self.parent=nn.Linear(2*dim+1+self.occupancy_slots,dim); self.out_norm=nn.LayerNorm(dim,eps=1e-5)
+
+    @staticmethod
+    def octant_occupancy(child_level,parent_level,parent_map):
+        """Return ``local [Nc,3]``, ``slot [Nc]``, and binary ``[Np,8]``."""
+        local=child_level.coords-2*parent_level.coords[parent_map]
+        if bool(((local<0)|(local>1)).any()):
+            bad=local[((local<0)|(local>1)).any(1)][:8].tolist()
+            raise AssertionError(f'Invalid child octant coordinates: {bad}')
+        slot=4*local[:,0]+2*local[:,1]+local[:,2]
+        n=len(parent_level.coords); occupancy=parent_level.centers.new_zeros((n,8))
+        flat=parent_map*8+slot
+        occupancy.view(-1).index_fill_(0,flat,1.)
+        child_count=torch.bincount(parent_map,minlength=n)
+        occupied_count=occupancy.sum(1).to(child_count.dtype)
+        if not torch.equal(occupied_count,child_count):
+            raise AssertionError('Octant occupancy count does not match unique child voxel count')
+        return local,slot,occupancy
+
+    def parent_input(self,x,child_level,parent_level,parent_map):
+        """Build ordered ``[Np, 2*D+1+8]`` EOOE projection input."""
+        local,slot,occupancy=self.octant_occupancy(child_level,parent_level,parent_map)
+        rel=local.to(x.dtype)-.5
         u=self.child(torch.cat((self.child_norm(x),rel),1)); n=len(parent_level.coords)
-        mx=segment_max(u,parent_map,n); mean=segment_sum(u,parent_map,n)/torch.bincount(parent_map,minlength=n)[:,None]
-        extra=torch.stack((torch.log1p(parent_level.point_count.float()),torch.bincount(parent_map,minlength=n).float()/8),1)
-        return self.out_norm(self.parent(torch.cat((mx,mean,extra),1)))
+        child_count=torch.bincount(parent_map,minlength=n)
+        mx=segment_max(u,parent_map,n); mean=segment_sum(u,parent_map,n)/child_count[:,None]
+        density=torch.log1p(parent_level.point_count.to(x.dtype))[:,None]
+        return torch.cat((mx,mean,density,occupancy.to(x.dtype)),1),occupancy,slot
+
+    def forward(self,x,child_level,parent_level,parent_map):
+        parent_input,_,_=self.parent_input(x,child_level,parent_level,parent_map)
+        return self.out_norm(self.parent(parent_input))
 
 class PositionEncoding(nn.Module):
     def __init__(self,dim=128): super().__init__(); self.net=nn.Sequential(nn.Linear(3,32),nn.GELU(),nn.Linear(32,dim))
