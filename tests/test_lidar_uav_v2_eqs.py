@@ -17,7 +17,7 @@ def query(sequence,index):
     time=float(index)+10.
     return dict(sequence_id=sequence,sample_id=f'{sequence}_{index}',query_time=time,
         points=torch.tensor([[index+.1,0.,0.]]),sensor_id=torch.zeros(1,dtype=torch.long),
-        delta_t=torch.tensor([-.01]),recent_mask=torch.ones(1,dtype=torch.bool),
+        delta_t=torch.tensor([-.01]),supervision_recent_mask=torch.ones(1,dtype=torch.bool),
         event_count=1,event_timestamps=[time-.01],event_sequence_ids=[sequence],
         has_observation=True,target_valid=True,target_timestamp=time,target_xyz=torch.zeros(3))
 

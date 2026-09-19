@@ -16,7 +16,7 @@ def query(i,points=None,target=True,valid=True):
     points=torch.tensor([[.2+i*.01,.1,.1],[1.3,.2,.1],[3.1,.1,.2]]) if points is None else points
     n=len(points)
     q=dict(points=points.float(),sensor_id=torch.arange(n)%2,delta_t=torch.full((n,),-.01),
-           recent_mask=torch.ones(n,dtype=torch.bool),sequence_id='synthetic',sample_id=f'q{i}',
+           supervision_recent_mask=torch.ones(n,dtype=torch.bool),sequence_id='synthetic',sample_id=f'q{i}',
            query_time=100.+i*.07,event_count=1,event_timestamps=[100.+i*.07-.01],event_sequence_ids=['synthetic'],has_observation=n>0,target_valid=target)
     if target:q.update(target_xyz=torch.tensor([.2,.1,.1]),target_timestamp=q['query_time'])
     return q
@@ -91,7 +91,7 @@ class QueryCausalTests(unittest.TestCase):
                 np.save(root/'seq'/name/f'{i}.npy',np.array([[i+1.,1,1],[0,0,0],[np.nan,1,1]]))
             q=LiDARQueryBuilder(root).build('seq',25.5,target_xyz=[1,2,3],target_timestamp=99,target_valid=True)
             self.assertEqual(q['event_count'],20);self.assertEqual(q['event_timestamps'],list(map(float,range(6,26))))
-            self.assertTrue(bool((q['delta_t']<=0).all()));self.assertEqual(int(q['recent_mask'].sum()),4)
+            self.assertTrue(bool((q['delta_t']<=0).all()));self.assertEqual(int(q['supervision_recent_mask'].sum()),4)
             self.assertEqual(len(q['points']),20);self.assertEqual(q['sensor_id'].tolist(),[i%2 for i in range(6,26)])
     def test_pool_is_query_local_and_soft(self):
         m=model();b=collate_lidar_samples([query(0),query(1)])

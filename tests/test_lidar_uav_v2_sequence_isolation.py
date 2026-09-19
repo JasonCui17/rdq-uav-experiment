@@ -43,7 +43,7 @@ class IsolationTests(unittest.TestCase):
     def test_d_identical_xyz_separate_voxels(self):
         qs=[query(s,0) for s in ('A','B')]
         for q in qs:
-            q.update(points=torch.tensor([[1.,2.,3.]]),sensor_id=torch.zeros(1,dtype=torch.long),delta_t=torch.tensor([-.01]),recent_mask=torch.ones(1,dtype=torch.bool))
+            q.update(points=torch.tensor([[1.,2.,3.]]),sensor_id=torch.zeros(1,dtype=torch.long),delta_t=torch.tensor([-.01]),supervision_recent_mask=torch.ones(1,dtype=torch.bool))
         b=collate_temporal_queries([{'queries':[q]} for q in qs]);h=HierarchyBuilder()(b['points'],b['point_batch_index'])
         for level in h.levels:self.assertEqual(len(level.coords),2);self.assertEqual(level.batch_index.tolist(),[0,1])
         self.assertEqual(h.point_to_l0.tolist(),[0,1]);RESULTS['spatial_same_xyz']='PASS'

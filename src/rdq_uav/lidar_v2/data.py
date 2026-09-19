@@ -59,7 +59,7 @@ class LiDARQueryBuilder:
             recent.append(np.full(len(points),i>=max(0,len(events)-4),bool))
         cat=lambda a,shape,dtype: torch.from_numpy(np.concatenate(a) if a else np.empty(shape,dtype))
         result={"points":cat(parts,(0,3),np.float32),"sensor_id":cat(sensors,(0,),np.int64),
-                "delta_t":cat(times,(0,),np.float32),"recent_mask":cat(recent,(0,),bool),
+                "delta_t":cat(times,(0,),np.float32),"supervision_recent_mask":cat(recent,(0,),bool),
                 "sequence_id":sequence_id,"query_time":query_time,"num_samples":1,
                 "sample_id":sample_id or f"{sequence_id}_query_{query_time:.9f}",
                 "query_uid":query_uid if query_uid is not None else (sample_id or f"query_{query_time:.9f}"),
@@ -183,7 +183,7 @@ def collate_temporal_queries(items,unique_query_packing=False):
                 q=clip[t];valid[b,t]=True;score[b,t]=not items[b].get('score_last_only',False) or t==len(clip)-1
             else:
                 q={'points':torch.empty((0,3)),'sensor_id':torch.empty(0,dtype=torch.long),
-                   'delta_t':torch.empty(0),'recent_mask':torch.empty(0,dtype=torch.bool),
+                   'delta_t':torch.empty(0),'supervision_recent_mask':torch.empty(0,dtype=torch.bool),
                    'query_time':clip[-1]['query_time'],'sequence_id':clip[0]['sequence_id'],
                    'sample_id':'PADDING','query_uid':'PADDING','event_count':0,'event_timestamps':[],'event_sequence_ids':[],
                    'has_observation':False,'target_valid':False}
@@ -199,7 +199,7 @@ def collate_temporal_queries(items,unique_query_packing=False):
                 reference=unique_samples[unique_by_key[key]]
                 same_metadata=(reference['sample_id']==q['sample_id'] and reference['query_time']==q['query_time'] and
                     reference['event_timestamps']==q['event_timestamps'] and reference['event_sequence_ids']==q['event_sequence_ids'])
-                same_tensors=all(torch.equal(reference[name],q[name]) for name in ('points','sensor_id','delta_t','recent_mask'))
+                same_tensors=all(torch.equal(reference[name],q[name]) for name in ('points','sensor_id','delta_t','supervision_recent_mask'))
                 if not same_metadata or not same_tensors:raise AssertionError(f'query_uid collision with inconsistent query: {key}')
             else:unique_by_key[key]=len(unique_samples);unique_samples.append(q)
             occurrence_to_unique[occurrence]=unique_by_key[key]
@@ -207,7 +207,7 @@ def collate_temporal_queries(items,unique_query_packing=False):
     else:
         spatial_samples=samples;occurrence_to_unique[occurrence_valid]=torch.arange(B*T)[occurrence_valid]
     counts=torch.tensor([len(q['points']) for q in spatial_samples],dtype=torch.long)
-    batch={k:torch.cat([q[k] for q in spatial_samples]) for k in ('points','sensor_id','delta_t','recent_mask')}
+    batch={k:torch.cat([q[k] for q in spatial_samples]) for k in ('points','sensor_id','delta_t','supervision_recent_mask')}
     batch.update(num_samples=len(spatial_samples),spatial_num_samples=len(spatial_samples),
                  point_batch_index=torch.repeat_interleave(torch.arange(len(spatial_samples)),counts),
                  clip_batch_index=torch.arange(B).repeat_interleave(T),clip_position=torch.arange(T).repeat(B),

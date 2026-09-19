@@ -50,7 +50,7 @@ def evaluate_batch(outputs,batch,selector,criterion):
     for b,item in enumerate(selected):
         if not bool(batch['score_mask'].flatten()[b]) or not bool(batch['target_valid'][b]):continue
         gt=batch["target_xyz"][b]; current=bool(torch.any(pos & (outputs["batch_index"]==b)))
-        recent_points=batch["recent_mask"]&(batch["point_batch_index"]==b)
+        recent_points=batch["supervision_recent_mask"]&(batch["point_batch_index"]==b)
         recent_neighbors=int(torch.count_nonzero(torch.linalg.vector_norm(batch["points"][recent_points]-gt,dim=1)<=1.))
         row={"sample_id":batch["sample_id"][b],"sequence_id":batch["sequence_id"][b],"t0":float(batch["query_time"][b]),"support_group":"CURRENT_SUPPORT" if current else "NO_CURRENT_SUPPORT","recent_neighbor_group":"1" if recent_neighbors==1 else "2-3" if recent_neighbors in (2,3) else "4+" if recent_neighbors>=4 else "0"}
         for kind in ("raw","nms"):

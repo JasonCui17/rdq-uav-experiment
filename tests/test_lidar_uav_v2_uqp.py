@@ -93,7 +93,7 @@ class UQPTests(unittest.TestCase):
             for q in clip['queries']:
                 if q['query_uid']==4:
                     q['points']=torch.tensor([[20.,20.,20.]]);q['sensor_id']=torch.zeros(1,dtype=torch.long)
-                    q['delta_t']=torch.tensor([-.01]);q['recent_mask']=torch.ones(1,dtype=torch.bool)
+                    q['delta_t']=torch.tensor([-.01]);q['supervision_recent_mask']=torch.ones(1,dtype=torch.bool)
         batch=collate_temporal_queries(items,unique_query_packing=True);out=qc.model()(batch);loss=QueryCausalLoss(qc.CFG)(out,batch)
         self.assertGreaterEqual(loss['num_no_current_support'],2);self.assertEqual(loss['num_temporal_supervised'],16)
 

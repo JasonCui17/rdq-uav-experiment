@@ -11,7 +11,7 @@ CFG=yaml.safe_load((ROOT/"configs/lidar_uav_v2.yaml").read_text())
 def batch(points,batch_index=None,gt=None,recent=None):
     n=len(points);batch_index=torch.zeros(n,dtype=torch.long) if batch_index is None else batch_index; b=int(batch_index.max())+1 if n else 1
     target=torch.zeros((b,3)) if gt is None else gt
-    return {"points":points.float(),"sensor_id":torch.arange(n)%2,"delta_t":-torch.linspace(0,1,n) if n else torch.empty(0),"recent_mask":torch.ones(n,dtype=torch.bool) if recent is None else recent,"point_batch_index":batch_index,"num_samples":b,"spatial_num_samples":b,"target_xyz":target,"spatial_target_xyz":target,
+    return {"points":points.float(),"sensor_id":torch.arange(n)%2,"delta_t":-torch.linspace(0,1,n) if n else torch.empty(0),"supervision_recent_mask":torch.ones(n,dtype=torch.bool) if recent is None else recent,"point_batch_index":batch_index,"num_samples":b,"spatial_num_samples":b,"target_xyz":target,"spatial_target_xyz":target,
             "target_valid":torch.ones(b,dtype=torch.bool),"query_valid_mask":torch.ones((b,1),dtype=torch.bool),
             "query_time_clip":torch.zeros((b,1),dtype=torch.float64),"query_time":torch.zeros(b,dtype=torch.float64),
             "clip_batch_index":torch.arange(b),"clip_position":torch.zeros(b,dtype=torch.long),

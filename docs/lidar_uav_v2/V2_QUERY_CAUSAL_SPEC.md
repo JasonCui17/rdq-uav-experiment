@@ -22,6 +22,12 @@ TemporalQueryClipDataset creates same-sequence rolling histories of at most eigh
 
 Spatial focal/SmoothL1 labels and normalization are unchanged: positive recent distance <=1m; ignore nonpositive all-history distance <=2m; negative >2m. No-positive queries skip spatial supervision. TemporalPositionLoss averages SmoothL1(beta1) over XYZ and every valid target query, including NO_CURRENT_SUPPORT. Total = spatial loss + temporal loss (weight1). Thus missing current evidence does not discard temporal supervision.
 
+The latest-four marker is stored as `supervision_recent_mask` and is consumed
+only by spatial label construction and evaluation grouping. It is not a learned
+model feature. Learned point timing uses continuous `delta_t`; temporal query
+timing uses the continuous query-time encoding. See
+`V2_RECENT_INPUT_CONTRACT.md` for the enforced data contract.
+
 ## Public interfaces
 - `LiDARQueryBuilder.build(sequence_id, query_time, ...)`: optional targets.
 - `build_query_history(builder, sequence_id, query_times)`: GT-free last-eight query history.
