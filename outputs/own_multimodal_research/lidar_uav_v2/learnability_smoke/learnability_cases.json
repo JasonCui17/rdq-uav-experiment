@@ -1,0 +1,192 @@
+[
+  {
+    "group": "A",
+    "dataset_index": 15,
+    "clip_index": 15,
+    "sequence_id": "seq0001",
+    "query_time": 1706255122.4480603,
+    "sample_id": "seq0001_g000015",
+    "current_support": true,
+    "positive_count": 1,
+    "history_current_support_count": 0,
+    "history_has_support": false,
+    "point_count": 33523,
+    "target_xyz": [
+      12.6864652633667,
+      -19.57719612121582,
+      43.36734390258789
+    ],
+    "clip_l0_voxel_count": 57554
+  },
+  {
+    "group": "A",
+    "dataset_index": 16,
+    "clip_index": 16,
+    "sequence_id": "seq0001",
+    "query_time": 1706255122.4986572,
+    "sample_id": "seq0001_g000016",
+    "current_support": true,
+    "positive_count": 1,
+    "history_current_support_count": 1,
+    "history_has_support": true,
+    "point_count": 33523,
+    "target_xyz": [
+      12.687249183654785,
+      -19.5787353515625,
+      43.36724853515625
+    ],
+    "clip_l0_voxel_count": 59586
+  },
+  {
+    "group": "A",
+    "dataset_index": 17,
+    "clip_index": 17,
+    "sequence_id": "seq0001",
+    "query_time": 1706255122.5472925,
+    "sample_id": "seq0001_g000017",
+    "current_support": true,
+    "positive_count": 1,
+    "history_current_support_count": 2,
+    "history_has_support": true,
+    "point_count": 37757,
+    "target_xyz": [
+      12.688926696777344,
+      -19.583078384399414,
+      43.367408752441406
+    ],
+    "clip_l0_voxel_count": 61249
+  },
+  {
+    "group": "A",
+    "dataset_index": 18,
+    "clip_index": 18,
+    "sequence_id": "seq0001",
+    "query_time": 1706255122.5916796,
+    "sample_id": "seq0001_g000018",
+    "current_support": true,
+    "positive_count": 1,
+    "history_current_support_count": 3,
+    "history_has_support": true,
+    "point_count": 37757,
+    "target_xyz": [
+      12.69029712677002,
+      -19.58579444885254,
+      43.367183685302734
+    ],
+    "clip_l0_voxel_count": 62912
+  },
+  {
+    "group": "B",
+    "dataset_index": 1209,
+    "clip_index": 1209,
+    "sequence_id": "seq0004",
+    "query_time": 1706255184.048986,
+    "sample_id": "seq0004_g000009",
+    "current_support": false,
+    "positive_count": 0,
+    "history_current_support_count": 7,
+    "history_has_support": true,
+    "point_count": 26215,
+    "target_xyz": [
+      7.545429706573486,
+      -21.06282615661621,
+      50.999046325683594
+    ],
+    "clip_l0_voxel_count": 47953
+  },
+  {
+    "group": "B",
+    "dataset_index": 1210,
+    "clip_index": 1210,
+    "sequence_id": "seq0004",
+    "query_time": 1706255184.1018717,
+    "sample_id": "seq0004_g000010",
+    "current_support": false,
+    "positive_count": 0,
+    "history_current_support_count": 6,
+    "history_has_support": true,
+    "point_count": 30538,
+    "target_xyz": [
+      7.519227981567383,
+      -20.993995666503906,
+      51.00020217895508
+    ],
+    "clip_l0_voxel_count": 51458
+  },
+  {
+    "group": "B",
+    "dataset_index": 1211,
+    "clip_index": 1211,
+    "sequence_id": "seq0004",
+    "query_time": 1706255184.1488714,
+    "sample_id": "seq0004_g000011",
+    "current_support": false,
+    "positive_count": 0,
+    "history_current_support_count": 5,
+    "history_has_support": true,
+    "point_count": 30538,
+    "target_xyz": [
+      7.493518829345703,
+      -20.928373336791992,
+      51.00177764892578
+    ],
+    "clip_l0_voxel_count": 54962
+  },
+  {
+    "group": "B",
+    "dataset_index": 1212,
+    "clip_index": 1212,
+    "sequence_id": "seq0004",
+    "query_time": 1706255184.20312,
+    "sample_id": "seq0004_g000012",
+    "current_support": false,
+    "positive_count": 0,
+    "history_current_support_count": 4,
+    "history_has_support": true,
+    "point_count": 34836,
+    "target_xyz": [
+      7.435855865478516,
+      -20.778858184814453,
+      51.00178527832031
+    ],
+    "clip_l0_voxel_count": 57705
+  },
+  {
+    "group": "C",
+    "dataset_index": 0,
+    "clip_index": 0,
+    "sequence_id": "seq0001",
+    "query_time": 1706255121.6059043,
+    "sample_id": "seq0001_g000000",
+    "current_support": false,
+    "positive_count": 0,
+    "history_current_support_count": 0,
+    "history_has_support": false,
+    "point_count": 0,
+    "target_xyz": [
+      12.671246528625488,
+      -19.575437545776367,
+      43.34611892700195
+    ],
+    "clip_l0_voxel_count": 0
+  },
+  {
+    "group": "C",
+    "dataset_index": 800,
+    "clip_index": 800,
+    "sequence_id": "seq0003",
+    "query_time": 1706255162.6037169,
+    "sample_id": "seq0003_g000000",
+    "current_support": false,
+    "positive_count": 0,
+    "history_current_support_count": 0,
+    "history_has_support": false,
+    "point_count": 0,
+    "target_xyz": [
+      12.846980094909668,
+      -19.485107421875,
+      50.261722564697266
+    ],
+    "clip_l0_voxel_count": 0
+  }
+]

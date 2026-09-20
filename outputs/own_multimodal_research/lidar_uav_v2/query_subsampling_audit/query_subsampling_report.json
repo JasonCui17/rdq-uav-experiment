@@ -1,0 +1,939 @@
+{
+  "status": "V2 EQS STRUCTURE READY",
+  "full_training_clips": 28600,
+  "train_sequences": 72,
+  "dataset_rebuilt_each_epoch": false,
+  "strides": {
+    "1": [
+      {
+        "offset": 0,
+        "epoch": 1,
+        "selected_clips": 28600,
+        "selection_ratio": 1.0,
+        "valid_query_slots": 226784,
+        "estimated_spatial_query_forwards": 226784,
+        "estimated_lidar_sample_builds": 226784
+      }
+    ],
+    "2": [
+      {
+        "offset": 0,
+        "epoch": 1,
+        "selected_clips": 14300,
+        "selection_ratio": 0.5,
+        "valid_query_slots": 113248,
+        "estimated_spatial_query_forwards": 113248,
+        "estimated_lidar_sample_builds": 113248
+      },
+      {
+        "offset": 1,
+        "epoch": 2,
+        "selected_clips": 14300,
+        "selection_ratio": 0.5,
+        "valid_query_slots": 113536,
+        "estimated_spatial_query_forwards": 113536,
+        "estimated_lidar_sample_builds": 113536
+      }
+    ],
+    "4": [
+      {
+        "offset": 0,
+        "epoch": 1,
+        "selected_clips": 7150,
+        "selection_ratio": 0.25,
+        "valid_query_slots": 56480,
+        "estimated_spatial_query_forwards": 56480,
+        "estimated_lidar_sample_builds": 56480
+      },
+      {
+        "offset": 1,
+        "epoch": 2,
+        "selected_clips": 7150,
+        "selection_ratio": 0.25,
+        "valid_query_slots": 56624,
+        "estimated_spatial_query_forwards": 56624,
+        "estimated_lidar_sample_builds": 56624
+      },
+      {
+        "offset": 2,
+        "epoch": 3,
+        "selected_clips": 7150,
+        "selection_ratio": 0.25,
+        "valid_query_slots": 56768,
+        "estimated_spatial_query_forwards": 56768,
+        "estimated_lidar_sample_builds": 56768
+      },
+      {
+        "offset": 3,
+        "epoch": 4,
+        "selected_clips": 7150,
+        "selection_ratio": 0.25,
+        "valid_query_slots": 56912,
+        "estimated_spatial_query_forwards": 56912,
+        "estimated_lidar_sample_builds": 56912
+      }
+    ],
+    "8": [
+      {
+        "offset": 0,
+        "epoch": 1,
+        "selected_clips": 3575,
+        "selection_ratio": 0.125,
+        "valid_query_slots": 28096,
+        "estimated_spatial_query_forwards": 28096,
+        "estimated_lidar_sample_builds": 28096
+      },
+      {
+        "offset": 1,
+        "epoch": 2,
+        "selected_clips": 3575,
+        "selection_ratio": 0.125,
+        "valid_query_slots": 28168,
+        "estimated_spatial_query_forwards": 28168,
+        "estimated_lidar_sample_builds": 28168
+      },
+      {
+        "offset": 2,
+        "epoch": 3,
+        "selected_clips": 3575,
+        "selection_ratio": 0.125,
+        "valid_query_slots": 28240,
+        "estimated_spatial_query_forwards": 28240,
+        "estimated_lidar_sample_builds": 28240
+      },
+      {
+        "offset": 3,
+        "epoch": 4,
+        "selected_clips": 3575,
+        "selection_ratio": 0.125,
+        "valid_query_slots": 28312,
+        "estimated_spatial_query_forwards": 28312,
+        "estimated_lidar_sample_builds": 28312
+      },
+      {
+        "offset": 4,
+        "epoch": 5,
+        "selected_clips": 3575,
+        "selection_ratio": 0.125,
+        "valid_query_slots": 28384,
+        "estimated_spatial_query_forwards": 28384,
+        "estimated_lidar_sample_builds": 28384
+      },
+      {
+        "offset": 5,
+        "epoch": 6,
+        "selected_clips": 3575,
+        "selection_ratio": 0.125,
+        "valid_query_slots": 28456,
+        "estimated_spatial_query_forwards": 28456,
+        "estimated_lidar_sample_builds": 28456
+      },
+      {
+        "offset": 6,
+        "epoch": 7,
+        "selected_clips": 3575,
+        "selection_ratio": 0.125,
+        "valid_query_slots": 28528,
+        "estimated_spatial_query_forwards": 28528,
+        "estimated_lidar_sample_builds": 28528
+      },
+      {
+        "offset": 7,
+        "epoch": 8,
+        "selected_clips": 3575,
+        "selection_ratio": 0.125,
+        "valid_query_slots": 28600,
+        "estimated_spatial_query_forwards": 28600,
+        "estimated_lidar_sample_builds": 28600
+      }
+    ]
+  },
+  "appearance_summary": {
+    "stride1_offset0": {
+      "mean": 7.9295104895104895,
+      "median": 8.0,
+      "p90": 8.0,
+      "max": 8
+    },
+    "stride4_offset0": {
+      "mean": 1.9748251748251748,
+      "median": 2.0,
+      "p90": 2.0,
+      "max": 2
+    },
+    "stride4_offset1": {
+      "mean": 1.9798601398601399,
+      "median": 2.0,
+      "p90": 2.0,
+      "max": 2
+    },
+    "stride4_offset2": {
+      "mean": 1.984895104895105,
+      "median": 2.0,
+      "p90": 2.0,
+      "max": 2
+    },
+    "stride4_offset3": {
+      "mean": 1.98993006993007,
+      "median": 2.0,
+      "p90": 2.0,
+      "max": 2
+    }
+  },
+  "stride4_four_epoch": {
+    "anchor_coverage_ratio": 1.0,
+    "duplicate_anchor_selection": 0,
+    "missing_anchor_count": 0,
+    "query_supervision_coverage": 1.0,
+    "missing_supervised_query_count": 0
+  },
+  "validation": {
+    "before": 1600,
+    "after": 1600,
+    "sampler": "NONE",
+    "full_denominator": true
+  },
+  "stride1_equivalence": true,
+  "resume_deterministic": true,
+  "scheduler_dry_run": {
+    "status": "PASS",
+    "epochs": 100,
+    "batch_size_clips": 2,
+    "accumulate": 2,
+    "total_planned_optimizer_updates": 178800,
+    "warmup_updates": 8940,
+    "per_epoch": [
+      {
+        "epoch": 1,
+        "offset": 0,
+        "selected_clips": 7150,
+        "batches": 3575,
+        "optimizer_updates": 1788
+      },
+      {
+        "epoch": 2,
+        "offset": 1,
+        "selected_clips": 7150,
+        "batches": 3575,
+        "optimizer_updates": 1788
+      },
+      {
+        "epoch": 3,
+        "offset": 2,
+        "selected_clips": 7150,
+        "batches": 3575,
+        "optimizer_updates": 1788
+      },
+      {
+        "epoch": 4,
+        "offset": 3,
+        "selected_clips": 7150,
+        "batches": 3575,
+        "optimizer_updates": 1788
+      },
+      {
+        "epoch": 5,
+        "offset": 0,
+        "selected_clips": 7150,
+        "batches": 3575,
+        "optimizer_updates": 1788
+      },
+      {
+        "epoch": 6,
+        "offset": 1,
+        "selected_clips": 7150,
+        "batches": 3575,
+        "optimizer_updates": 1788
+      },
+      {
+        "epoch": 7,
+        "offset": 2,
+        "selected_clips": 7150,
+        "batches": 3575,
+        "optimizer_updates": 1788
+      },
+      {
+        "epoch": 8,
+        "offset": 3,
+        "selected_clips": 7150,
+        "batches": 3575,
+        "optimizer_updates": 1788
+      },
+      {
+        "epoch": 9,
+        "offset": 0,
+        "selected_clips": 7150,
+        "batches": 3575,
+        "optimizer_updates": 1788
+      },
+      {
+        "epoch": 10,
+        "offset": 1,
+        "selected_clips": 7150,
+        "batches": 3575,
+        "optimizer_updates": 1788
+      },
+      {
+        "epoch": 11,
+        "offset": 2,
+        "selected_clips": 7150,
+        "batches": 3575,
+        "optimizer_updates": 1788
+      },
+      {
+        "epoch": 12,
+        "offset": 3,
+        "selected_clips": 7150,
+        "batches": 3575,
+        "optimizer_updates": 1788
+      },
+      {
+        "epoch": 13,
+        "offset": 0,
+        "selected_clips": 7150,
+        "batches": 3575,
+        "optimizer_updates": 1788
+      },
+      {
+        "epoch": 14,
+        "offset": 1,
+        "selected_clips": 7150,
+        "batches": 3575,
+        "optimizer_updates": 1788
+      },
+      {
+        "epoch": 15,
+        "offset": 2,
+        "selected_clips": 7150,
+        "batches": 3575,
+        "optimizer_updates": 1788
+      },
+      {
+        "epoch": 16,
+        "offset": 3,
+        "selected_clips": 7150,
+        "batches": 3575,
+        "optimizer_updates": 1788
+      },
+      {
+        "epoch": 17,
+        "offset": 0,
+        "selected_clips": 7150,
+        "batches": 3575,
+        "optimizer_updates": 1788
+      },
+      {
+        "epoch": 18,
+        "offset": 1,
+        "selected_clips": 7150,
+        "batches": 3575,
+        "optimizer_updates": 1788
+      },
+      {
+        "epoch": 19,
+        "offset": 2,
+        "selected_clips": 7150,
+        "batches": 3575,
+        "optimizer_updates": 1788
+      },
+      {
+        "epoch": 20,
+        "offset": 3,
+        "selected_clips": 7150,
+        "batches": 3575,
+        "optimizer_updates": 1788
+      },
+      {
+        "epoch": 21,
+        "offset": 0,
+        "selected_clips": 7150,
+        "batches": 3575,
+        "optimizer_updates": 1788
+      },
+      {
+        "epoch": 22,
+        "offset": 1,
+        "selected_clips": 7150,
+        "batches": 3575,
+        "optimizer_updates": 1788
+      },
+      {
+        "epoch": 23,
+        "offset": 2,
+        "selected_clips": 7150,
+        "batches": 3575,
+        "optimizer_updates": 1788
+      },
+      {
+        "epoch": 24,
+        "offset": 3,
+        "selected_clips": 7150,
+        "batches": 3575,
+        "optimizer_updates": 1788
+      },
+      {
+        "epoch": 25,
+        "offset": 0,
+        "selected_clips": 7150,
+        "batches": 3575,
+        "optimizer_updates": 1788
+      },
+      {
+        "epoch": 26,
+        "offset": 1,
+        "selected_clips": 7150,
+        "batches": 3575,
+        "optimizer_updates": 1788
+      },
+      {
+        "epoch": 27,
+        "offset": 2,
+        "selected_clips": 7150,
+        "batches": 3575,
+        "optimizer_updates": 1788
+      },
+      {
+        "epoch": 28,
+        "offset": 3,
+        "selected_clips": 7150,
+        "batches": 3575,
+        "optimizer_updates": 1788
+      },
+      {
+        "epoch": 29,
+        "offset": 0,
+        "selected_clips": 7150,
+        "batches": 3575,
+        "optimizer_updates": 1788
+      },
+      {
+        "epoch": 30,
+        "offset": 1,
+        "selected_clips": 7150,
+        "batches": 3575,
+        "optimizer_updates": 1788
+      },
+      {
+        "epoch": 31,
+        "offset": 2,
+        "selected_clips": 7150,
+        "batches": 3575,
+        "optimizer_updates": 1788
+      },
+      {
+        "epoch": 32,
+        "offset": 3,
+        "selected_clips": 7150,
+        "batches": 3575,
+        "optimizer_updates": 1788
+      },
+      {
+        "epoch": 33,
+        "offset": 0,
+        "selected_clips": 7150,
+        "batches": 3575,
+        "optimizer_updates": 1788
+      },
+      {
+        "epoch": 34,
+        "offset": 1,
+        "selected_clips": 7150,
+        "batches": 3575,
+        "optimizer_updates": 1788
+      },
+      {
+        "epoch": 35,
+        "offset": 2,
+        "selected_clips": 7150,
+        "batches": 3575,
+        "optimizer_updates": 1788
+      },
+      {
+        "epoch": 36,
+        "offset": 3,
+        "selected_clips": 7150,
+        "batches": 3575,
+        "optimizer_updates": 1788
+      },
+      {
+        "epoch": 37,
+        "offset": 0,
+        "selected_clips": 7150,
+        "batches": 3575,
+        "optimizer_updates": 1788
+      },
+      {
+        "epoch": 38,
+        "offset": 1,
+        "selected_clips": 7150,
+        "batches": 3575,
+        "optimizer_updates": 1788
+      },
+      {
+        "epoch": 39,
+        "offset": 2,
+        "selected_clips": 7150,
+        "batches": 3575,
+        "optimizer_updates": 1788
+      },
+      {
+        "epoch": 40,
+        "offset": 3,
+        "selected_clips": 7150,
+        "batches": 3575,
+        "optimizer_updates": 1788
+      },
+      {
+        "epoch": 41,
+        "offset": 0,
+        "selected_clips": 7150,
+        "batches": 3575,
+        "optimizer_updates": 1788
+      },
+      {
+        "epoch": 42,
+        "offset": 1,
+        "selected_clips": 7150,
+        "batches": 3575,
+        "optimizer_updates": 1788
+      },
+      {
+        "epoch": 43,
+        "offset": 2,
+        "selected_clips": 7150,
+        "batches": 3575,
+        "optimizer_updates": 1788
+      },
+      {
+        "epoch": 44,
+        "offset": 3,
+        "selected_clips": 7150,
+        "batches": 3575,
+        "optimizer_updates": 1788
+      },
+      {
+        "epoch": 45,
+        "offset": 0,
+        "selected_clips": 7150,
+        "batches": 3575,
+        "optimizer_updates": 1788
+      },
+      {
+        "epoch": 46,
+        "offset": 1,
+        "selected_clips": 7150,
+        "batches": 3575,
+        "optimizer_updates": 1788
+      },
+      {
+        "epoch": 47,
+        "offset": 2,
+        "selected_clips": 7150,
+        "batches": 3575,
+        "optimizer_updates": 1788
+      },
+      {
+        "epoch": 48,
+        "offset": 3,
+        "selected_clips": 7150,
+        "batches": 3575,
+        "optimizer_updates": 1788
+      },
+      {
+        "epoch": 49,
+        "offset": 0,
+        "selected_clips": 7150,
+        "batches": 3575,
+        "optimizer_updates": 1788
+      },
+      {
+        "epoch": 50,
+        "offset": 1,
+        "selected_clips": 7150,
+        "batches": 3575,
+        "optimizer_updates": 1788
+      },
+      {
+        "epoch": 51,
+        "offset": 2,
+        "selected_clips": 7150,
+        "batches": 3575,
+        "optimizer_updates": 1788
+      },
+      {
+        "epoch": 52,
+        "offset": 3,
+        "selected_clips": 7150,
+        "batches": 3575,
+        "optimizer_updates": 1788
+      },
+      {
+        "epoch": 53,
+        "offset": 0,
+        "selected_clips": 7150,
+        "batches": 3575,
+        "optimizer_updates": 1788
+      },
+      {
+        "epoch": 54,
+        "offset": 1,
+        "selected_clips": 7150,
+        "batches": 3575,
+        "optimizer_updates": 1788
+      },
+      {
+        "epoch": 55,
+        "offset": 2,
+        "selected_clips": 7150,
+        "batches": 3575,
+        "optimizer_updates": 1788
+      },
+      {
+        "epoch": 56,
+        "offset": 3,
+        "selected_clips": 7150,
+        "batches": 3575,
+        "optimizer_updates": 1788
+      },
+      {
+        "epoch": 57,
+        "offset": 0,
+        "selected_clips": 7150,
+        "batches": 3575,
+        "optimizer_updates": 1788
+      },
+      {
+        "epoch": 58,
+        "offset": 1,
+        "selected_clips": 7150,
+        "batches": 3575,
+        "optimizer_updates": 1788
+      },
+      {
+        "epoch": 59,
+        "offset": 2,
+        "selected_clips": 7150,
+        "batches": 3575,
+        "optimizer_updates": 1788
+      },
+      {
+        "epoch": 60,
+        "offset": 3,
+        "selected_clips": 7150,
+        "batches": 3575,
+        "optimizer_updates": 1788
+      },
+      {
+        "epoch": 61,
+        "offset": 0,
+        "selected_clips": 7150,
+        "batches": 3575,
+        "optimizer_updates": 1788
+      },
+      {
+        "epoch": 62,
+        "offset": 1,
+        "selected_clips": 7150,
+        "batches": 3575,
+        "optimizer_updates": 1788
+      },
+      {
+        "epoch": 63,
+        "offset": 2,
+        "selected_clips": 7150,
+        "batches": 3575,
+        "optimizer_updates": 1788
+      },
+      {
+        "epoch": 64,
+        "offset": 3,
+        "selected_clips": 7150,
+        "batches": 3575,
+        "optimizer_updates": 1788
+      },
+      {
+        "epoch": 65,
+        "offset": 0,
+        "selected_clips": 7150,
+        "batches": 3575,
+        "optimizer_updates": 1788
+      },
+      {
+        "epoch": 66,
+        "offset": 1,
+        "selected_clips": 7150,
+        "batches": 3575,
+        "optimizer_updates": 1788
+      },
+      {
+        "epoch": 67,
+        "offset": 2,
+        "selected_clips": 7150,
+        "batches": 3575,
+        "optimizer_updates": 1788
+      },
+      {
+        "epoch": 68,
+        "offset": 3,
+        "selected_clips": 7150,
+        "batches": 3575,
+        "optimizer_updates": 1788
+      },
+      {
+        "epoch": 69,
+        "offset": 0,
+        "selected_clips": 7150,
+        "batches": 3575,
+        "optimizer_updates": 1788
+      },
+      {
+        "epoch": 70,
+        "offset": 1,
+        "selected_clips": 7150,
+        "batches": 3575,
+        "optimizer_updates": 1788
+      },
+      {
+        "epoch": 71,
+        "offset": 2,
+        "selected_clips": 7150,
+        "batches": 3575,
+        "optimizer_updates": 1788
+      },
+      {
+        "epoch": 72,
+        "offset": 3,
+        "selected_clips": 7150,
+        "batches": 3575,
+        "optimizer_updates": 1788
+      },
+      {
+        "epoch": 73,
+        "offset": 0,
+        "selected_clips": 7150,
+        "batches": 3575,
+        "optimizer_updates": 1788
+      },
+      {
+        "epoch": 74,
+        "offset": 1,
+        "selected_clips": 7150,
+        "batches": 3575,
+        "optimizer_updates": 1788
+      },
+      {
+        "epoch": 75,
+        "offset": 2,
+        "selected_clips": 7150,
+        "batches": 3575,
+        "optimizer_updates": 1788
+      },
+      {
+        "epoch": 76,
+        "offset": 3,
+        "selected_clips": 7150,
+        "batches": 3575,
+        "optimizer_updates": 1788
+      },
+      {
+        "epoch": 77,
+        "offset": 0,
+        "selected_clips": 7150,
+        "batches": 3575,
+        "optimizer_updates": 1788
+      },
+      {
+        "epoch": 78,
+        "offset": 1,
+        "selected_clips": 7150,
+        "batches": 3575,
+        "optimizer_updates": 1788
+      },
+      {
+        "epoch": 79,
+        "offset": 2,
+        "selected_clips": 7150,
+        "batches": 3575,
+        "optimizer_updates": 1788
+      },
+      {
+        "epoch": 80,
+        "offset": 3,
+        "selected_clips": 7150,
+        "batches": 3575,
+        "optimizer_updates": 1788
+      },
+      {
+        "epoch": 81,
+        "offset": 0,
+        "selected_clips": 7150,
+        "batches": 3575,
+        "optimizer_updates": 1788
+      },
+      {
+        "epoch": 82,
+        "offset": 1,
+        "selected_clips": 7150,
+        "batches": 3575,
+        "optimizer_updates": 1788
+      },
+      {
+        "epoch": 83,
+        "offset": 2,
+        "selected_clips": 7150,
+        "batches": 3575,
+        "optimizer_updates": 1788
+      },
+      {
+        "epoch": 84,
+        "offset": 3,
+        "selected_clips": 7150,
+        "batches": 3575,
+        "optimizer_updates": 1788
+      },
+      {
+        "epoch": 85,
+        "offset": 0,
+        "selected_clips": 7150,
+        "batches": 3575,
+        "optimizer_updates": 1788
+      },
+      {
+        "epoch": 86,
+        "offset": 1,
+        "selected_clips": 7150,
+        "batches": 3575,
+        "optimizer_updates": 1788
+      },
+      {
+        "epoch": 87,
+        "offset": 2,
+        "selected_clips": 7150,
+        "batches": 3575,
+        "optimizer_updates": 1788
+      },
+      {
+        "epoch": 88,
+        "offset": 3,
+        "selected_clips": 7150,
+        "batches": 3575,
+        "optimizer_updates": 1788
+      },
+      {
+        "epoch": 89,
+        "offset": 0,
+        "selected_clips": 7150,
+        "batches": 3575,
+        "optimizer_updates": 1788
+      },
+      {
+        "epoch": 90,
+        "offset": 1,
+        "selected_clips": 7150,
+        "batches": 3575,
+        "optimizer_updates": 1788
+      },
+      {
+        "epoch": 91,
+        "offset": 2,
+        "selected_clips": 7150,
+        "batches": 3575,
+        "optimizer_updates": 1788
+      },
+      {
+        "epoch": 92,
+        "offset": 3,
+        "selected_clips": 7150,
+        "batches": 3575,
+        "optimizer_updates": 1788
+      },
+      {
+        "epoch": 93,
+        "offset": 0,
+        "selected_clips": 7150,
+        "batches": 3575,
+        "optimizer_updates": 1788
+      },
+      {
+        "epoch": 94,
+        "offset": 1,
+        "selected_clips": 7150,
+        "batches": 3575,
+        "optimizer_updates": 1788
+      },
+      {
+        "epoch": 95,
+        "offset": 2,
+        "selected_clips": 7150,
+        "batches": 3575,
+        "optimizer_updates": 1788
+      },
+      {
+        "epoch": 96,
+        "offset": 3,
+        "selected_clips": 7150,
+        "batches": 3575,
+        "optimizer_updates": 1788
+      },
+      {
+        "epoch": 97,
+        "offset": 0,
+        "selected_clips": 7150,
+        "batches": 3575,
+        "optimizer_updates": 1788
+      },
+      {
+        "epoch": 98,
+        "offset": 1,
+        "selected_clips": 7150,
+        "batches": 3575,
+        "optimizer_updates": 1788
+      },
+      {
+        "epoch": 99,
+        "offset": 2,
+        "selected_clips": 7150,
+        "batches": 3575,
+        "optimizer_updates": 1788
+      },
+      {
+        "epoch": 100,
+        "offset": 3,
+        "selected_clips": 7150,
+        "batches": 3575,
+        "optimizer_updates": 1788
+      }
+    ]
+  },
+  "sequence_isolation": "PASS",
+  "optimizer_steps": 0,
+  "scheduler_steps": 0,
+  "training_epochs": 0,
+  "definitions": {
+    "event": "one LiDAR frame",
+    "query": "query_time plus latest 20 causal merged events",
+    "clip": "up to 8 consecutive same-sequence queries",
+    "batch": "B complete clips",
+    "eqs_scope": "clip selection only"
+  },
+  "tests": {
+    "unittest": 48,
+    "spatial": 9,
+    "total": 57,
+    "causal_results": {
+      "future_lidar_max_diff": 0.0,
+      "future_gt_max_diff": 0.0,
+      "future_removal_max_diff": 1.1175870895385742e-08,
+      "no_current_support_temporal_gradient": "PASS",
+      "empty_lidar": "PASS"
+    },
+    "isolation_results": {
+      "rolling_validation_boundary_reset": "PASS",
+      "spatial_same_xyz": "PASS",
+      "cross_batch_max_diff": 0.0,
+      "same_timestamp_cross_sequence_max_diff": 0.0,
+      "arbitrary_mixed_history": "PASS"
+    }
+  },
+  "git_head_before": "9b413de9f940c6009ef3ef4ed3c1a42dbbc5ec53"
+}

@@ -1,0 +1,476 @@
+{
+  "summary": {
+    "A": {
+      "A": {
+        "initial": {
+          "pool_entropy": 9.015347480773926,
+          "max_objectness_probability": 0.010254576802253723,
+          "gt_near_pool_weight": 0.00012263031931070145,
+          "pooled_xyz_error": 51.38950824737549,
+          "reference_xyz_error": 70.26955223083496,
+          "spatial_top1_error": 70.26955223083496,
+          "temporal_error": 49.18303298950195
+        },
+        "final": {
+          "pool_entropy": 8.985569953918457,
+          "max_objectness_probability": 0.04403163492679596,
+          "gt_near_pool_weight": 0.0006649282004218549,
+          "pooled_xyz_error": 51.29671859741211,
+          "reference_xyz_error": 0.08978075534105301,
+          "spatial_top1_error": 0.08978075534105301,
+          "temporal_error": 0.4296177923679352
+        }
+      }
+    },
+    "B": {
+      "B": {
+        "initial": {
+          "pool_entropy": 8.963041543960571,
+          "max_objectness_probability": 0.010228782426565886,
+          "gt_near_pool_weight": 0.0002551682337070815,
+          "pooled_xyz_error": 56.140923500061035,
+          "reference_xyz_error": 65.02185916900635,
+          "spatial_top1_error": 65.02185916900635,
+          "temporal_error": 55.57763957977295
+        },
+        "final": {
+          "pool_entropy": 8.9105806350708,
+          "max_objectness_probability": 0.04080588277429342,
+          "gt_near_pool_weight": 0.0012422522413544357,
+          "pooled_xyz_error": 56.033440589904785,
+          "reference_xyz_error": 0.289060615003109,
+          "spatial_top1_error": 0.289060615003109,
+          "temporal_error": 0.9582495093345642
+        }
+      }
+    },
+    "MIX": {
+      "A": {
+        "initial": {
+          "pool_entropy": 9.015347480773926,
+          "max_objectness_probability": 0.010254576802253723,
+          "gt_near_pool_weight": 0.00012263031931070145,
+          "pooled_xyz_error": 51.38950824737549,
+          "reference_xyz_error": 70.26955223083496,
+          "spatial_top1_error": 70.26955223083496,
+          "temporal_error": 49.18303298950195
+        },
+        "final": {
+          "pool_entropy": 8.984107255935669,
+          "max_objectness_probability": 0.05966176278889179,
+          "gt_near_pool_weight": 0.0009377984824823216,
+          "pooled_xyz_error": 51.276832580566406,
+          "reference_xyz_error": 0.24197395890951157,
+          "spatial_top1_error": 0.24197395890951157,
+          "temporal_error": 5.961603164672852
+        }
+      },
+      "B": {
+        "initial": {
+          "pool_entropy": 8.96304202079773,
+          "max_objectness_probability": 0.010228782426565886,
+          "gt_near_pool_weight": 0.0002551682337070815,
+          "pooled_xyz_error": 56.140923500061035,
+          "reference_xyz_error": 65.02185916900635,
+          "spatial_top1_error": 65.02185916900635,
+          "temporal_error": 55.57763957977295
+        },
+        "final": {
+          "pool_entropy": 8.925628662109375,
+          "max_objectness_probability": 0.06169789098203182,
+          "gt_near_pool_weight": 0.00181272387271747,
+          "pooled_xyz_error": 55.94956016540527,
+          "reference_xyz_error": 0.3850482180714607,
+          "spatial_top1_error": 0.3850482180714607,
+          "temporal_error": 3.6014991998672485
+        }
+      }
+    }
+  },
+  "records": [
+    {
+      "stage": "initial",
+      "group": "A",
+      "pool_entropy": 8.99681568145752,
+      "max_objectness_probability": 0.010249395854771137,
+      "gt_near_pool_weight": 0.00012495667033363134,
+      "pooled_xyz_error": 51.406490325927734,
+      "reference_xyz_error": 70.26657104492188,
+      "spatial_top1_error": 70.26657104492188,
+      "temporal_error": 49.1807861328125,
+      "experiment": "A"
+    },
+    {
+      "stage": "initial",
+      "group": "A",
+      "pool_entropy": 8.996816635131836,
+      "max_objectness_probability": 0.010247542522847652,
+      "gt_near_pool_weight": 0.00012491615780163556,
+      "pooled_xyz_error": 51.40758514404297,
+      "reference_xyz_error": 70.26884460449219,
+      "spatial_top1_error": 70.26884460449219,
+      "temporal_error": 49.18180847167969,
+      "experiment": "A"
+    },
+    {
+      "stage": "initial",
+      "group": "A",
+      "pool_entropy": 9.033878326416016,
+      "max_objectness_probability": 0.010261873714625835,
+      "gt_near_pool_weight": 0.00012034152314299718,
+      "pooled_xyz_error": 51.37110900878906,
+      "reference_xyz_error": 70.2698745727539,
+      "spatial_top1_error": 70.2698745727539,
+      "temporal_error": 49.18400955200195,
+      "experiment": "A"
+    },
+    {
+      "stage": "initial",
+      "group": "A",
+      "pool_entropy": 9.033879280090332,
+      "max_objectness_probability": 0.010259495116770267,
+      "gt_near_pool_weight": 0.00012030692596454173,
+      "pooled_xyz_error": 51.37284851074219,
+      "reference_xyz_error": 70.27291870117188,
+      "spatial_top1_error": 70.27291870117188,
+      "temporal_error": 49.18552780151367,
+      "experiment": "A"
+    },
+    {
+      "stage": "final",
+      "group": "A",
+      "pool_entropy": 8.966416358947754,
+      "max_objectness_probability": 0.04413479566574097,
+      "gt_near_pool_weight": 0.0006772177293896675,
+      "pooled_xyz_error": 51.310333251953125,
+      "reference_xyz_error": 0.08910622447729111,
+      "spatial_top1_error": 0.08910622447729111,
+      "temporal_error": 0.43008264899253845,
+      "experiment": "A"
+    },
+    {
+      "stage": "final",
+      "group": "A",
+      "pool_entropy": 8.967338562011719,
+      "max_objectness_probability": 0.044073984026908875,
+      "gt_near_pool_weight": 0.0006792621570639312,
+      "pooled_xyz_error": 51.31228256225586,
+      "reference_xyz_error": 0.08812840282917023,
+      "spatial_top1_error": 0.08812840282917023,
+      "temporal_error": 0.4301939010620117,
+      "experiment": "A"
+    },
+    {
+      "stage": "final",
+      "group": "A",
+      "pool_entropy": 9.003863334655762,
+      "max_objectness_probability": 0.0440022312104702,
+      "gt_near_pool_weight": 0.0006509992526844144,
+      "pooled_xyz_error": 51.28109359741211,
+      "reference_xyz_error": 0.09053395688533783,
+      "spatial_top1_error": 0.09053395688533783,
+      "temporal_error": 0.4289553165435791,
+      "experiment": "A"
+    },
+    {
+      "stage": "final",
+      "group": "A",
+      "pool_entropy": 9.004661560058594,
+      "max_objectness_probability": 0.0439155288040638,
+      "gt_near_pool_weight": 0.0006522336625494063,
+      "pooled_xyz_error": 51.283164978027344,
+      "reference_xyz_error": 0.09135443717241287,
+      "spatial_top1_error": 0.09135443717241287,
+      "temporal_error": 0.42923930287361145,
+      "experiment": "A"
+    },
+    {
+      "stage": "initial",
+      "group": "B",
+      "pool_entropy": 8.907120704650879,
+      "max_objectness_probability": 0.010235927067697048,
+      "gt_near_pool_weight": 0.0002695240546017885,
+      "pooled_xyz_error": 56.22610092163086,
+      "reference_xyz_error": 55.5192985534668,
+      "spatial_top1_error": 55.5192985534668,
+      "temporal_error": 55.62828063964844,
+      "experiment": "B"
+    },
+    {
+      "stage": "initial",
+      "group": "B",
+      "pool_entropy": 8.965888977050781,
+      "max_objectness_probability": 0.010228399187326431,
+      "gt_near_pool_weight": 0.0002542309230193496,
+      "pooled_xyz_error": 56.162689208984375,
+      "reference_xyz_error": 68.26139068603516,
+      "spatial_top1_error": 68.26139068603516,
+      "temporal_error": 55.59975814819336,
+      "experiment": "B"
+    },
+    {
+      "stage": "initial",
+      "group": "B",
+      "pool_entropy": 8.965888977050781,
+      "max_objectness_probability": 0.010226588696241379,
+      "gt_near_pool_weight": 0.0002543008595239371,
+      "pooled_xyz_error": 56.12863540649414,
+      "reference_xyz_error": 68.21160888671875,
+      "spatial_top1_error": 68.21160888671875,
+      "temporal_error": 55.57320022583008,
+      "experiment": "B"
+    },
+    {
+      "stage": "initial",
+      "group": "B",
+      "pool_entropy": 9.013267517089844,
+      "max_objectness_probability": 0.010224214754998684,
+      "gt_near_pool_weight": 0.0002426170976832509,
+      "pooled_xyz_error": 56.046268463134766,
+      "reference_xyz_error": 68.09513854980469,
+      "spatial_top1_error": 68.09513854980469,
+      "temporal_error": 55.50931930541992,
+      "experiment": "B"
+    },
+    {
+      "stage": "final",
+      "group": "B",
+      "pool_entropy": 8.852983474731445,
+      "max_objectness_probability": 0.04090665653347969,
+      "gt_near_pool_weight": 0.0014147600159049034,
+      "pooled_xyz_error": 56.105186462402344,
+      "reference_xyz_error": 0.16360943019390106,
+      "spatial_top1_error": 0.16360943019390106,
+      "temporal_error": 1.0589218139648438,
+      "experiment": "B"
+    },
+    {
+      "stage": "final",
+      "group": "B",
+      "pool_entropy": 8.913711547851562,
+      "max_objectness_probability": 0.04084168002009392,
+      "gt_near_pool_weight": 0.0013373829424381256,
+      "pooled_xyz_error": 56.05084991455078,
+      "reference_xyz_error": 0.23277799785137177,
+      "spatial_top1_error": 0.23277799785137177,
+      "temporal_error": 1.0004241466522217,
+      "experiment": "B"
+    },
+    {
+      "stage": "final",
+      "group": "B",
+      "pool_entropy": 8.913333892822266,
+      "max_objectness_probability": 0.04078024998307228,
+      "gt_near_pool_weight": 0.001331526436842978,
+      "pooled_xyz_error": 56.01705551147461,
+      "reference_xyz_error": 0.3011366128921509,
+      "spatial_top1_error": 0.3011366128921509,
+      "temporal_error": 0.9477312564849854,
+      "experiment": "B"
+    },
+    {
+      "stage": "final",
+      "group": "B",
+      "pool_entropy": 8.96229362487793,
+      "max_objectness_probability": 0.0406949445605278,
+      "gt_near_pool_weight": 0.0008853395702317357,
+      "pooled_xyz_error": 55.960670471191406,
+      "reference_xyz_error": 0.4587184190750122,
+      "spatial_top1_error": 0.4587184190750122,
+      "temporal_error": 0.825920820236206,
+      "experiment": "B"
+    },
+    {
+      "stage": "initial",
+      "group": "A",
+      "pool_entropy": 8.99681568145752,
+      "max_objectness_probability": 0.010249395854771137,
+      "gt_near_pool_weight": 0.00012495667033363134,
+      "pooled_xyz_error": 51.406490325927734,
+      "reference_xyz_error": 70.26657104492188,
+      "spatial_top1_error": 70.26657104492188,
+      "temporal_error": 49.1807861328125,
+      "experiment": "MIX"
+    },
+    {
+      "stage": "initial",
+      "group": "A",
+      "pool_entropy": 8.996816635131836,
+      "max_objectness_probability": 0.010247542522847652,
+      "gt_near_pool_weight": 0.00012491615780163556,
+      "pooled_xyz_error": 51.40758514404297,
+      "reference_xyz_error": 70.26884460449219,
+      "spatial_top1_error": 70.26884460449219,
+      "temporal_error": 49.18180847167969,
+      "experiment": "MIX"
+    },
+    {
+      "stage": "initial",
+      "group": "A",
+      "pool_entropy": 9.033878326416016,
+      "max_objectness_probability": 0.010261873714625835,
+      "gt_near_pool_weight": 0.00012034152314299718,
+      "pooled_xyz_error": 51.37110900878906,
+      "reference_xyz_error": 70.2698745727539,
+      "spatial_top1_error": 70.2698745727539,
+      "temporal_error": 49.18400955200195,
+      "experiment": "MIX"
+    },
+    {
+      "stage": "initial",
+      "group": "A",
+      "pool_entropy": 9.033879280090332,
+      "max_objectness_probability": 0.010259495116770267,
+      "gt_near_pool_weight": 0.00012030692596454173,
+      "pooled_xyz_error": 51.37284851074219,
+      "reference_xyz_error": 70.27291870117188,
+      "spatial_top1_error": 70.27291870117188,
+      "temporal_error": 49.18552780151367,
+      "experiment": "MIX"
+    },
+    {
+      "stage": "initial",
+      "group": "B",
+      "pool_entropy": 8.907121658325195,
+      "max_objectness_probability": 0.010235927067697048,
+      "gt_near_pool_weight": 0.0002695240546017885,
+      "pooled_xyz_error": 56.22610092163086,
+      "reference_xyz_error": 55.5192985534668,
+      "spatial_top1_error": 55.5192985534668,
+      "temporal_error": 55.62828063964844,
+      "experiment": "MIX"
+    },
+    {
+      "stage": "initial",
+      "group": "B",
+      "pool_entropy": 8.965888977050781,
+      "max_objectness_probability": 0.010228399187326431,
+      "gt_near_pool_weight": 0.0002542309230193496,
+      "pooled_xyz_error": 56.162689208984375,
+      "reference_xyz_error": 68.26139068603516,
+      "spatial_top1_error": 68.26139068603516,
+      "temporal_error": 55.59975814819336,
+      "experiment": "MIX"
+    },
+    {
+      "stage": "initial",
+      "group": "B",
+      "pool_entropy": 8.965888977050781,
+      "max_objectness_probability": 0.010226588696241379,
+      "gt_near_pool_weight": 0.0002543008595239371,
+      "pooled_xyz_error": 56.12863540649414,
+      "reference_xyz_error": 68.21160888671875,
+      "spatial_top1_error": 68.21160888671875,
+      "temporal_error": 55.57320022583008,
+      "experiment": "MIX"
+    },
+    {
+      "stage": "initial",
+      "group": "B",
+      "pool_entropy": 9.01326847076416,
+      "max_objectness_probability": 0.010224214754998684,
+      "gt_near_pool_weight": 0.0002426170976832509,
+      "pooled_xyz_error": 56.046268463134766,
+      "reference_xyz_error": 68.09513854980469,
+      "spatial_top1_error": 68.09513854980469,
+      "temporal_error": 55.50931930541992,
+      "experiment": "MIX"
+    },
+    {
+      "stage": "final",
+      "group": "A",
+      "pool_entropy": 8.964195251464844,
+      "max_objectness_probability": 0.05992978438735008,
+      "gt_near_pool_weight": 0.0009532235562801361,
+      "pooled_xyz_error": 51.29452133178711,
+      "reference_xyz_error": 0.24012477695941925,
+      "spatial_top1_error": 0.24012477695941925,
+      "temporal_error": 6.013031959533691,
+      "experiment": "MIX"
+    },
+    {
+      "stage": "final",
+      "group": "A",
+      "pool_entropy": 8.965601921081543,
+      "max_objectness_probability": 0.059810422360897064,
+      "gt_near_pool_weight": 0.0009587728418409824,
+      "pooled_xyz_error": 51.29836654663086,
+      "reference_xyz_error": 0.24020403623580933,
+      "spatial_top1_error": 0.24020403623580933,
+      "temporal_error": 5.969827651977539,
+      "experiment": "MIX"
+    },
+    {
+      "stage": "final",
+      "group": "A",
+      "pool_entropy": 9.002721786499023,
+      "max_objectness_probability": 0.059533532708883286,
+      "gt_near_pool_weight": 0.0009178246255032718,
+      "pooled_xyz_error": 51.25541305541992,
+      "reference_xyz_error": 0.24293586611747742,
+      "spatial_top1_error": 0.24293586611747742,
+      "temporal_error": 5.9509196281433105,
+      "experiment": "MIX"
+    },
+    {
+      "stage": "final",
+      "group": "A",
+      "pool_entropy": 9.003910064697266,
+      "max_objectness_probability": 0.05937331169843674,
+      "gt_near_pool_weight": 0.0009213729063048959,
+      "pooled_xyz_error": 51.259029388427734,
+      "reference_xyz_error": 0.24463115632534027,
+      "spatial_top1_error": 0.24463115632534027,
+      "temporal_error": 5.912633419036865,
+      "experiment": "MIX"
+    },
+    {
+      "stage": "final",
+      "group": "B",
+      "pool_entropy": 8.867095947265625,
+      "max_objectness_probability": 0.06180749461054802,
+      "gt_near_pool_weight": 0.0022490902338176966,
+      "pooled_xyz_error": 56.005496978759766,
+      "reference_xyz_error": 0.2548034191131592,
+      "spatial_top1_error": 0.2548034191131592,
+      "temporal_error": 3.5531208515167236,
+      "experiment": "MIX"
+    },
+    {
+      "stage": "final",
+      "group": "B",
+      "pool_entropy": 8.9279203414917,
+      "max_objectness_probability": 0.06174548342823982,
+      "gt_near_pool_weight": 0.0021194429136812687,
+      "pooled_xyz_error": 55.970977783203125,
+      "reference_xyz_error": 0.32826685905456543,
+      "spatial_top1_error": 0.32826685905456543,
+      "temporal_error": 3.579894542694092,
+      "experiment": "MIX"
+    },
+    {
+      "stage": "final",
+      "group": "B",
+      "pool_entropy": 8.929418563842773,
+      "max_objectness_probability": 0.06167076900601387,
+      "gt_near_pool_weight": 0.0014766803942620754,
+      "pooled_xyz_error": 55.940895080566406,
+      "reference_xyz_error": 0.3987238109111786,
+      "spatial_top1_error": 0.3987238109111786,
+      "temporal_error": 3.613847017288208,
+      "experiment": "MIX"
+    },
+    {
+      "stage": "final",
+      "group": "B",
+      "pool_entropy": 8.978079795837402,
+      "max_objectness_probability": 0.06156781688332558,
+      "gt_near_pool_weight": 0.001405681949108839,
+      "pooled_xyz_error": 55.8808708190918,
+      "reference_xyz_error": 0.5583987832069397,
+      "spatial_top1_error": 0.5583987832069397,
+      "temporal_error": 3.6591343879699707,
+      "experiment": "MIX"
+    }
+  ]
+}

@@ -1,0 +1,121 @@
+{
+  "status": "V2 RECENT INPUT CONTRACT CLEANUP READY",
+  "field": "supervision_recent_mask",
+  "usage_chain": [
+    {
+      "category": "A Dataset generation",
+      "path": "src/rdq_uav/lidar_v2/data.py",
+      "use": "last 4 selected actual events -> supervision_recent_mask"
+    },
+    {
+      "category": "B Collate",
+      "path": "src/rdq_uav/lidar_v2/data.py",
+      "use": "concatenate mask; validate repeated UQP query identity"
+    },
+    {
+      "category": "C Device transfer",
+      "path": "src/rdq_uav/lidar_v2/runtime.py",
+      "use": "generic move_batch transfers bool mask to loss/evaluation device"
+    },
+    {
+      "category": "D Model forward",
+      "path": "src/rdq_uav/lidar_v2/model.py; sbe.py; temporal.py",
+      "use": "NOT READ"
+    },
+    {
+      "category": "E Spatial label/loss",
+      "path": "src/rdq_uav/lidar_v2/loss.py",
+      "use": "d_recent, Positive/Ignore/Negative, NoCurrentSupport"
+    },
+    {
+      "category": "F Evaluation",
+      "path": "src/rdq_uav/lidar_v2/runtime.py",
+      "use": "CurrentSupport split and latest-four neighbor group"
+    },
+    {
+      "category": "G Export/debug",
+      "path": "tools/evaluate_lidar_uav_v2.py; export_lidar_uav_v2_candidates.py",
+      "use": "indirectly uses shared evaluation; no learned feature"
+    }
+  ],
+  "model_forward_uses_recent_mask": false,
+  "spatial_supervision_uses_recent_mask": true,
+  "evaluation_uses_recent_mask": true,
+  "transferred_to_gpu": true,
+  "transfer_reason": "CandidateLoss d_recent and validation grouping execute on the model device",
+  "model_point_inputs": [
+    "points/XYZ",
+    "sensor_id",
+    "delta_t",
+    "point_batch_index"
+  ],
+  "latest_events": 20,
+  "recent_supervision_events": 4,
+  "real_batch": {
+    "sequence_id": "seq0001",
+    "clip_index": 7,
+    "points": 70545,
+    "queries": 8,
+    "label_counts": {
+      "positive": 0,
+      "ignore": 14,
+      "negative": 29851,
+      "current_support_occurrences": 0,
+      "no_current_support_occurrences": 8
+    },
+    "label_masks_equal": true,
+    "output_diffs": {
+      "logits": 0.0,
+      "pred_xyz": 0.0,
+      "fine_features": 0.0,
+      "query_token": 0.0,
+      "temporal_hidden": 0.0,
+      "temporal_pred_xyz": 0.0
+    },
+    "model_mask_deletion_output_diffs": {
+      "logits": 0.0,
+      "pred_xyz": 0.0,
+      "fine_features": 0.0,
+      "query_token": 0.0,
+      "temporal_hidden": 0.0,
+      "temporal_pred_xyz": 0.0
+    },
+    "loss_diffs": {
+      "loss": 0.0,
+      "spatial_loss": 0.0,
+      "loss_cls": 0.0,
+      "loss_reg": 0.0,
+      "temporal_loss": 0.0
+    }
+  },
+  "gradients": {
+    "max_diff": 0.0,
+    "per_parameter": {
+      "voxel_embed.proj.weight": 0.0,
+      "merge01.parent.weight": 0.0,
+      "encoder0.blocks.0.qkv.weight": 0.0,
+      "head.cls.2.weight": 0.0,
+      "query_pool.xyz_embed.2.weight": 0.0,
+      "temporal_transformer.blocks.0.qkv.weight": 0.0,
+      "temporal_head.net.2.weight": 0.0
+    }
+  },
+  "parameters": {
+    "before": 1324683,
+    "after": 1324683
+  },
+  "regressions": {
+    "tests": 76,
+    "sbe": "PASS",
+    "eooe": "PASS",
+    "uqp": "PASS",
+    "eqs": "PASS",
+    "sequence_isolation": "PASS",
+    "query_causal_future_leakage": "PASS"
+  },
+  "optimizer_steps": 0,
+  "scheduler_steps": 0,
+  "training_epochs": 0,
+  "checkpoint_optimization": false,
+  "git_head_before": "9c58609519ba3d047ec8f49419902845ada3e3e8"
+}

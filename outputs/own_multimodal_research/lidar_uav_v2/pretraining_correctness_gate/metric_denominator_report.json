@@ -1,0 +1,12 @@
+{
+  "validation_gt_rows": 1600,
+  "evaluated_endpoint_occurrences": 1600,
+  "endpoint_spatial_mask_occurrences": 1600,
+  "spatial_supervised_occurrences": 1391,
+  "temporal_supervised_occurrences": 1600,
+  "current_support_occurrences": 1391,
+  "no_current_support_occurrences": 209,
+  "pre_fix_history_plus_endpoint_occurrences": 12352,
+  "pre_fix_spatial_supervised_occurrences": 10739,
+  "post_fix_history_occurrences_in_spatial_loss": 0
+}

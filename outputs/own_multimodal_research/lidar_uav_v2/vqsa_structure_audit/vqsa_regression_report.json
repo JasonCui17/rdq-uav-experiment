@@ -1,0 +1,67 @@
+{
+  "tests": 84,
+  "empty_slot_mask": "PASS",
+  "single_slot_attention": "PASS",
+  "position_sensitivity": "PASS",
+  "point_permutation": "PASS",
+  "vqsa_permutation_max_diff": 0.0,
+  "uqp": "PASS",
+  "uqp_output_diffs": {
+    "spatial": {
+      "logits": 0.0,
+      "pred_xyz": 0.0,
+      "fine_features": 0.0
+    },
+    "query_token": 0.0,
+    "temporal_hidden": 0.0,
+    "temporal_xyz": 0.0
+  },
+  "uqp_loss_diffs": {
+    "loss": 0.0,
+    "spatial_loss": 0.0,
+    "loss_cls": 0.0,
+    "loss_reg": 0.0,
+    "temporal_loss": 0.0
+  },
+  "uqp_gradient_diffs": {
+    "voxel_embed.proj.weight": {
+      "max_abs_diff": 3.725290298461914e-09,
+      "max_relative_diff": 1.0972929016012467e-07
+    },
+    "encoder0.blocks.0.qkv.weight": {
+      "max_abs_diff": 8.731149137020111e-11,
+      "max_relative_diff": 1.682339906011034e-07
+    },
+    "merge01.parent.weight": {
+      "max_abs_diff": 1.862645149230957e-09,
+      "max_relative_diff": 2.7733090909141336e-07
+    },
+    "head.cls.2.weight": {
+      "max_abs_diff": 7.450580596923828e-09,
+      "max_relative_diff": 1.5659710727559556e-07
+    },
+    "head.reg.2.weight": {
+      "max_abs_diff": 3.725290298461914e-09,
+      "max_relative_diff": 4.9427403303688095e-08
+    },
+    "query_pool.xyz_embed.2.weight": {
+      "max_abs_diff": 1.4210854715202004e-14,
+      "max_relative_diff": 1.237195720218333e-07
+    },
+    "temporal_transformer.blocks.0.qkv.weight": {
+      "max_abs_diff": 0.0,
+      "max_relative_diff": 0.0
+    },
+    "temporal_head.net.2.weight": {
+      "max_abs_diff": 0.0,
+      "max_relative_diff": 0.0
+    }
+  },
+  "sbe": "PASS",
+  "eooe": "PASS",
+  "eqs": "PASS",
+  "sequence_isolation": "PASS",
+  "recent_contract": "PASS",
+  "recent_gradient_max_diff": 0.0,
+  "query_causal_future_leakage": "PASS"
+}

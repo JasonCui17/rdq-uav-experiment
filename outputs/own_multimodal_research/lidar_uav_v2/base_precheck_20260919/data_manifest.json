@@ -1,0 +1,287 @@
+{
+  "train_root": "/home/jasoncui/datasets/MMAUD/official/train",
+  "val_root": "/home/jasoncui/datasets/MMAUD/official/val",
+  "val_reference": "/home/jasoncui/datasets/MMAUD/official/validation_ref_new (for your ref).csv",
+  "train_gt_source": "sequence_ground_truth",
+  "val_gt_source": "validation_ref_csv",
+  "train_sample_count": 28600,
+  "val_gt_rows": 1600,
+  "val_valid_gt_rows": 1600,
+  "val_invalid_gt_rows": 0,
+  "val_sequence_count": 16,
+  "val_matched_sequence_count": 16,
+  "val_sequence_matched_rows": 1600,
+  "val_constructed_samples": 1600,
+  "val_missing_sequence_count": 0,
+  "val_missing_sequence_examples": [],
+  "val_no_history_event_count": 21,
+  "val_no_history_event_examples": [
+    "seq0001_valref_000000",
+    "seq0002_valref_000100",
+    "seq0003_valref_000200",
+    "seq0004_valref_000300",
+    "seq0004_valref_000301",
+    "seq0005_valref_000400",
+    "seq0006_valref_000500",
+    "seq0007_valref_000600",
+    "seq0007_valref_000601",
+    "seq0008_valref_000700"
+  ],
+  "val_empty_lidar_count": 23,
+  "val_empty_lidar_examples": [
+    "seq0001_valref_000000",
+    "seq0002_valref_000100",
+    "seq0003_valref_000200",
+    "seq0003_valref_000201",
+    "seq0003_valref_000202",
+    "seq0004_valref_000300",
+    "seq0004_valref_000301",
+    "seq0005_valref_000400",
+    "seq0006_valref_000500",
+    "seq0007_valref_000600"
+  ],
+  "val_fewer_than_20_events_count": 310,
+  "val_fewer_than_20_events_examples": [
+    "seq0001_valref_000000",
+    "seq0001_valref_000001",
+    "seq0001_valref_000002",
+    "seq0001_valref_000003",
+    "seq0001_valref_000004",
+    "seq0001_valref_000005",
+    "seq0001_valref_000006",
+    "seq0001_valref_000007",
+    "seq0001_valref_000008",
+    "seq0001_valref_000009"
+  ],
+  "val_duplicate_timestamp_count": 0,
+  "train_sequences": [
+    "seq0001",
+    "seq0002",
+    "seq0003",
+    "seq0004",
+    "seq0005",
+    "seq0006",
+    "seq0008",
+    "seq0010",
+    "seq0011",
+    "seq0016",
+    "seq0017",
+    "seq0018",
+    "seq0019",
+    "seq0021",
+    "seq0022",
+    "seq0024",
+    "seq0025",
+    "seq0026",
+    "seq0027",
+    "seq0028",
+    "seq0029",
+    "seq0030",
+    "seq0032",
+    "seq0033",
+    "seq0034",
+    "seq0038",
+    "seq0039",
+    "seq0040",
+    "seq0041",
+    "seq0043",
+    "seq0044",
+    "seq0045",
+    "seq0046",
+    "seq0047",
+    "seq0049",
+    "seq0051",
+    "seq0052",
+    "seq0053",
+    "seq0056",
+    "seq0057",
+    "seq0058",
+    "seq0060",
+    "seq0061",
+    "seq0062",
+    "seq0063",
+    "seq0064",
+    "seq0069",
+    "seq0070",
+    "seq0071",
+    "seq0072",
+    "seq0073",
+    "seq0074",
+    "seq0076",
+    "seq0077",
+    "seq0079",
+    "seq0080",
+    "seq0081",
+    "seq0082",
+    "seq0083",
+    "seq0085",
+    "seq0086",
+    "seq0088",
+    "seq0089",
+    "seq0091",
+    "seq0093",
+    "seq0094",
+    "seq0095",
+    "seq0096",
+    "seq0097",
+    "seq0099",
+    "seq0100",
+    "seq0102"
+  ],
+  "val_sequences": [
+    "seq0001",
+    "seq0002",
+    "seq0003",
+    "seq0004",
+    "seq0005",
+    "seq0006",
+    "seq0007",
+    "seq0008",
+    "seq0009",
+    "seq0010",
+    "seq0011",
+    "seq0012",
+    "seq0013",
+    "seq0014",
+    "seq0015",
+    "seq0016"
+  ],
+  "git_commit": "b8db35c401ff64a41a512617a9d1ac496df7b9c6",
+  "model_config_hash": "df5733b2b9313b49b03f1ed3a55090c42569530071fe9bf347d2862259bce530",
+  "validation_schema": {
+    "columns": [
+      "Sequence",
+      "Timestamp",
+      "Position",
+      "Classification"
+    ],
+    "sequence": "Sequence",
+    "timestamp_seconds": "Timestamp",
+    "xyz": "Position",
+    "classification": "Classification",
+    "timestamp_dtype": "float64",
+    "timestamp_unit": "seconds (matched to LiDAR filename timestamps)",
+    "xyz_dtype": "float32 after strict parse",
+    "xyz_unit": "CODE_ASSUMED_METER_FROM_EXISTING_MMUAV_CONVENTION",
+    "missing_values": 0,
+    "duplicate_sequence_timestamp": 0,
+    "classification_values": [
+      "0",
+      "1",
+      "2",
+      "3"
+    ],
+    "first_10": [
+      {
+        "sequence_id": "seq0001",
+        "sample_id": "seq0001_valref_000000",
+        "t0": 1706255621.564602,
+        "gt_xyz": [
+          -0.7345520257949829,
+          -1.2626270055770874,
+          2.174375057220459
+        ],
+        "classification": "0"
+      },
+      {
+        "sequence_id": "seq0001",
+        "sample_id": "seq0001_valref_000001",
+        "t0": 1706255621.6135716,
+        "gt_xyz": [
+          -0.7519720196723938,
+          -1.2679959535598755,
+          2.1726019382476807
+        ],
+        "classification": "0"
+      },
+      {
+        "sequence_id": "seq0001",
+        "sample_id": "seq0001_valref_000002",
+        "t0": 1706255621.6631424,
+        "gt_xyz": [
+          -0.7688279747962952,
+          -1.2720999717712402,
+          2.1714839935302734
+        ],
+        "classification": "0"
+      },
+      {
+        "sequence_id": "seq0001",
+        "sample_id": "seq0001_valref_000003",
+        "t0": 1706255621.7146702,
+        "gt_xyz": [
+          -0.8007190227508545,
+          -1.2773070335388184,
+          2.170245885848999
+        ],
+        "classification": "0"
+      },
+      {
+        "sequence_id": "seq0001",
+        "sample_id": "seq0001_valref_000004",
+        "t0": 1706255621.7612548,
+        "gt_xyz": [
+          -0.8162630200386047,
+          -1.2784899473190308,
+          2.1702721118927
+        ],
+        "classification": "0"
+      },
+      {
+        "sequence_id": "seq0001",
+        "sample_id": "seq0001_valref_000005",
+        "t0": 1706255621.8131719,
+        "gt_xyz": [
+          -0.8320599794387817,
+          -1.2786519527435303,
+          2.1703009605407715
+        ],
+        "classification": "0"
+      },
+      {
+        "sequence_id": "seq0001",
+        "sample_id": "seq0001_valref_000006",
+        "t0": 1706255621.8600023,
+        "gt_xyz": [
+          -0.8479400277137756,
+          -1.2773619890213013,
+          2.1706979274749756
+        ],
+        "classification": "0"
+      },
+      {
+        "sequence_id": "seq0001",
+        "sample_id": "seq0001_valref_000007",
+        "t0": 1706255621.913219,
+        "gt_xyz": [
+          -0.8622729778289795,
+          -1.2751330137252808,
+          2.1717920303344727
+        ],
+        "classification": "0"
+      },
+      {
+        "sequence_id": "seq0001",
+        "sample_id": "seq0001_valref_000008",
+        "t0": 1706255621.9637177,
+        "gt_xyz": [
+          -0.8884000182151794,
+          -1.268193006515503,
+          2.1740190982818604
+        ],
+        "classification": "0"
+      },
+      {
+        "sequence_id": "seq0001",
+        "sample_id": "seq0001_valref_000009",
+        "t0": 1706255622.0144038,
+        "gt_xyz": [
+          -0.90208899974823,
+          -1.262434959411621,
+          2.1751298904418945
+        ],
+        "classification": "0"
+      }
+    ]
+  }
+}

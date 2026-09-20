@@ -1,0 +1,40 @@
+{
+  "gradients": {
+    "voxel_embed.proj.weight": {
+      "max_abs_diff": 3.725290298461914e-09,
+      "max_relative_diff": 9.482234890698752e-08
+    },
+    "encoder0.blocks.0.qkv.weight": {
+      "max_abs_diff": 1.1641532182693481e-10,
+      "max_relative_diff": 1.1577493722682903e-07
+    },
+    "merge01.parent.weight": {
+      "max_abs_diff": 9.313225746154785e-10,
+      "max_relative_diff": 1.1532258957336177e-07
+    },
+    "head.cls.2.weight": {
+      "max_abs_diff": 7.450580596923828e-09,
+      "max_relative_diff": 1.6047510902678907e-07
+    },
+    "head.reg.2.weight": {
+      "max_abs_diff": 3.725290298461914e-09,
+      "max_relative_diff": 6.48947627590242e-08
+    },
+    "query_pool.xyz_embed.2.weight": {
+      "max_abs_diff": 1.4210854715202004e-14,
+      "max_relative_diff": 8.623515343260322e-08
+    },
+    "temporal_transformer.blocks.0.qkv.weight": {
+      "max_abs_diff": 0.0,
+      "max_relative_diff": 0.0
+    },
+    "temporal_head.net.2.weight": {
+      "max_abs_diff": 0.0,
+      "max_relative_diff": 0.0
+    }
+  },
+  "shared_multi_context_gradient": {
+    "status": "PASS",
+    "max_diff": 0.0
+  }
+}

@@ -1,0 +1,2 @@
+epoch,selected_clips,batches,same_sequence_overlap_batches,mixed_sequence_leftover_batches,query_occurrences,unique_spatial_queries,deduplicated_occurrences,dedup_ratio,dense_stride1_spatial_queries,eqs_stride4_spatial_queries,eqs_uqp_spatial_queries,dense_to_eqs_reduction,eqs_to_uqp_reduction,dense_to_uqp_reduction
+1,7150,3575,3575,0,56480,42396,14084,0.24936260623229467,226784,56480,42396,0.7509524481444899,0.24936260623229467,0.8130555947509525

@@ -1,0 +1,65 @@
+{
+  "train": {
+    "clips": 28600,
+    "sequences": 72,
+    "queries": 28600,
+    "cross_sequence_clips": 0,
+    "unsorted_clips": 0,
+    "duplicate_timestamp_clips": 0,
+    "empty_sequence_id": 0,
+    "event_sequence_mismatch": 0,
+    "event_path_sequence_mismatch": 0,
+    "future_event_count": 0,
+    "duplicate_sample_identity_clips": 0,
+    "selected_event_references_checked": 4416168,
+    "anomalies": [],
+    "duplicate_query_timestamp_records": [],
+    "audit_scope": "Every clip and every selected event metadata reference; no point arrays are read."
+  },
+  "validation": {
+    "clips": 1600,
+    "sequences": 16,
+    "queries": 1600,
+    "cross_sequence_clips": 0,
+    "unsorted_clips": 0,
+    "duplicate_timestamp_clips": 0,
+    "empty_sequence_id": 0,
+    "event_sequence_mismatch": 0,
+    "event_path_sequence_mismatch": 0,
+    "future_event_count": 0,
+    "duplicate_sample_identity_clips": 0,
+    "selected_event_references_checked": 220632,
+    "anomalies": [],
+    "duplicate_query_timestamp_records": [],
+    "audit_scope": "Every clip and every selected event metadata reference; no point arrays are read."
+  },
+  "temporal_attention": {
+    "cross_batch_invariance": "PASS",
+    "cross_batch_max_diff": 0.0,
+    "same_timestamp_cross_sequence": "PASS",
+    "same_timestamp_max_diff": 0.0
+  },
+  "spatial": {
+    "same_xyz_cross_sample_voxel_isolation": "PASS"
+  },
+  "rolling_validation_boundary_reset": "PASS",
+  "arbitrary_query_mixed_history_protection": "PASS",
+  "causal_regression": {
+    "future_lidar_max_diff": 0.0,
+    "future_gt_max_diff": 0.0,
+    "future_removal_max_diff": 1.1175870895385742e-08,
+    "no_current_support_temporal_gradient": "PASS",
+    "empty_lidar": "PASS"
+  },
+  "original_dataset_sequence_isolated": true,
+  "tests": 38,
+  "optimizer_steps": 0,
+  "scheduler_steps": 0,
+  "training_epochs": 0,
+  "train_root": "/home/jasoncui/datasets/MMAUD/official/train",
+  "val_root": "/home/jasoncui/datasets/MMAUD/official/val",
+  "split_reference": "outputs/mmuav_paper_reproduction/splits/splits.json",
+  "spatial_regression_tests": 9,
+  "py_compile": "PASS",
+  "v1_frozen_checksums": "PASS"
+}

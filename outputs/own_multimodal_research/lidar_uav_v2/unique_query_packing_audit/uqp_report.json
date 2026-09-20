@@ -1,0 +1,144 @@
+{
+  "status": "V2 UNIQUE QUERY PACKING READY",
+  "typical_batch": {
+    "clip_indices": [
+      8,
+      12
+    ],
+    "query_occurrences": 16,
+    "unique_queries": 12,
+    "dedup_ratio": 0.25,
+    "dataset_materialized_points": 241478,
+    "reference_packed_points": 241478,
+    "uqp_spatial_packed_points": 179195,
+    "point_disk_io_deduplicated": false,
+    "model_input_points_deduplicated": true
+  },
+  "epoch1": {
+    "selected_clips": 7150,
+    "batches": 3575,
+    "same_sequence_overlap_batches": 3575,
+    "mixed_sequence_leftover_batches": 0,
+    "query_occurrences": 56480,
+    "unique_spatial_queries": 42396,
+    "deduplicated_occurrences": 14084,
+    "dedup_ratio": 0.24936260623229467
+  },
+  "compute_funnel": {
+    "dense_stride1_spatial_queries": 226784,
+    "eqs_stride4_spatial_queries": 56480,
+    "eqs_uqp_spatial_queries": 42396,
+    "dense_to_eqs_reduction": 0.7509524481444899,
+    "eqs_to_uqp_reduction": 0.24936260623229467,
+    "dense_to_uqp_reduction": 0.8130555947509525
+  },
+  "exact_output": {
+    "spatial": {
+      "logits": 0.0,
+      "pred_xyz": 0.0,
+      "fine_features": 0.0
+    },
+    "query_token": 0.0,
+    "temporal_hidden": 0.0,
+    "temporal_xyz": 0.0
+  },
+  "loss_diffs": {
+    "loss": 0.0,
+    "spatial_loss": 0.0,
+    "loss_cls": 0.0,
+    "loss_reg": 0.0,
+    "temporal_loss": 0.0
+  },
+  "gradient_equivalence": {
+    "voxel_embed.proj.weight": {
+      "max_abs_diff": 3.725290298461914e-09,
+      "max_relative_diff": 9.482234890698752e-08
+    },
+    "encoder0.blocks.0.qkv.weight": {
+      "max_abs_diff": 1.1641532182693481e-10,
+      "max_relative_diff": 1.1577493722682903e-07
+    },
+    "merge01.parent.weight": {
+      "max_abs_diff": 9.313225746154785e-10,
+      "max_relative_diff": 1.1532258957336177e-07
+    },
+    "head.cls.2.weight": {
+      "max_abs_diff": 7.450580596923828e-09,
+      "max_relative_diff": 1.6047510902678907e-07
+    },
+    "head.reg.2.weight": {
+      "max_abs_diff": 3.725290298461914e-09,
+      "max_relative_diff": 6.48947627590242e-08
+    },
+    "query_pool.xyz_embed.2.weight": {
+      "max_abs_diff": 1.4210854715202004e-14,
+      "max_relative_diff": 8.623515343260322e-08
+    },
+    "temporal_transformer.blocks.0.qkv.weight": {
+      "max_abs_diff": 0.0,
+      "max_relative_diff": 0.0
+    },
+    "temporal_head.net.2.weight": {
+      "max_abs_diff": 0.0,
+      "max_relative_diff": 0.0
+    }
+  },
+  "shared_multi_context_gradient": {
+    "status": "PASS",
+    "max_diff": 0.0
+  },
+  "regressions": {
+    "uqp": "PASS",
+    "eqs": "PASS",
+    "sequence_isolation": "PASS",
+    "future_leakage": "PASS",
+    "sbe": "PASS",
+    "arbitrary_query": "PASS",
+    "tests": 65,
+    "causal_results": {
+      "future_lidar_max_diff": 0.0,
+      "future_gt_max_diff": 0.0,
+      "future_removal_max_diff": 1.1175870895385742e-08,
+      "no_current_support_temporal_gradient": "PASS",
+      "empty_lidar": "PASS"
+    },
+    "isolation_results": {
+      "rolling_validation_boundary_reset": "PASS",
+      "spatial_same_xyz": "PASS",
+      "cross_batch_max_diff": 0.0,
+      "same_timestamp_cross_sequence_max_diff": 0.0,
+      "arbitrary_mixed_history": "PASS"
+    }
+  },
+  "scheduler_dry_run": {
+    "planned_optimizer_updates": 178800,
+    "warmup_updates": 8940
+  },
+  "benchmark": {
+    "hardware": "cpu",
+    "mode": "CPU_FP32",
+    "reference": {
+      "median_ms": 6137.120467494242,
+      "mean_ms": 6176.218321843771,
+      "p95_ms": 6360.110495996196,
+      "repeats": 20,
+      "warmup": 3,
+      "peak_allocated_gib": null
+    },
+    "uqp": {
+      "median_ms": 4088.722519460134,
+      "mean_ms": 4102.190591057297,
+      "p95_ms": 4186.733196582645,
+      "repeats": 20,
+      "warmup": 3,
+      "peak_allocated_gib": null
+    },
+    "speedup": 1.5009872737229852
+  },
+  "remaining_redundancy": "different-query overlapping latest20-event windows are not eliminated",
+  "optimizer_steps": 0,
+  "scheduler_steps": 0,
+  "training_epochs": 0,
+  "checkpoint_optimization": false,
+  "git_head_before": "eb71671e16fc446af78a816a78a70d7c43809192"
+}

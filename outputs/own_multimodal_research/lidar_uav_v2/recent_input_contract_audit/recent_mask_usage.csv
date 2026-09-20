@@ -1,0 +1,8 @@
+category,path,use
+A Dataset generation,src/rdq_uav/lidar_v2/data.py,last 4 selected actual events -> supervision_recent_mask
+B Collate,src/rdq_uav/lidar_v2/data.py,concatenate mask; validate repeated UQP query identity
+C Device transfer,src/rdq_uav/lidar_v2/runtime.py,generic move_batch transfers bool mask to loss/evaluation device
+D Model forward,src/rdq_uav/lidar_v2/model.py; sbe.py; temporal.py,NOT READ
+E Spatial label/loss,src/rdq_uav/lidar_v2/loss.py,"d_recent, Positive/Ignore/Negative, NoCurrentSupport"
+F Evaluation,src/rdq_uav/lidar_v2/runtime.py,CurrentSupport split and latest-four neighbor group
+G Export/debug,tools/evaluate_lidar_uav_v2.py; export_lidar_uav_v2_candidates.py,indirectly uses shared evaluation; no learned feature

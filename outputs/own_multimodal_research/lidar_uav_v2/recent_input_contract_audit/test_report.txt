@@ -1,0 +1,81 @@
+test_gradient_exact_equivalence (test_lidar_uav_v2_recent_contract.RecentInputContractTests) ... ok
+test_legacy_labels_and_losses_are_exact (test_lidar_uav_v2_recent_contract.RecentInputContractTests) ... ok
+test_model_forward_does_not_require_supervision_mask (test_lidar_uav_v2_recent_contract.RecentInputContractTests) ... ok
+test_only_supervision_consumers_reference_mask (test_lidar_uav_v2_recent_contract.RecentInputContractTests) ... ok
+test_density_is_independent_from_topology (test_lidar_uav_v2_eooe.EOOETests) ... ok
+test_occupancy_count_consistency_and_invalid_local (test_lidar_uav_v2_eooe.EOOETests) ... ok
+test_occupancy_patterns_same_ratio_are_distinct (test_lidar_uav_v2_eooe.EOOETests) ... ok
+test_permutation_invariance (test_lidar_uav_v2_eooe.EOOETests) ... ok
+test_projection_contract (test_lidar_uav_v2_eooe.EOOETests) ... ok
+test_slot_mapping_matches_sbe (test_lidar_uav_v2_eooe.EOOETests) ... ok
+test_topology_reaches_parent_projection (test_lidar_uav_v2_eooe.EOOETests) ... ok
+test_gradient_equivalence (test_lidar_uav_v2_uqp.UQPTests) ... ok
+test_key_includes_sequence (test_lidar_uav_v2_uqp.UQPTests) ... ok
+test_mapping_16_to_12 (test_lidar_uav_v2_uqp.UQPTests) ... ok
+test_no_support_weight_and_temporal_occurrences (test_lidar_uav_v2_uqp.UQPTests) ... ok
+test_overlap_batch_sampler_preserves_selection (test_lidar_uav_v2_uqp.UQPTests) ... ok
+test_reference_output_and_loss_equivalence (test_lidar_uav_v2_uqp.UQPTests) ... ok
+test_shared_query_receives_both_temporal_context_gradients (test_lidar_uav_v2_uqp.UQPTests) ... ok
+test_uid_collision_rejected (test_lidar_uav_v2_uqp.UQPTests) ... ok
+test_dense_clip_context_is_unchanged (test_lidar_uav_v2_eqs.EQSTests) ... ok
+test_epoch_cycle_and_resume_order (test_lidar_uav_v2_eqs.EQSTests) ... ok
+test_four_epoch_anchor_and_query_coverage (test_lidar_uav_v2_eqs.EQSTests) ... ok
+test_full_dataset_and_sequence_local_ordinals (test_lidar_uav_v2_eqs.EQSTests) ... ok
+test_invalid_stride_and_epoch (test_lidar_uav_v2_eqs.EQSTests) ... ok
+test_loader_batch_counts_clips (test_lidar_uav_v2_eqs.EQSTests) ... ok
+test_scheduler_plan_uses_variable_epoch_lengths (test_lidar_uav_v2_eqs.EQSTests) ... ok
+test_short_sequence_may_have_zero_for_offset (test_lidar_uav_v2_eqs.EQSTests) ... ok
+test_stride_1248_selection_rule (test_lidar_uav_v2_eqs.EQSTests) ... ok
+test_stride_one_exact_equivalence (test_lidar_uav_v2_eqs.EQSTests) ... ok
+test_a_dataset_groups_before_time (test_lidar_uav_v2_sequence_isolation.IsolationTests) ... ok
+test_b_same_timestamps_and_validation_reset (test_lidar_uav_v2_sequence_isolation.IsolationTests) ... ok
+test_c_event_sequence_checked_explicitly (test_lidar_uav_v2_sequence_isolation.IsolationTests) ... ok
+test_d_identical_xyz_separate_voxels (test_lidar_uav_v2_sequence_isolation.IsolationTests) ... ok
+test_e_temporal_cross_batch_tokens (test_lidar_uav_v2_sequence_isolation.IsolationTests) ... ok
+test_f_same_timestamp_observation_invariance (test_lidar_uav_v2_sequence_isolation.IsolationTests) ... ok
+test_g_reject_mixed_history (test_lidar_uav_v2_sequence_isolation.IsolationTests) ... ok
+test_h_duplicate_unsorted_identity_diagnostics (test_lidar_uav_v2_sequence_isolation.IsolationTests) ... ok
+test_i_model_rejects_forged_mixed_clip (test_lidar_uav_v2_sequence_isolation.IsolationTests) ... ok
+test_j_restore_by_explicit_indices (test_lidar_uav_v2_sequence_isolation.IsolationTests) ... ok
+test_k_inference_sequence_switch_no_state (test_lidar_uav_v2_sequence_isolation.IsolationTests) ... ok
+test_a_future_lidar_invariance (test_lidar_uav_v2_query_causal.QueryCausalTests) ... ok
+test_b_future_gt_invariance (test_lidar_uav_v2_query_causal.QueryCausalTests) ... ok
+test_builder_last20_recent4_and_cleaning (test_lidar_uav_v2_query_causal.QueryCausalTests) ... ok
+test_c_future_removal (test_lidar_uav_v2_query_causal.QueryCausalTests) ... ok
+test_d_gt_free_query_and_independent_target_time (test_lidar_uav_v2_query_causal.QueryCausalTests) ... ok
+test_e_no_current_support_temporal_gradient (test_lidar_uav_v2_query_causal.QueryCausalTests) ... ok
+test_f_empty_observation_and_padding (test_lidar_uav_v2_query_causal.QueryCausalTests) ... ok
+test_g_causal_mask (test_lidar_uav_v2_query_causal.QueryCausalTests) ... ok
+test_gt_free_static_model_and_no_v1_import (test_lidar_uav_v2_query_causal.QueryCausalTests) ... ok
+test_pool_gradient_and_padding_invariance (test_lidar_uav_v2_query_causal.QueryCausalTests) ... ok
+test_pool_is_query_local_and_soft (test_lidar_uav_v2_query_causal.QueryCausalTests) ... ok
+test_validation_endpoint_and_export_interface (test_lidar_uav_v2_query_causal.QueryCausalTests) ... ok
+test_validation_scores_endpoint_once_and_temporal_groups (test_lidar_uav_v2_query_causal.QueryCausalTests) ... ok
+test_01_octants (test_lidar_uav_v2_sbe.SBETests) ... ok
+test_02_negative_world (test_lidar_uav_v2_sbe.SBETests) ... ok
+test_03_boundaries (test_lidar_uav_v2_sbe.SBETests) ... ok
+test_04_residual (test_lidar_uav_v2_sbe.SBETests) ... ok
+test_05_single_point (test_lidar_uav_v2_sbe.SBETests) ... ok
+test_06_mid360_single (test_lidar_uav_v2_sbe.SBETests) ... ok
+test_07_sensor_mixture (test_lidar_uav_v2_sbe.SBETests) ... ok
+test_08_time_stats (test_lidar_uav_v2_sbe.SBETests) ... ok
+test_09_permutation (test_lidar_uav_v2_sbe.SBETests) ... ok
+test_10_empty_slots_and_input (test_lidar_uav_v2_sbe.SBETests) ... ok
+test_11_batch_identity (test_lidar_uav_v2_sbe.SBETests) ... ok
+test_12_checkpoint_strictness (test_lidar_uav_v2_sbe.SBETests) ... ok
+test_13_no_pointwise_learned_feature (test_lidar_uav_v2_sbe.SBETests) ... ok
+test_14_amp_statistics_fp32 (test_lidar_uav_v2_sbe.SBETests) ... ok
+
+----------------------------------------------------------------------
+Ran 67 tests in 2.786s
+
+OK
+test_voxel_floor_parent_maps_child_positions_and_counts PASS
+test_single_and_many_point_voxel_forward_without_cap PASS
+test_batch_and_global_attention_never_mix_samples PASS
+test_morton_identity_and_shifted_windows_no_wrap PASS
+test_batched_local_attention_matches_per_window_reference PASS
+test_loss_ignore_no_support_decode_and_finite_backward PASS
+test_selector_keeps_xyz_score_feature_identity_and_stable_tie PASS
+test_empty_input_returns_empty_prediction PASS
+test_architecture_contract_and_initialization PASS

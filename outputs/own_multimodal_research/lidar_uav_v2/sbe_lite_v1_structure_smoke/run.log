@@ -1,0 +1,267 @@
+VAL:   0%|          | 0/2 [00:00<?, ?it/s]VAL: 100%|██████████| 2/2 [00:00<00:00, 61.92it/s]
+Tests PASS: 27 SBE/query + 9 spatial
+Real 8-query eval/no_grad forward...
+Benchmark legacy embedding on cpu
+  timed 5/20
+  timed 10/20
+  timed 15/20
+  timed 20/20
+Benchmark legacy full model on cpu
+  timed 5/20
+  timed 10/20
+  timed 15/20
+  timed 20/20
+Benchmark sbe embedding on cpu
+  timed 5/20
+  timed 10/20
+  timed 15/20
+  timed 20/20
+Benchmark sbe full model on cpu
+  timed 5/20
+  timed 10/20
+  timed 15/20
+  timed 20/20
+{
+  "status": "V2 SBE-LITE STRUCTURE READY",
+  "pre_sbe_commit": "7c5ae423d8d9344f5c5fafa42f0ead79ebe1c133",
+  "tests": {
+    "sbe": 14,
+    "query_causal": 13,
+    "spatial": 9,
+    "causal_results": {
+      "future_lidar_max_diff": 0.0,
+      "future_gt_max_diff": 0.0,
+      "future_removal_max_diff": 1.1175870895385742e-08,
+      "no_current_support_temporal_gradient": "PASS",
+      "empty_lidar": "PASS"
+    }
+  },
+  "parameters": {
+    "old_total": 1330445,
+    "legacy_embedding": 19202,
+    "sbe_embedding": 11648,
+    "spatial": 1040168,
+    "temporal": 282723,
+    "total": 1322891,
+    "reduction": 7554,
+    "reduction_fraction": 0.005677799533238879
+  },
+  "downstream_load": {
+    "status": "PASS",
+    "source": "pre-SBE class initialized state_dict; no trained temporal weights claimed",
+    "skipped_source_keys": [
+      "voxel_embed.norm.bias",
+      "voxel_embed.norm.weight",
+      "voxel_embed.point_mlp.0.bias",
+      "voxel_embed.point_mlp.0.weight",
+      "voxel_embed.point_mlp.2.bias",
+      "voxel_embed.point_mlp.2.weight",
+      "voxel_embed.proj.bias",
+      "voxel_embed.proj.weight",
+      "voxel_embed.sensor_embedding.weight"
+    ],
+    "expected_missing_keys": [
+      "voxel_embed.norm.bias",
+      "voxel_embed.norm.weight",
+      "voxel_embed.proj.bias",
+      "voxel_embed.proj.weight"
+    ],
+    "unexpected_missing_keys": [],
+    "unexpected_keys": []
+  },
+  "arbitrary_query": {
+    "status": "PASS",
+    "query_time": 1706255122.6682854,
+    "target_present": false,
+    "spatial_candidate_count": 20
+  },
+  "real_smoke": {
+    "query_count": 8,
+    "sequence_id": "seq0001",
+    "sample_ids": [
+      "seq0001_g000019",
+      "seq0001_g000020",
+      "seq0001_g000021",
+      "seq0001_g000022",
+      "seq0001_g000023",
+      "seq0001_g000024",
+      "seq0001_g000025",
+      "seq0001_g000026"
+    ],
+    "query_times": [
+      1706255122.6397073,
+      1706255122.6968632,
+      1706255122.7472053,
+      1706255122.8081586,
+      1706255122.8601298,
+      1706255122.908603,
+      1706255122.9549448,
+      1706255123.0146456
+    ],
+    "points": 338058,
+    "points_per_query": [
+      41953,
+      41953,
+      42304,
+      42258,
+      42259,
+      42348,
+      42347,
+      42636
+    ],
+    "event_counts": [
+      20,
+      20,
+      20,
+      20,
+      20,
+      20,
+      20,
+      20
+    ],
+    "token_counts": [
+      69443,
+      27996,
+      10846
+    ],
+    "slot_stats_shape": [
+      69443,
+      8,
+      11
+    ],
+    "flatten_shape": [
+      69443,
+      88
+    ],
+    "l0_token_shape": [
+      69443,
+      128
+    ],
+    "query_token_shape": [
+      1,
+      8,
+      128
+    ],
+    "temporal_hidden_shape": [
+      1,
+      8,
+      128
+    ],
+    "temporal_pred_xyz_shape": [
+      1,
+      8,
+      3
+    ],
+    "future_event_count": 0,
+    "all_outputs_finite": true,
+    "spatial_labels_unchanged": true
+  },
+  "compute": {
+    "point_count": 338058,
+    "l0_voxels": 69443,
+    "point_to_voxel_ratio": 4.86813645723831,
+    "linear_calls": {
+      "legacy": [
+        {
+          "in_features": 5,
+          "out_features": 32,
+          "input_shape": [
+            338058,
+            5
+          ],
+          "input_elements": 1690290
+        },
+        {
+          "in_features": 32,
+          "out_features": 64,
+          "input_shape": [
+            338058,
+            32
+          ],
+          "input_elements": 10817856
+        },
+        {
+          "in_features": 129,
+          "out_features": 128,
+          "input_shape": [
+            69443,
+            129
+          ],
+          "input_elements": 8958147
+        }
+      ],
+      "sbe": [
+        {
+          "in_features": 88,
+          "out_features": 128,
+          "input_shape": [
+            69443,
+            88
+          ],
+          "input_elements": 6110984
+        }
+      ]
+    },
+    "sbe_pointwise_learned_calls": 0
+  },
+  "benchmark": {
+    "device": "cpu",
+    "dtype": "float32",
+    "threads": 4,
+    "torch": "2.1.1+cu118",
+    "cuda_status": "CUDA_NOT_TESTED",
+    "timings": {
+      "legacy": {
+        "embedding": {
+          "mean_ms": 163.0229399946984,
+          "median_ms": 164.42321299109608,
+          "p95_ms": 171.59326767432503,
+          "repeats": 20,
+          "warmup": 3,
+          "peak_gpu_allocated_gib": null
+        },
+        "full": {
+          "mean_ms": 5907.011601945851,
+          "median_ms": 6022.235894983169,
+          "p95_ms": 6280.71230063797,
+          "repeats": 20,
+          "warmup": 3,
+          "peak_gpu_allocated_gib": null
+        }
+      },
+      "sbe": {
+        "embedding": {
+          "mean_ms": 68.17951654084027,
+          "median_ms": 68.32849193597212,
+          "p95_ms": 72.46299750986509,
+          "repeats": 20,
+          "warmup": 3,
+          "peak_gpu_allocated_gib": null
+        },
+        "full": {
+          "mean_ms": 5947.395999863511,
+          "median_ms": 6069.276972033549,
+          "p95_ms": 6139.566134091001,
+          "repeats": 20,
+          "warmup": 3,
+          "peak_gpu_allocated_gib": null
+        }
+      }
+    },
+    "embedding_speedup": 2.4063638510443117,
+    "full_speedup": 0.9922493112001414
+  },
+  "unchanged_modules": {
+    "data.py": true,
+    "geometry.py": true,
+    "loss.py": true,
+    "runtime.py": true,
+    "training.py": true,
+    "selector.py": true,
+    "temporal.py": true
+  },
+  "optimizer_steps": 0,
+  "scheduler_steps": 0,
+  "training_epochs": 0,
+  "checkpoint_optimization": false
+}
