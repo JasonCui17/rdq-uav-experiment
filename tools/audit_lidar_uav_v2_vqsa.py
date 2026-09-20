@@ -22,7 +22,7 @@ def main():
     output.mkdir(parents=True,exist_ok=True);torch.set_num_threads(4);torch.manual_seed(42)
     cfg=yaml.safe_load((ROOT/'configs/lidar_uav_v2.yaml').read_text())
     queries=LiDARUAVDataset(cfg['data']['root'],ROOT/cfg['data']['split_file'],cfg['data']['train_split'])
-    clips=TemporalQueryClipDataset(queries,cfg['temporal']['clip_length'],stride=1)
+    clips=TemporalQueryClipDataset(queries,cfg['data']['query_clip_length'],stride=cfg['data']['query_clip_stride'])
     clip_index=next(i for i,r in enumerate(clips.clip_metadata) if r['sequence_id']=='seq0001' and r['valid_query_slots']==8)
     item=clips[clip_index];batch=collate_temporal_queries([item],unique_query_packing=True)
     model=LiDARUAVDetector(cfg).eval();hierarchy=model.hierarchy(batch['points'],batch['point_batch_index'])
@@ -62,15 +62,14 @@ def main():
     if not tests.wasSuccessful():raise AssertionError('Regression test failure')
     uqp=modules[3].RESULTS;recent=modules[6].RESULTS;vqsa=modules[0].RESULTS
     parameters=sum(p.numel() for p in model.parameters())
-    all_finite=all(torch.isfinite(result[key]).all().item() for key in ('logits','pred_xyz','fine_features','query_token','temporal_hidden','temporal_pred_xyz'))
+    all_finite=all(torch.isfinite(result[key]).all().item() for key in ('logits','pred_xyz','fine_features'))
     report=dict(status='V2 VQSA STRUCTURE READY',parameters=dict(before=1324683,after=parameters,delta=parameters-1324683,
         vqsa_and_sbe=sum(p.numel() for p in model.voxel_embed.parameters())),complexity=complexity,
         real_smoke=dict(sequence_id='seq0001',clip_index=clip_index,raw_points=len(batch['points']),queries=8,
             token_shapes=dict(slot_stats=list(debug['slot_stats'].shape),slot_input=list(debug['slot_input'].shape),
                 slot_tokens=list(debug['slot_tokens'].shape),voxel_query=list(debug['voxel_query'].shape),
                 dynamic_attention_output=list(debug['dynamic_sequence'].shape),dynamic_summary=list(debug['dynamic_summary'].shape),
-                L0=list(l0_token.shape),L1=[len(hierarchy.levels[1].coords),128],L2=[len(hierarchy.levels[2].coords),128],
-                query_token=list(result['query_token'].shape),temporal_xyz=list(result['temporal_pred_xyz'].shape)),
+                L0=list(l0_token.shape),L1=[len(hierarchy.levels[1].coords),128],L2=[len(hierarchy.levels[2].coords),128]),
             occupied_slots=dict(mean=float(np.mean(occupied_count)),median=float(np.median(occupied_count)),
                 p90=float(np.percentile(occupied_count,90)),max=int(np.max(occupied_count))),voxel_queries=v0,
             visible_slot_tokens=visible,logical_visible_attention_pairs=visible,dense_fixed_attention_logits=v0*8*heads,
@@ -78,11 +77,10 @@ def main():
                 sum(t>q['query_time'] for t in q['event_timestamps']) for q in item['queries']),all_outputs_finite=all_finite),
         regressions=dict(tests=tests.testsRun+len(spatial_names),empty_slot_mask='PASS',single_slot_attention='PASS',
             position_sensitivity='PASS',point_permutation='PASS',vqsa_permutation_max_diff=vqsa.get('permutation_max_diff'),
-            uqp='PASS',uqp_output_diffs=dict(spatial=uqp.get('spatial'),query_token=uqp.get('query_token_max_diff'),
-                temporal_hidden=uqp.get('temporal_hidden_max_diff'),temporal_xyz=uqp.get('temporal_xyz_max_diff')),
+            uqp='PASS',uqp_output_diffs=dict(spatial=uqp.get('spatial')),
             uqp_loss_diffs=uqp.get('loss_diffs'),uqp_gradient_diffs=uqp.get('gradient_diffs'),sbe='PASS',eooe='PASS',
             eqs='PASS',sequence_isolation='PASS',recent_contract='PASS',recent_gradient_max_diff=max(recent['gradient_diffs'].values()),
-            query_causal_future_leakage='PASS'),pointwise_learned_expansion=False,optimizer_steps=0,scheduler_steps=0,
+            causal_input_window='PASS'),pointwise_learned_expansion=False,optimizer_steps=0,scheduler_steps=0,
         training_epochs=0,checkpoint_optimization=False,git_head_before=subprocess.check_output(['git','rev-parse','HEAD'],cwd=ROOT,text=True).strip())
     (output/'vqsa_structure_report.json').write_text(json.dumps(report,indent=2))
     (output/'vqsa_regression_report.json').write_text(json.dumps(report['regressions'],indent=2))

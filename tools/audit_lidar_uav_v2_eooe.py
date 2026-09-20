@@ -49,9 +49,9 @@ def main():
     output.mkdir(parents=True,exist_ok=False);torch.set_num_threads(4);torch.manual_seed(42)
     cfg=yaml.safe_load((ROOT/'configs/lidar_uav_v2.yaml').read_text())
     queries=LiDARUAVDataset(cfg['data']['root'],ROOT/cfg['data']['split_file'],cfg['data']['train_split'])
-    clips=TemporalQueryClipDataset(queries,cfg['temporal']['clip_length'],stride=1)
+    clips=TemporalQueryClipDataset(queries,cfg['data']['query_clip_length'],stride=cfg['data']['query_clip_stride'])
     clip_index=next(i for i,r in enumerate(clips.clip_metadata)
-        if r['sequence_id']=='seq0001' and r['valid_query_slots']==cfg['temporal']['clip_length'])
+        if r['sequence_id']=='seq0001' and r['valid_query_slots']==cfg['data']['query_clip_length'])
     item=clips[clip_index];batch=collate_temporal_queries([item],unique_query_packing=True)
     model=LiDARUAVDetector(cfg).eval()
     with torch.no_grad():result=model(batch)
@@ -71,8 +71,7 @@ def main():
         for name,fn in vars(spatial).items():
             if name.startswith('test_') and callable(fn):fn();spatial_names.append(name);handle.write(name+' PASS\n')
     if not tests.wasSuccessful():raise AssertionError('Regression test failure')
-    params=sum(p.numel() for p in model.parameters());temporal_names=('query_pool.','time_encoding.','presence_embedding.','temporal_transformer.','temporal_head.')
-    temporal=sum(p.numel() for name,p in model.named_parameters() if name.startswith(temporal_names));spatial=params-temporal
+    params=sum(p.numel() for p in model.parameters());spatial=params
     future_events=sum(sum(t>q['query_time'] for t in q['event_timestamps']) for q in item['queries'])
     if future_events:raise AssertionError(f'Future events: {future_events}')
     uqp=modules[1].RESULTS;causal=modules[4].RESULTS;isolation=modules[3].RESULTS
@@ -81,21 +80,18 @@ def main():
         removed_fields=['child_voxel_count/8'],new_sparse_merge_input=dict(fields=['max_child_feature[128]',
         'mean_child_feature[128]','log1p(raw_point_count)[1]','explicit_octant_occupancy[8]'],dimension=265),
         slot_convention='4*x + 2*y + z; identical to SBE-Lite',raw_point_count_propagation='L0 raw points; L1/L2 sum child raw_point_count',
-        parameters=dict(before=1322891,after=params,delta=params-1322891,spatial=spatial,temporal=temporal,
+        parameters=dict(before=1322891,after=params,delta=params-1322891,spatial=spatial,
             merge01_parent=list(model.merge01.parent.weight.shape),merge12_parent=list(model.merge12.parent.weight.shape)),
         real_smoke=dict(sequence_id='seq0001',clip_index=clip_index,query_count=len(item['queries']),
             query_times=[q['query_time'] for q in item['queries']],points=len(batch['points']),future_event_count=future_events,
             token_shapes=dict(L0=[len(l0.coords),128],L1=[len(l1.coords),128],L2=[len(l2.coords),128]),
             occupancy_shapes=dict(L0_to_L1=list(occupancy01.shape),L1_to_L2=list(occupancy12.shape)),
             parent_input_shapes=dict(L0_to_L1=list(input01.shape),L1_to_L2=list(input12.shape)),
-            query_token=list(result['query_token'].shape),temporal_hidden=list(result['temporal_hidden'].shape),
-            temporal_pred_xyz=list(result['temporal_pred_xyz'].shape),all_outputs_finite=all(torch.isfinite(result[k]).all().item()
-                for k in ('logits','pred_xyz','fine_features','query_token','temporal_hidden','temporal_pred_xyz'))),
+            all_outputs_finite=all(torch.isfinite(result[k]).all().item()
+                for k in ('logits','pred_xyz','fine_features'))),
         occupancy=summaries,regressions=dict(tests=tests.testsRun+len(spatial_names),eooe='PASS',
             permutation_invariance='PASS',topology_sensitivity='PASS',uqp_exact='PASS',eqs='PASS',sequence_isolation='PASS',
-            query_causal_future_leakage='PASS',sbe='PASS',uqp_output_diffs=dict(spatial=uqp.get('spatial'),
-                query_token=uqp.get('query_token_max_diff'),temporal_hidden=uqp.get('temporal_hidden_max_diff'),
-                temporal_xyz=uqp.get('temporal_xyz_max_diff')),uqp_loss_diffs=uqp.get('loss_diffs'),
+            causal_input_window='PASS',sbe='PASS',uqp_output_diffs=dict(spatial=uqp.get('spatial')),uqp_loss_diffs=uqp.get('loss_diffs'),
             uqp_gradient_diffs=uqp.get('gradient_diffs'),future_leakage=causal,sequence_isolation_details=isolation),
         optimizer_steps=0,scheduler_steps=0,training_epochs=0,checkpoint_optimization=False,
         git_head_before=subprocess.check_output(['git','rev-parse','HEAD'],cwd=ROOT,text=True).strip())

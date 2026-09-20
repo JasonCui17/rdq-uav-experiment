@@ -9,7 +9,7 @@ import torch
 ROOT=Path(__file__).resolve().parents[1];sys.path.insert(0,str(ROOT/'src'))
 spec=importlib.util.spec_from_file_location('qc',ROOT/'tests/test_lidar_uav_v2_query_causal.py');qc=importlib.util.module_from_spec(spec);spec.loader.exec_module(qc)
 from rdq_uav.lidar_v2 import (EpochCyclicQuerySampler,OverlapAwareBatchSampler,
-    QueryCausalLoss,TemporalPositionLoss,TemporalQueryClipDataset,collate_temporal_queries)
+    CandidateLoss,TemporalQueryClipDataset,collate_temporal_queries)
 
 RESULTS={}
 
@@ -53,20 +53,17 @@ class UQPTests(unittest.TestCase):
         for occurrence,unique in enumerate(uqp['occurrence_to_unique'].tolist()):
             left=a['batch_index']==occurrence;right=b['batch_index']==unique
             for key in spatial:spatial[key]=max(spatial[key],max_diff(a[key][left],b[key][right]))
-        query=max_diff(a['query_token'],b['query_token']);hidden=max_diff(a['temporal_hidden'],b['temporal_hidden']);temporal=max_diff(a['temporal_pred_xyz'],b['temporal_pred_xyz'])
-        criterion=QueryCausalLoss(qc.CFG);la=criterion(a,reference);lb=criterion(b,uqp)
-        losses={key:abs(float(la[key])-float(lb[key])) for key in ('loss','spatial_loss','loss_cls','loss_reg','temporal_loss')}
-        self.assertLessEqual(max(spatial.values()),1e-6);self.assertLessEqual(max(query,hidden,temporal),1e-6);self.assertLessEqual(max(losses.values()),1e-6)
-        RESULTS.update(spatial=spatial,query_token_max_diff=query,temporal_hidden_max_diff=hidden,
-                       temporal_xyz_max_diff=temporal,loss_diffs=losses)
+        criterion=CandidateLoss(qc.CFG);la=criterion(a,reference);lb=criterion(b,uqp)
+        losses={key:abs(float(la[key])-float(lb[key])) for key in ('loss','loss_cls','loss_reg')}
+        self.assertLessEqual(max(spatial.values()),1e-6);self.assertLessEqual(max(losses.values()),1e-6)
+        RESULTS.update(spatial=spatial,loss_diffs=losses)
 
     def test_gradient_equivalence(self):
         torch.manual_seed(42);a=qc.model().train();b=qc.model().train();b.load_state_dict(a.state_dict())
-        la=QueryCausalLoss(qc.CFG)(a(packed(False)),packed(False))['loss'];la.backward()
-        uqp=packed(True);lb=QueryCausalLoss(qc.CFG)(b(uqp),uqp)['loss'];lb.backward()
+        la=CandidateLoss(qc.CFG)(a(packed(False)),packed(False))['loss'];la.backward()
+        uqp=packed(True);lb=CandidateLoss(qc.CFG)(b(uqp),uqp)['loss'];lb.backward()
         names=('voxel_embed.proj.weight','encoder0.blocks.0.qkv.weight','merge01.parent.weight',
-               'head.cls.2.weight','head.reg.2.weight','query_pool.xyz_embed.2.weight',
-               'temporal_transformer.blocks.0.qkv.weight','temporal_head.net.2.weight')
+               'head.cls.2.weight','head.reg.2.weight')
         result={}
         for name in names:
             ga=dict(a.named_parameters())[name].grad;gb=dict(b.named_parameters())[name].grad
@@ -76,26 +73,15 @@ class UQPTests(unittest.TestCase):
             self.assertLessEqual(absolute,1e-5,name)
         RESULTS['gradient_diffs']=result
 
-    def test_shared_query_receives_both_temporal_context_gradients(self):
-        model=qc.model().train();batch=packed(True);captured={}
-        def hook(module,args,output):captured.update(unique=output[0]);output[0].retain_grad()
-        handle=model.query_pool.register_forward_hook(hook);out=model(batch);out['query_token'].retain_grad()
-        loss=TemporalPositionLoss(qc.CFG)(out,batch);loss.backward();handle.remove()
-        unique=4;occurrence_grad=out['query_token'].grad.reshape(-1,128)
-        expected=occurrence_grad[4]+occurrence_grad[8]
-        difference=max_diff(captured['unique'].grad[unique],expected)
-        self.assertGreater(float(occurrence_grad[4].abs().sum()),0);self.assertGreater(float(occurrence_grad[8].abs().sum()),0)
-        self.assertLessEqual(difference,1e-7);RESULTS['shared_multi_context_gradient_max_diff']=difference
-
-    def test_no_support_weight_and_temporal_occurrences(self):
+    def test_no_support_occurrences_remain_skipped(self):
         items=overlapping_items()
         for clip in items:
             for q in clip['queries']:
                 if q['query_uid']==4:
                     q['points']=torch.tensor([[20.,20.,20.]]);q['sensor_id']=torch.zeros(1,dtype=torch.long)
                     q['delta_t']=torch.tensor([-.01]);q['supervision_recent_mask']=torch.ones(1,dtype=torch.bool)
-        batch=collate_temporal_queries(items,unique_query_packing=True);out=qc.model()(batch);loss=QueryCausalLoss(qc.CFG)(out,batch)
-        self.assertGreaterEqual(loss['num_no_current_support'],2);self.assertEqual(loss['num_temporal_supervised'],16)
+        batch=collate_temporal_queries(items,unique_query_packing=True);out=qc.model()(batch);loss=CandidateLoss(qc.CFG)(out,batch)
+        self.assertGreaterEqual(loss['num_no_current_support'],2)
 
     def test_overlap_batch_sampler_preserves_selection(self):
         class Q:

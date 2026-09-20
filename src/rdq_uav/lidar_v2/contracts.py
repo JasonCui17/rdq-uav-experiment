@@ -14,8 +14,7 @@ PREVIOUSLY_SILENT_FIELDS=(
     'data.query_mode','data.denoise','model.transformer.l2_global',
     'model.transformer.attention_dropout','model.transformer.ffn_dropout','model.transformer.drop_path',
     'model.merge.use_child_position','model.merge.use_log_point_count','model.merge.explicit_octant_occupancy',
-    'model.merge.occupancy_slots','model.merge.attention_pool','model.up.adjacent_only','temporal.enabled',
-    'temporal.stride','temporal.candidate_pool','temporal.use_xyz_embedding','temporal.use_presence_embedding',
+    'model.merge.occupancy_slots','model.merge.attention_pool','model.up.adjacent_only',
     'evaluation.k','evaluation.radii_m','selector.version','train.checkpoint_metric',
 )
 
@@ -28,6 +27,11 @@ def _get(cfg,path):
 
 def validate_frozen_v2_config(cfg):
     """Reject public options that contradict the frozen pre-training architecture."""
+    if 'temporal' in cfg:
+        raise ValueError(f'{ERROR} temporal architecture was removed; use data.query_clip_length for spatial sampling')
+    stale_loss={'temporal_weight','temporal_smooth_l1_beta'}&set(cfg.get('loss',{}))
+    if stale_loss:
+        raise ValueError(f'{ERROR} removed temporal loss fields: {sorted(stale_loss)}')
     if 'checkpoint_metric' in cfg.get('train',{}):
         raise ValueError(f'{ERROR} train.checkpoint_metric is deprecated; checkpoint_policy is fixed and explicit')
     required={
@@ -40,9 +44,7 @@ def validate_frozen_v2_config(cfg):
         'model.merge.explicit_octant_occupancy':True,'model.merge.occupancy_slots':8,
         'model.merge.attention_pool':False,'model.up.adjacent_only':True,
         'model.head.residual_scale_m':1.,'data.query_mode':'gt_timestamp','data.denoise':False,
-        'temporal.enabled':True,'temporal.stride':1,'temporal.dim':128,'temporal.dropout':0.,
-        'temporal.candidate_pool':'softmax_objectness','temporal.use_xyz_embedding':True,
-        'temporal.use_presence_embedding':True,'temporal.causal':True,
+        'data.query_clip_length':8,'data.query_clip_stride':1,
         'evaluation.precision':'fp32','evaluation.k':[1,5,10,20],'evaluation.radii_m':[.5,1.,2.],
         'selector.version':'stable_topk100_radius1m_v1',
     }
@@ -54,7 +56,6 @@ def validate_frozen_v2_config(cfg):
     expected_policy={
         'last':'last.pt',
         'spatial':{'filename':'best_spatial.pt','order':['nms_recall_at_10_1m','nms_top1_success_1m','negative_nms_top1_error_median','earlier_epoch']},
-        'temporal':{'filename':'best_temporal.pt','order':['temporal_success_1m','negative_temporal_error_median','negative_temporal_error_p90','earlier_epoch']},
     }
     if policy!=expected_policy:
         raise ValueError(f'{ERROR} checkpoint_policy={policy!r}; required {expected_policy!r}')

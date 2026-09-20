@@ -1,6 +1,6 @@
 experiment:
   name: lidar_uav_v2
-  version: lidar_uav_v2_query_causal_v1
+  version: lidar_uav_v2_spatial_candidates_v1
   seed: 42
   output_dir: outputs/own_multimodal_research/lidar_uav_v2
 data:
@@ -10,6 +10,8 @@ data:
   val_split: validation_sub
   test_split: heldout_test_sub
   num_merged_frames: 20
+  query_clip_length: 8
+  query_clip_stride: 1
   query_mode: gt_timestamp
   coordinate_config_id: EXISTING_MMUAV_COORDINATE_ASSUMPTION
   denoise: false
@@ -58,8 +60,6 @@ loss:
   focal_gamma: 2.0
   smooth_l1_beta: 1.0
   reg_weight: 2.0
-  temporal_weight: 1.0
-  temporal_smooth_l1_beta: 1.0
 selector:
   version: stable_topk100_radius1m_v1
   raw_topk: 20
@@ -101,28 +101,8 @@ checkpoint_policy:
   spatial:
     filename: best_spatial.pt
     order: [nms_recall_at_10_1m, nms_top1_success_1m, negative_nms_top1_error_median, earlier_epoch]
-  temporal:
-    filename: best_temporal.pt
-    order: [temporal_success_1m, negative_temporal_error_median, negative_temporal_error_p90, earlier_epoch]
 tiny:
   max_samples: 32
   updates: 500
   lr: 0.0002
   weight_decay: 0.0
-
-temporal:
-  enabled: true
-  clip_length: 8
-  stride: 1
-  dim: 128
-  heads: 4
-  ffn_dim: 256
-  blocks: 2
-  dropout: 0.0
-  time_encoding:
-    input_dim: 2
-    hidden_dim: 32
-  candidate_pool: softmax_objectness
-  use_xyz_embedding: true
-  use_presence_embedding: true
-  causal: true

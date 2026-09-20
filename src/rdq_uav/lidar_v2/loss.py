@@ -51,22 +51,3 @@ class CandidateLoss(nn.Module):
         return {"loss":mean(sample_total),"loss_cls":mean(sample_cls),"loss_reg":mean(sample_reg),"num_pos":num_pos,"num_neg":num_neg,
                 "num_ignore":num_ignore,"num_supervised_samples":int(supervised_occurrence.sum()),"num_no_current_support":int(sample_no_support[mapped].sum()),
                 "positive_mask":pos,"ignore_mask":ignore,"negative_mask":neg}
-
-class TemporalPositionLoss(nn.Module):
-    """Mean over XYZ axes and valid query targets, including no-current-support."""
-    def __init__(self,cfg):
-        super().__init__();self.beta=float(cfg['loss']['temporal_smooth_l1_beta'])
-    def forward(self,outputs,batch):
-        mask=batch['target_valid_clip']&batch['query_valid_mask']
-        if not bool(mask.any()):return outputs['temporal_pred_xyz'].sum()*0
-        return F.smooth_l1_loss(outputs['temporal_pred_xyz'][mask].float(),batch['target_xyz_clip'][mask].float(),beta=self.beta,reduction='mean')
-
-class QueryCausalLoss(CandidateLoss):
-    """Spatial V1 loss plus query-wise temporal position supervision."""
-    def __init__(self,cfg):
-        super().__init__(cfg);self.temporal=TemporalPositionLoss(cfg);self.weight=float(cfg['loss']['temporal_weight'])
-    def forward(self,outputs,batch):
-        result=super().forward(outputs,batch);spatial=result['loss'];temporal=self.temporal(outputs,batch)
-        result.update(spatial_loss=spatial,temporal_loss=temporal,loss=spatial+self.weight*temporal,
-                      num_temporal_supervised=int((batch['target_valid_clip']&batch['query_valid_mask']).sum()))
-        return result

@@ -12,7 +12,7 @@ import unittest
 import torch
 import yaml
 
-from rdq_uav.lidar_v2 import CandidateSelector, QueryCausalLoss
+from rdq_uav.lidar_v2 import CandidateLoss, CandidateSelector
 from rdq_uav.lidar_v2.contracts import (
     ERROR,
     effective_config,
@@ -22,7 +22,7 @@ from rdq_uav.lidar_v2.contracts import (
 )
 from rdq_uav.lidar_v2.geometry import decode_residual, encode_residual
 from rdq_uav.lidar_v2.runtime import evaluate_batch
-from rdq_uav.lidar_v2.training import better_spatial, better_temporal, save_checkpoint
+from rdq_uav.lidar_v2.training import better_spatial, save_checkpoint
 
 
 CFG = yaml.safe_load(open('configs/lidar_uav_v2.yaml'))
@@ -53,7 +53,6 @@ def _loss_fixture(endpoint_has_support=True, temporal_length=3):
         'voxel_centers': points.clone(),
         'batch_index': torch.arange(n),
         'layouts': SimpleNamespace(point_to_l0=torch.arange(n)),
-        'temporal_pred_xyz': torch.zeros((1, n, 3), requires_grad=True),
     }
     batch = {
         'points': points,
@@ -86,27 +85,25 @@ class CorrectnessGateTests(unittest.TestCase):
     tied = selector(_selector_outputs(torch.tensor([2, 2], dtype=torch.bfloat16)))[0]['raw']
     self.assertEqual(tied['source_token_id'].tolist(), [0, 1])
 
-  def test_f2_endpoint_only_spatial_and_temporal_supervision(self):
-    criterion = QueryCausalLoss(CFG)
+  def test_f2_endpoint_only_spatial_supervision(self):
+    criterion = CandidateLoss(CFG)
     out, batch = _loss_fixture(True, 3)
     loss = criterion(out, batch)
     self.assertEqual(loss['num_supervised_samples'], 1)
     self.assertEqual(loss['num_no_current_support'], 0)
-    self.assertEqual(loss['num_temporal_supervised'], 1)
 
     out, batch = _loss_fixture(False, 3)
     loss = criterion(out, batch)
     self.assertEqual(loss['num_supervised_samples'], 0)
     self.assertEqual(loss['num_no_current_support'], 1)
-    self.assertEqual(loss['num_temporal_supervised'], 1)
-    self.assertEqual(float(loss['spatial_loss']), 0)
+    self.assertEqual(float(loss['loss']), 0)
 
   def test_f2_endpoint_mask_supports_t1_t8_and_padding(self):
     for length in (1, 8):
       with self.subTest(length=length):
         out, batch = _loss_fixture(True, length)
         self.assertEqual(int(batch['spatial_supervise_mask_occurrence'].sum()), 1)
-        self.assertEqual(QueryCausalLoss(CFG)(out, batch)['num_supervised_samples'], 1)
+        self.assertEqual(CandidateLoss(CFG)(out, batch)['num_supervised_samples'], 1)
 
   def test_f2_uqp_counts_selected_occurrences_not_unique_or(self):
     out, batch = _loss_fixture(True, 2)
@@ -117,15 +114,12 @@ class CorrectnessGateTests(unittest.TestCase):
     batch['target_valid'] = torch.ones(3, dtype=torch.bool)
     batch['occurrence_to_unique'] = torch.tensor([0, 0, 1])
     batch['spatial_supervise_mask_occurrence'] = torch.tensor([False, True, True])
-    out['temporal_pred_xyz'] = torch.zeros((1, 3, 3), requires_grad=True)
-    loss = QueryCausalLoss(CFG)(out, batch)
+    loss = CandidateLoss(CFG)(out, batch)
     self.assertEqual(loss['num_supervised_samples'], 2)
-    self.assertEqual(loss['num_temporal_supervised'], 2)
 
   def test_f3_frozen_architecture_fields_fail_fast(self):
     validate_frozen_v2_config(CFG)
     mutations = [
-        ('temporal', 'enabled', False),
         ('model.transformer', 'l2_global', False),
         ('model.merge', 'explicit_octant_occupancy', False),
         ('model.voxel.sbe.vqsa', 'enabled', False),
@@ -146,6 +140,10 @@ class CorrectnessGateTests(unittest.TestCase):
     stale = copy.deepcopy(CFG)
     stale['train']['checkpoint_metric'] = 'anything'
     with self.assertRaisesRegex(ValueError, 'deprecated'):validate_frozen_v2_config(stale)
+    stale = copy.deepcopy(CFG);stale['temporal'] = {'enabled': False}
+    with self.assertRaisesRegex(ValueError, 'temporal architecture was removed'):validate_frozen_v2_config(stale)
+    stale = copy.deepcopy(CFG);stale['loss']['temporal_weight'] = 1.0
+    with self.assertRaisesRegex(ValueError, 'removed temporal loss fields'):validate_frozen_v2_config(stale)
 
   def test_f3_effective_config_and_precision_contract(self):
     effective, training, evaluation = effective_config(CFG, torch.device('cpu'))
@@ -197,7 +195,6 @@ def _evaluation_fixture(packed=False):
         'source_token_id': torch.arange(n),
         'batch_index': torch.arange(n),
         'layouts': SimpleNamespace(point_to_l0=torch.arange(n)),
-        'temporal_pred_xyz': torch.zeros((2, 8, 3)),
         'aux_stats': {'num_samples': n},
     }
     return outputs, batch
@@ -206,7 +203,7 @@ def _evaluation_fixture(packed=False):
 class EvaluationAndCheckpointTests(unittest.TestCase):
   def test_f5_non_uqp_evaluates_both_endpoints_and_uqp_fails(self):
     outputs, batch = _evaluation_fixture(False)
-    rows = evaluate_batch(outputs, batch, CandidateSelector(CFG), QueryCausalLoss(CFG))
+    rows = evaluate_batch(outputs, batch, CandidateSelector(CFG), CandidateLoss(CFG))
     self.assertEqual([row['sample_id'] for row in rows], ['q7', 'q11'])
     batch['unique_query_packing'] = True
     batch['spatial_num_samples'] = 12
@@ -219,17 +216,12 @@ class EvaluationAndCheckpointTests(unittest.TestCase):
     self.assertTrue(better_spatial({**s, 'epoch': 4, 'nms_top1_success_1m': .71}, s))
     self.assertTrue(better_spatial({**s, 'epoch': 4, 'nms_top1_error_median': .49}, s))
     self.assertFalse(better_spatial({**s, 'epoch': 4}, s))
-    t = dict(epoch=3, temporal_success_1m=.6, temporal_error_median=.8, temporal_error_p90=2.)
-    self.assertTrue(better_temporal({**t, 'epoch': 4, 'temporal_success_1m': .61}, t))
-    self.assertTrue(better_temporal({**t, 'epoch': 4, 'temporal_error_median': .7}, t))
-    self.assertTrue(better_temporal({**t, 'epoch': 4, 'temporal_error_p90': 1.9}, t))
-    self.assertFalse(better_temporal({**t, 'epoch': 4}, t))
 
   def test_checkpoint_payload_contains_reproduction_contract(self):
     class State:
       def state_dict(self):return {'state': 1}
     effective, _, _ = effective_config(CFG, torch.device('cpu'))
-    selection = {'spatial': {'epoch': 1}, 'temporal': {'epoch': 1}}
+    selection = {'spatial': {'epoch': 1}}
     metadata = {'git_commit': 'abc', 'run_id': 'run', 'eqs': {'stride': 4, 'current_offset': 0}}
     with tempfile.TemporaryDirectory() as directory:
       path = f'{directory}/last.pt'
@@ -238,8 +230,9 @@ class EvaluationAndCheckpointTests(unittest.TestCase):
     for key in ('model_state', 'optimizer_state', 'scheduler_state', 'epoch',
                 'global_optimizer_step', 'effective_config', 'training_precision',
                 'evaluation_precision', 'spatial_selection_metrics',
-                'temporal_selection_metrics', 'git_commit', 'run_id', 'eqs'):
+                'git_commit', 'run_id', 'eqs'):
       self.assertIn(key, state)
+    self.assertNotIn('temporal_selection_metrics', state)
 
 
 if __name__ == '__main__':unittest.main()

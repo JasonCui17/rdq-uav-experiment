@@ -65,7 +65,7 @@ class LiDARQueryBuilder:
                 "query_uid":query_uid if query_uid is not None else (sample_id or f"query_{query_time:.9f}"),
                 "event_count":len(events),"event_timestamps":[e.timestamp for e in events],
                 "event_sequence_ids":[e.sequence_id for e in events],
-                "has_observation":sum(len(p) for p in parts)>0,"target_valid":bool(target_valid),
+                "target_valid":bool(target_valid),
                 "query_valid":True,"metadata":metadata}
         if target_valid:
             if target_xyz is None or target_timestamp is None: raise ValueError("Valid target requires XYZ and timestamp")
@@ -186,7 +186,7 @@ def collate_temporal_queries(items,unique_query_packing=False):
                    'delta_t':torch.empty(0),'supervision_recent_mask':torch.empty(0,dtype=torch.bool),
                    'query_time':clip[-1]['query_time'],'sequence_id':clip[0]['sequence_id'],
                    'sample_id':'PADDING','query_uid':'PADDING','event_count':0,'event_timestamps':[],'event_sequence_ids':[],
-                   'has_observation':False,'target_valid':False}
+                   'target_valid':False}
             if any(ts>q['query_time'] for ts in q['event_timestamps']) or bool((q['delta_t']>0).any()):
                 raise ValueError('Future event violation')
             samples.append(q)
@@ -213,7 +213,6 @@ def collate_temporal_queries(items,unique_query_packing=False):
                  clip_batch_index=torch.arange(B).repeat_interleave(T),clip_position=torch.arange(T).repeat(B),
                  query_valid_mask=valid,score_mask=score,point_counts=counts,
                  query_time=torch.tensor([q['query_time'] for q in samples],dtype=torch.float64),
-                 has_observation=torch.tensor([len(q['points'])>0 for q in samples]).reshape(B,T),
                  target_valid=torch.tensor([q.get('target_valid',False) for q in samples],dtype=torch.bool),
                  sample_id=[q['sample_id'] for q in samples],sequence_id=[q['sequence_id'] for q in samples],
                  query_uid=[q.get('query_uid',q['sample_id']) for q in samples],
@@ -231,7 +230,7 @@ def collate_temporal_queries(items,unique_query_packing=False):
     batch['spatial_target_valid']=torch.tensor([q.get('target_valid',False) for q in spatial_samples],dtype=torch.bool)
     if bool(batch['target_valid'].any()):
         xyz=torch.stack([torch.as_tensor(q['target_xyz']).float() if q.get('target_valid',False) else torch.zeros(3) for q in samples])
-        batch.update(target_xyz=xyz,target_xyz_clip=xyz.reshape(B,T,3),
+        batch.update(target_xyz=xyz,
                      target_timestamp=torch.tensor([q.get('target_timestamp',float('nan')) for q in samples],dtype=torch.float64))
         batch['spatial_target_xyz']=torch.stack([torch.as_tensor(q['target_xyz']).float() if q.get('target_valid',False) else torch.zeros(3) for q in spatial_samples])
     assert_temporal_batch_integrity(batch)

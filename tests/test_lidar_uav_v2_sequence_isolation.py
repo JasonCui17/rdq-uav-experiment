@@ -6,8 +6,7 @@ ROOT=Path(__file__).resolve().parents[1];sys.path.insert(0,str(ROOT/'src'))
 spec=importlib.util.spec_from_file_location('qc',ROOT/'tests/test_lidar_uav_v2_query_causal.py');qc=importlib.util.module_from_spec(spec);spec.loader.exec_module(qc)
 from rdq_uav.lidar_v2 import LiDARQueryBuilder,TemporalQueryClipDataset,collate_temporal_queries,build_query_history
 from rdq_uav.lidar_v2.geometry import HierarchyBuilder
-from rdq_uav.lidar_v2.isolation import assert_temporal_clip_integrity
-from rdq_uav.lidar_v2.temporal import CausalTemporalTransformer
+from rdq_uav.lidar_v2.isolation import assert_temporal_batch_integrity,assert_temporal_clip_integrity
 from rdq_uav.multimodal.merged_lidar import LidarFrameEvent
 RESULTS={}
 
@@ -47,18 +46,14 @@ class IsolationTests(unittest.TestCase):
         b=collate_temporal_queries([{'queries':[q]} for q in qs]);h=HierarchyBuilder()(b['points'],b['point_batch_index'])
         for level in h.levels:self.assertEqual(len(level.coords),2);self.assertEqual(level.batch_index.tolist(),[0,1])
         self.assertEqual(h.point_to_l0.tolist(),[0,1]);RESULTS['spatial_same_xyz']='PASS'
-    def test_e_temporal_cross_batch_tokens(self):
-        torch.manual_seed(42);m=CausalTemporalTransformer().eval();x=torch.randn(2,4,128);x[1]*=1000;y=x.clone();y[1]=-y[1]*3
-        valid=torch.ones((2,4),dtype=torch.bool)
-        with torch.no_grad():a=m(x,valid);b=m(y,valid)
-        d=float((a[0]-b[0]).abs().max());self.assertLessEqual(d,1e-6);RESULTS['cross_batch_max_diff']=d
-    def test_f_same_timestamp_observation_invariance(self):
+    def test_e_same_timestamp_cross_sequence_spatial_isolation(self):
         items=[{'queries':[query(s,i) for i in range(4)]} for s in ('A','B')]
         changed=copy.deepcopy(items)
         for q in changed[1]['queries']:q['points']=q['points']*1000+2000
         m=qc.model()
         with torch.no_grad():a=m(collate_temporal_queries(items));b=m(collate_temporal_queries(changed))
-        d=float((a['temporal_pred_xyz'][0]-b['temporal_pred_xyz'][0]).abs().max())
+        left=a['batch_index']<4;right=b['batch_index']<4
+        d=max(float((a[key][left]-b[key][right]).abs().max()) for key in ('logits','pred_xyz','fine_features'))
         self.assertLessEqual(d,1e-6);RESULTS['same_timestamp_cross_sequence_max_diff']=d
     def test_g_reject_mixed_history(self):
         with self.assertRaisesRegex(AssertionError,'cross_sequence_clip'):
@@ -78,16 +73,7 @@ class IsolationTests(unittest.TestCase):
         with self.assertRaisesRegex(AssertionError,'duplicate_query_timestamp'):TemporalQueryClipDataset(ds)
     def test_i_model_rejects_forged_mixed_clip(self):
         b=collate_temporal_queries([{'queries':[query('A',i) for i in range(4)]}]);b['sequence_id'][2]='B'
-        with self.assertRaisesRegex(AssertionError,'cross_sequence_clip'):qc.model()(b)
-    def test_j_restore_by_explicit_indices(self):
-        b=collate_temporal_queries([{'queries':[query(s,i) for i in range(4)]} for s in ('A','B')]);c=copy.deepcopy(b)
-        perm=torch.tensor([4,0,5,1,6,2,7,3]);inverse=torch.argsort(perm)
-        for key in ('clip_batch_index','clip_position','query_time'):c[key]=b[key][perm]
-        for key in ('sequence_id','sample_id'):c[key]=[b[key][i] for i in perm.tolist()]
-        c['point_batch_index']=inverse[b['point_batch_index']]
-        m=qc.model()
-        with torch.no_grad():a=m(b);z=m(c)
-        self.assertLessEqual(float((a['temporal_pred_xyz']-z['temporal_pred_xyz']).abs().max()),1e-6)
+        with self.assertRaisesRegex(AssertionError,'cross_sequence_clip'):assert_temporal_batch_integrity(b)
     def test_k_inference_sequence_switch_no_state(self):
         with tempfile.TemporaryDirectory() as tmp:
             builder=LiDARQueryBuilder(tmp)

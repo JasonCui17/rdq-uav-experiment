@@ -17,13 +17,12 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / 'src'))
 
 from rdq_uav.lidar_v2 import (CandidateSelector, LiDARUAVDetector,
-    LiDARUAVValidationDataset, QueryCausalLoss, TemporalQueryClipDataset,
+    CandidateLoss, LiDARUAVValidationDataset, TemporalQueryClipDataset,
     collate_temporal_queries)
 from rdq_uav.lidar_v2.contracts import (PREVIOUSLY_SILENT_FIELDS,
     effective_config, validate_frozen_v2_config)
 from rdq_uav.lidar_v2.geometry import decode_residual, encode_residual
-from rdq_uav.lidar_v2.training import (better_spatial, better_temporal,
-    validate)
+from rdq_uav.lidar_v2.training import better_spatial,validate
 
 
 def args():
@@ -102,7 +101,7 @@ def main():
     }
 
     val_queries = LiDARUAVValidationDataset(a.val_root, a.val_reference, cfg['data']['num_merged_frames'])
-    val_clips = TemporalQueryClipDataset(val_queries, cfg['temporal']['clip_length'], validation=True)
+    val_clips = TemporalQueryClipDataset(val_queries, cfg['data']['query_clip_length'], validation=True)
     support = []
     for i in range(len(val_queries)):
         query = val_queries[i]
@@ -116,7 +115,6 @@ def main():
         'validation_gt_rows': len(val_queries), 'evaluated_endpoint_occurrences': endpoints,
         'endpoint_spatial_mask_occurrences': endpoints,
         'spatial_supervised_occurrences': current,
-        'temporal_supervised_occurrences': endpoints,
         'current_support_occurrences': current,
         'no_current_support_occurrences': endpoints - current,
         'pre_fix_history_plus_endpoint_occurrences': before_occurrences,
@@ -129,7 +127,7 @@ def main():
     starts = [i for i, row in enumerate(val_clips.clip_metadata) if row['anchor_query_ordinal'] == 0][:2]
     batches = [collate_temporal_queries([val_clips[i]]) for i in starts]
     torch.manual_seed(42);model = LiDARUAVDetector(cfg).to(device).eval()
-    criterion = QueryCausalLoss(cfg);selector = CandidateSelector(cfg)
+    criterion = CandidateLoss(cfg);selector = CandidateSelector(cfg)
     metrics_a, rows_a, health_a = validate(model, batches, criterion, selector, device, evaluation_precision)
     metrics_b, rows_b, health_b = validate(model, batches, criterion, selector, device, evaluation_precision)
     parameter_count = sum(p.numel() for p in model.parameters())
@@ -142,28 +140,19 @@ def main():
         'health_max_abs_diff': metric_diff(health_a, health_b),
         'non_uqp_evaluation': 'PASS',
         'uqp_evaluation': 'RuntimeError: occurrence-aligned spatial queries required',
-        'query_readout_diagnostics': ['pool_entropy', 'max_objectness_probability', 'reference_xyz',
-                                      'pooled_xyz', 'candidate_count', 'gt_near_pool_weight_optional'],
+        'candidate_diagnostics': ['candidate_count', 'top1_score', 'raw_top10_error', 'nms_top10_error'],
     }
 
     s = {'epoch': 3, 'nms_recall_at_10_1m': .8, 'nms_top1_success_1m': .7, 'nms_top1_error_median': .5}
-    t = {'epoch': 3, 'temporal_success_1m': .6, 'temporal_error_median': .8, 'temporal_error_p90': 2.}
     checkpoint_report = {
         'status': 'PASS',
-        'files': ['last.pt', 'best_spatial.pt', 'best_temporal.pt'],
+        'files': ['last.pt', 'best_spatial.pt'],
         'best_spatial_order': cfg['checkpoint_policy']['spatial']['order'],
-        'best_temporal_order': cfg['checkpoint_policy']['temporal']['order'],
         'spatial_tests': {
             'recall_wins': better_spatial({**s, 'epoch': 4, 'nms_recall_at_10_1m': .81}, s),
             'top1_tie_break': better_spatial({**s, 'epoch': 4, 'nms_top1_success_1m': .71}, s),
             'median_tie_break': better_spatial({**s, 'epoch': 4, 'nms_top1_error_median': .49}, s),
             'earlier_epoch_wins_exact_tie': not better_spatial({**s, 'epoch': 4}, s),
-        },
-        'temporal_tests': {
-            'success_wins': better_temporal({**t, 'epoch': 4, 'temporal_success_1m': .61}, t),
-            'median_tie_break': better_temporal({**t, 'epoch': 4, 'temporal_error_median': .7}, t),
-            'p90_tie_break': better_temporal({**t, 'epoch': 4, 'temporal_error_p90': 1.9}, t),
-            'earlier_epoch_wins_exact_tie': not better_temporal({**t, 'epoch': 4}, t),
         },
         'subgroups_used_for_selection': False,
     }
@@ -184,7 +173,7 @@ def main():
     print(json.dumps({
         'status': gate['status'], 'parameters': parameter_count,
         'endpoint_occurrences': endpoints, 'spatial_supervised_occurrences': current,
-        'temporal_supervised_occurrences': endpoints, 'current_support': current,
+        'current_support': current,
         'no_current_support': endpoints-current, 'metric_diff': evaluation_report['metric_max_abs_diff'],
         'output': str(a.output),
     }, indent=2))

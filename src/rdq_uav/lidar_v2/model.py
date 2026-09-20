@@ -4,9 +4,7 @@ import math
 from typing import Any
 import torch
 from torch import nn
-from .isolation import assert_temporal_batch_integrity
 from .sbe import SBELiteVoxelEmbed
-from .temporal import CandidateAwareQueryPool, TimeEncoding, CausalTemporalTransformer, TemporalXYZHead
 from .geometry import HierarchyBuilder, SparseHierarchy, SparseLevel, decode_residual
 
 def segment_sum(x,index,n):
@@ -185,13 +183,6 @@ class LiDARUAVDetector(nn.Module):
         self.encoder1=SpatialTransformer(d,tr["heads"],tr["ffn_dim"],tr["blocks_per_level"][1],tr["window_size"],tr["window_shift"],tr["relative_range"],False)
         self.encoder2=SpatialTransformer(d,tr["heads"],tr["ffn_dim"],tr["blocks_per_level"][2],tr["window_size"],tr["window_shift"],tr["relative_range"],True)
         self.up21=SparseUp(d); self.up10=SparseUp(d); self.final_norm=nn.LayerNorm(d,eps=1e-5); self.head=CandidateHead(d,m["head"]["hidden_dim"],m["head"]["residual_scale_m"])
-        tc=cfg['temporal']
-        if tc['dim']!=d or not tc['causal']:raise ValueError('Temporal dimension/causality contract')
-        self.query_pool=CandidateAwareQueryPool(d)
-        self.time_encoding=TimeEncoding(d,tc['time_encoding']['hidden_dim'])
-        self.presence_embedding=nn.Embedding(2,d)
-        self.temporal_transformer=CausalTemporalTransformer(d,tc['heads'],tc['ffn_dim'],tc['blocks'],tc['dropout'])
-        self.temporal_head=TemporalXYZHead(d)
         self.apply(self._init)
         if isinstance(self.voxel_embed,LegacyVoxelEmbed):
             nn.init.constant_(self.voxel_embed.sensor_embedding.weight[0],0)
@@ -213,45 +204,11 @@ class LiDARUAVDetector(nn.Module):
                 "aux_stats":{"token_counts":[len(x.coords) for x in h.levels],"num_samples":int(batch["spatial_num_samples"]),"attention_backend":"explicit_pytorch_scaled_dot_product_with_additive_axis_bias"}}
 
     def forward(self,batch):
-        """Packed query points -> spatial candidates plus causal [B,T,3] XYZ.
-
-        Does not inspect target XYZ/timestamps. Real missing-observation slots
-        remain valid; only actual padding is excluded from temporal keys.
-        """
-        assert_temporal_batch_integrity(batch)
-        out=self.spatial_forward(batch)
-        token,observed=self.query_pool(out,int(batch['spatial_num_samples']))
-        valid=batch['query_valid_mask'];B,T=valid.shape
-        times=batch['query_time_clip']
-        if not torch.isfinite(times[valid]).all():raise ValueError('Non-finite query time')
-        if T>1 and bool(((times[:,1:]<=times[:,:-1])&valid[:,1:]&valid[:,:-1]).any()):
-            raise ValueError('Non-increasing query time')
-        cb,cp=batch['clip_batch_index'],batch['clip_position'];mapping=batch['occurrence_to_unique']
-        occurrence=token.new_zeros((B*T,token.shape[-1]));occurrence_observed=torch.zeros(B*T,dtype=torch.bool,device=observed.device)
-        flat_valid=valid.flatten();occurrence[flat_valid]=token[mapping[flat_valid]];occurrence_observed[flat_valid]=observed[mapping[flat_valid]]
-        restored=token.new_zeros((B,T,token.shape[-1]));restored[cb,cp]=occurrence
-        observation=torch.zeros((B,T),dtype=torch.bool,device=observed.device);observation[cb,cp]=occurrence_observed
-        token=restored;observed=observation&valid
-        x=token+self.time_encoding(times,valid)+self.presence_embedding(observed.long())
-        hidden=self.temporal_transformer(x,valid)
-        prediction=self.temporal_head(hidden).masked_fill(~valid[:,:,None],0.)
-        out.update(query_token=token,temporal_hidden=hidden,temporal_pred_xyz=prediction,
-                   has_observation=observed,query_valid_mask=valid,query_time_clip=times)
-        return out
-
-    def load_spatial_v2_base_weights(self,state_dict):
-        """Reject any missing/unexpected spatial weights; allow only new modules."""
-        prefixes=('query_pool.','time_encoding.','presence_embedding.','temporal_transformer.','temporal_head.')
-        expected={k for k in self.state_dict() if not k.startswith(prefixes)}
-        if set(state_dict)!=expected:
-            raise ValueError(f'Spatial key mismatch: missing={expected-set(state_dict)}, unexpected={set(state_dict)-expected}')
-        result=self.load_state_dict(state_dict,strict=False)
-        if result.unexpected_keys or any(not k.startswith(prefixes) for k in result.missing_keys):
-            raise ValueError(str(result))
-        return result
+        """Packed query points -> dense spatial candidate fields."""
+        return self.spatial_forward(batch)
 
     def load_pre_sbe_weights(self,state_dict):
-        """Load all Query-Causal downstream weights; skip only legacy voxel_embed.*.
+        """Load all downstream spatial weights; skip only legacy voxel_embed.*.
 
         Checks full key coverage and shapes before mutating parameters. Does not
         accept an incomplete spatial-only checkpoint or unexplained new keys.

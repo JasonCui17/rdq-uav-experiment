@@ -8,7 +8,7 @@ from pathlib import Path
 import torch,yaml
 
 ROOT=Path(__file__).resolve().parents[1];sys.path.insert(0,str(ROOT/'src'))
-from rdq_uav.lidar_v2 import LiDARUAVDataset,LiDARUAVDetector,QueryCausalLoss,TemporalQueryClipDataset,collate_temporal_queries
+from rdq_uav.lidar_v2 import CandidateLoss,LiDARUAVDataset,LiDARUAVDetector,TemporalQueryClipDataset,collate_temporal_queries
 
 
 def load_test(name):
@@ -24,7 +24,7 @@ def main():
     output.mkdir(parents=True,exist_ok=False);torch.set_num_threads(4);torch.manual_seed(42)
     cfg=yaml.safe_load((ROOT/'configs/lidar_uav_v2.yaml').read_text())
     queries=LiDARUAVDataset(cfg['data']['root'],ROOT/cfg['data']['split_file'],cfg['data']['train_split'])
-    clips=TemporalQueryClipDataset(queries,cfg['temporal']['clip_length'],stride=1)
+    clips=TemporalQueryClipDataset(queries,cfg['data']['query_clip_length'],stride=cfg['data']['query_clip_stride'])
     clip_index=next(i for i,r in enumerate(clips.clip_metadata) if r['sequence_id']=='seq0001' and r['valid_query_slots']==8)
     clean=collate_temporal_queries([clips[clip_index]],unique_query_packing=True)
     legacy=copy.deepcopy(clean);legacy['recent_mask']=legacy.pop('supervision_recent_mask')
@@ -32,14 +32,14 @@ def main():
     with torch.no_grad():
         old_output=model(legacy);new_output=model(clean)
         model_only=dict(clean);model_only.pop('supervision_recent_mask');without_mask=model(model_only)
-    keys=('logits','pred_xyz','fine_features','query_token','temporal_hidden','temporal_pred_xyz')
+    keys=('logits','pred_xyz','fine_features')
     output_diffs={key:maximum(old_output[key],new_output[key]) for key in keys}
     deletion_diffs={key:maximum(new_output[key],without_mask[key]) for key in keys}
-    old_criterion=contract.LegacyQueryCausalLoss(cfg);new_criterion=QueryCausalLoss(cfg)
+    old_criterion=contract.LegacyCandidateLoss(cfg);new_criterion=CandidateLoss(cfg)
     old_labels=old_criterion.labels(old_output,legacy);new_labels=new_criterion.labels(new_output,clean)
     label_equal=[torch.equal(a,b) for a,b in zip(old_labels[:3],new_labels[:3])]
     old_loss=old_criterion(old_output,legacy);new_loss=new_criterion(new_output,clean)
-    loss_diffs={key:abs(float(old_loss[key])-float(new_loss[key])) for key in ('loss','spatial_loss','loss_cls','loss_reg','temporal_loss')}
+    loss_diffs={key:abs(float(old_loss[key])-float(new_loss[key])) for key in ('loss','loss_cls','loss_reg')}
     label_counts=dict(positive=int(new_labels[0].sum()),ignore=int(new_labels[1].sum()),negative=int(new_labels[2].sum()),
         current_support_occurrences=int(new_loss['num_supervised_samples']),no_current_support_occurrences=int(new_loss['num_no_current_support']))
     if not all(label_equal) or max((*output_diffs.values(),*deletion_diffs.values(),*loss_diffs.values()))>1e-7:
@@ -60,7 +60,7 @@ def main():
         dict(category='A Dataset generation',path='src/rdq_uav/lidar_v2/data.py',use='last 4 selected actual events -> supervision_recent_mask'),
         dict(category='B Collate',path='src/rdq_uav/lidar_v2/data.py',use='concatenate mask; validate repeated UQP query identity'),
         dict(category='C Device transfer',path='src/rdq_uav/lidar_v2/runtime.py',use='generic move_batch transfers bool mask to loss/evaluation device'),
-        dict(category='D Model forward',path='src/rdq_uav/lidar_v2/model.py; sbe.py; temporal.py',use='NOT READ'),
+        dict(category='D Model forward',path='src/rdq_uav/lidar_v2/model.py; sbe.py',use='NOT READ'),
         dict(category='E Spatial label/loss',path='src/rdq_uav/lidar_v2/loss.py',use='d_recent, Positive/Ignore/Negative, NoCurrentSupport'),
         dict(category='F Evaluation',path='src/rdq_uav/lidar_v2/runtime.py',use='CurrentSupport split and latest-four neighbor group'),
         dict(category='G Export/debug',path='tools/evaluate_lidar_uav_v2.py; export_lidar_uav_v2_candidates.py',use='indirectly uses shared evaluation; no learned feature'),

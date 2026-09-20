@@ -10,7 +10,7 @@ import torch,yaml
 
 ROOT=Path(__file__).resolve().parents[1];sys.path.insert(0,str(ROOT/'src'))
 from rdq_uav.lidar_v2 import (EpochCyclicQuerySampler,LiDARUAVDataset,LiDARUAVDetector,
-    OverlapAwareBatchSampler,QueryCausalLoss,TemporalQueryClipDataset,
+    OverlapAwareBatchSampler,CandidateLoss,TemporalQueryClipDataset,
     collate_temporal_queries,planned_epoch_stats)
 
 
@@ -54,9 +54,7 @@ def compare_outputs(reference,packed):
         for key in spatial:
             diff=float((reference[key][left]-packed['output'][key][right]).abs().max()) if bool(left.any()) else 0.
             spatial[key]=max(spatial[key],diff)
-    return dict(spatial=spatial,query_token=float((reference['query_token']-packed['output']['query_token']).abs().max()),
-        temporal_hidden=float((reference['temporal_hidden']-packed['output']['temporal_hidden']).abs().max()),
-        temporal_xyz=float((reference['temporal_pred_xyz']-packed['output']['temporal_pred_xyz']).abs().max()))
+    return dict(spatial=spatial)
 
 
 def main():
@@ -67,7 +65,7 @@ def main():
     out=args.output;out.mkdir(parents=True,exist_ok=False);torch.set_num_threads(4);torch.manual_seed(42)
     cfg=yaml.safe_load((ROOT/'configs/lidar_uav_v2.yaml').read_text())
     queries=LiDARUAVDataset(cfg['data']['root'],ROOT/cfg['data']['split_file'],cfg['data']['train_split'])
-    clips=TemporalQueryClipDataset(queries,cfg['temporal']['clip_length'],stride=1)
+    clips=TemporalQueryClipDataset(queries,cfg['data']['query_clip_length'],stride=cfg['data']['query_clip_stride'])
     eqs=EpochCyclicQuerySampler(clips,4,cfg['experiment']['seed'],True);batcher=OverlapAwareBatchSampler(eqs,2,cfg['experiment']['seed'],True);batcher.set_epoch(1)
     batches=batcher.batches_for_epoch(shuffle=False);examples=[];total_occurrences=total_unique=0;same_overlap=mixed=0
     typical=None
@@ -87,13 +85,13 @@ def main():
     materialized_points=sum(len(q['points']) for item in items for q in item['queries'])
     reference=collate_temporal_queries(items,unique_query_packing=False);packed=collate_temporal_queries(items,unique_query_packing=True)
     if int(reference['query_valid_mask'].sum())!=16 or packed['spatial_num_samples']!=12:raise AssertionError('Unexpected typical mapping')
-    torch.manual_seed(42);model=LiDARUAVDetector(cfg).eval();criterion=QueryCausalLoss(cfg)
+    torch.manual_seed(42);model=LiDARUAVDetector(cfg).eval();criterion=CandidateLoss(cfg)
     with torch.no_grad():
         ref_out=model(reference);uqp_out=model(packed)
         comparison=compare_outputs(ref_out,dict(packed,output=uqp_out))
         ref_loss=criterion(ref_out,reference);uqp_loss=criterion(uqp_out,packed)
-    loss_diffs={key:abs(float(ref_loss[key])-float(uqp_loss[key])) for key in ('loss','spatial_loss','loss_cls','loss_reg','temporal_loss')}
-    if max((*comparison['spatial'].values(),comparison['query_token'],comparison['temporal_hidden'],comparison['temporal_xyz'],*loss_diffs.values()))>1e-6:
+    loss_diffs={key:abs(float(ref_loss[key])-float(uqp_loss[key])) for key in ('loss','loss_cls','loss_reg')}
+    if max((*comparison['spatial'].values(),*loss_diffs.values()))>1e-6:
         raise AssertionError(dict(comparison=comparison,loss_diffs=loss_diffs))
     test_names=('test_lidar_uav_v2_uqp','test_lidar_uav_v2_eqs','test_lidar_uav_v2_sequence_isolation','test_lidar_uav_v2_query_causal','test_lidar_uav_v2_sbe')
     modules=[load_test(name) for name in test_names]
@@ -122,7 +120,6 @@ def main():
             eqs_to_uqp_reduction=1-total_unique/total_occurrences,
             dense_to_uqp_reduction=1-total_unique/sum(r['valid_query_slots'] for r in clips.clip_metadata)),
         exact_output=comparison,loss_diffs=loss_diffs,gradient_equivalence=gradient.get('gradient_diffs'),
-        shared_multi_context_gradient=dict(status='PASS',max_diff=gradient.get('shared_multi_context_gradient_max_diff')),
         regressions=dict(uqp='PASS',eqs='PASS',sequence_isolation='PASS',future_leakage='PASS',sbe='PASS',
             arbitrary_query='PASS',tests=result.testsRun+len(spatial_names),causal_results=modules[3].RESULTS,
             isolation_results=modules[2].RESULTS),scheduler_dry_run=dict(planned_optimizer_updates=sum(r['optimizer_updates'] for r in plan),
@@ -134,8 +131,7 @@ def main():
         git_head_before=subprocess.check_output(['git','rev-parse','HEAD'],cwd=ROOT,text=True).strip())
     write_csv(out/'uqp_batch_examples.csv',examples)
     write_csv(out/'uqp_epoch_efficiency.csv',[dict(epoch=1,**report['epoch1'],**report['compute_funnel'])])
-    (out/'uqp_gradient_equivalence.json').write_text(json.dumps(dict(gradients=gradient.get('gradient_diffs'),
-        shared_multi_context_gradient=report['shared_multi_context_gradient']),indent=2))
+    (out/'uqp_gradient_equivalence.json').write_text(json.dumps(dict(gradients=gradient.get('gradient_diffs')),indent=2))
     (out/'uqp_report.json').write_text(json.dumps(report,indent=2))
     print(json.dumps(report,indent=2),flush=True)
 

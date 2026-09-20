@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Manual V2 QueryCausal training entry. Structure verification uses --precheck-only."""
+"""Manual V2 spatial-candidate training entry. Use --precheck-only for data checks."""
 import argparse,functools,json,os,subprocess,sys,time
 from pathlib import Path
 import numpy as np
@@ -8,11 +8,11 @@ from torch.utils.data import DataLoader
 from tqdm.auto import tqdm
 ROOT=Path(__file__).resolve().parents[1];sys.path.insert(0,str(ROOT/'src'))
 from rdq_uav.lidar_v2 import (LiDARUAVDetector,LiDARUAVDataset,LiDARUAVValidationDataset,
-    TemporalQueryClipDataset,collate_temporal_queries,QueryCausalLoss,CandidateSelector,
+    TemporalQueryClipDataset,collate_temporal_queries,CandidateLoss,CandidateSelector,
     EpochCyclicQuerySampler,OverlapAwareBatchSampler,planned_epoch_stats)
 from rdq_uav.lidar_v2.runtime import move_batch,optimizer_groups,UpdateScheduler
 from rdq_uav.lidar_v2.training import (inspect_dataset_timing,write_csv,validate,finite_or_raise,save_checkpoint,
-    spatial_selection_metrics,temporal_selection_metrics,better_spatial,better_temporal)
+    spatial_selection_metrics,better_spatial)
 from rdq_uav.lidar_v2.contracts import effective_config,validate_frozen_v2_config
 from rdq_uav.utils.seed import seed_everything
 
@@ -31,7 +31,7 @@ def parse_args():
 def main():
     args=parse_args();cfg=yaml.safe_load(args.config.read_text());validate_frozen_v2_config(cfg);seed_everything(cfg['experiment']['seed'])
     if int(os.environ.get('WORLD_SIZE','1'))>1:raise RuntimeError('DDP not implemented; use single device')
-    output=(args.output or ROOT/cfg['experiment']['output_dir']/'query_causal_v1').resolve()
+    output=(args.output or ROOT/cfg['experiment']['output_dir']/'spatial_candidates_v1').resolve()
     protected=(ROOT/'outputs/own_multimodal_research/lidar_uav_v1').resolve()
     if output==protected or protected in output.parents:raise ValueError('V1 output directory is frozen')
     if output.exists() and not args.precheck_only and not args.resume:raise FileExistsError(output)
@@ -43,7 +43,8 @@ def main():
     (output/'effective_config.json').write_text(json.dumps(effective_cfg,indent=2))
     trainq=LiDARUAVDataset(args.train_root,ROOT/cfg['data']['split_file'],cfg['data']['train_split'],cfg['data']['num_merged_frames'])
     valq=LiDARUAVValidationDataset(args.val_root,args.val_reference,cfg['data']['num_merged_frames'])
-    tc=cfg['temporal'];train=TemporalQueryClipDataset(trainq,tc['clip_length'],stride=1);val=TemporalQueryClipDataset(valq,tc['clip_length'],validation=True)
+    clip_length=int(cfg['data']['query_clip_length']);clip_stride=int(cfg['data']['query_clip_stride'])
+    train=TemporalQueryClipDataset(trainq,clip_length,stride=clip_stride);val=TemporalQueryClipDataset(valq,clip_length,validation=True)
     eqs=cfg['train']['query_subsampling']
     if eqs['offset_policy']!='cyclic_epoch' or eqs['anchor']!='clip_end' or not eqs['dense_clip_context']:
         raise ValueError('EQS-v1 requires cyclic_epoch, clip_end, and dense_clip_context=true')
@@ -56,12 +57,12 @@ def main():
     write_csv(output/'precheck_samples.csv',checks)
     (output/'resolved_config.yaml').write_text(yaml.safe_dump(effective_cfg,sort_keys=False))
     train_sampler.set_epoch(1)
-    print(f'QUERY CAUSAL PRECHECK PASS: train queries={len(trainq)}, full clips={len(train)}, '
+    print(f'SPATIAL CANDIDATE PRECHECK PASS: train queries={len(trainq)}, full clips={len(train)}, '
           f'epoch1 selected clips={len(train_sampler)}, val endpoints={len(val)}, future events=0; '
           'query and target times are independent interfaces')
     print(f'Training precision: {training_precision.effective}\nEvaluation precision: {evaluation_precision.effective}')
     if args.precheck_only:return
-    model=LiDARUAVDetector(cfg).to(device);criterion=QueryCausalLoss(cfg);selector=CandidateSelector(cfg)
+    model=LiDARUAVDetector(cfg).to(device);criterion=CandidateLoss(cfg);selector=CandidateSelector(cfg)
     batch_size=args.batch_size or cfg['train']['per_gpu_batch_size'];accum=args.accumulate or cfg['train']['single_gpu_accumulate']
     if batch_size<1 or accum<1:raise ValueError('Invalid batch/accumulation')
     uqp=cfg['train']['unique_query_packing']
@@ -84,12 +85,12 @@ def main():
           f"Selection ratio : {first['selected_clips']/len(train):.2%}\n"
           f"Unique query packing : {bool(uqp['enabled'])}\nOverlap-aware batching : {bool(overlap_sampler is not None)}\n"
           f"Validation endpoints : {len(val)} (full)\nPlanned optimizer updates : {total_planned_updates}")
-    start=step=0;best_spatial=best_temporal=None;history=[]
+    start=step=0;best_spatial=None;history=[]
     if args.resume:
         state=torch.load(args.resume,map_location=device);model.load_state_dict(state['model_state'],strict=True)
         opt.load_state_dict(state['optimizer_state']);sched.load_state_dict(state['scheduler_state'])
         start=state['epoch'];step=state.get('global_optimizer_step',state['global_step'])
-        selection=state.get('checkpoint_selection',{});best_spatial=selection.get('spatial');best_temporal=selection.get('temporal')
+        selection=state.get('checkpoint_selection',{});best_spatial=selection.get('spatial')
         if (output/'metrics.json').exists():history=json.loads((output/'metrics.json').read_text())
         for record in history:
             record.setdefault('query_stride',None);record.setdefault('query_offset',None)
@@ -103,19 +104,18 @@ def main():
             if overlap_sampler is not None:overlap_sampler.set_epoch(epoch)
             else:train_sampler.set_epoch(epoch)
             selected_clips=len(train_sampler);valid_query_slots=sum(train.clip_metadata[i]['valid_query_slots'] for i in train_sampler.selected_indices(shuffle=False))
-            model.train();opt.zero_grad(set_to_none=True);pending=0;totals=np.zeros(5);batches=0;occurrences=unique_queries=0;stop=False;begin=time.perf_counter()
-            names=('loss','spatial_loss','loss_cls','loss_reg','temporal_loss')
+            names=('loss','loss_cls','loss_reg')
+            model.train();opt.zero_grad(set_to_none=True);pending=0;totals=np.zeros(len(names));batches=0;occurrences=unique_queries=0;stop=False;begin=time.perf_counter()
             offset=train_sampler.offset_for_epoch();ratio=selected_clips/len(train)
             bar=tqdm(loader,desc=f'TRAIN {epoch}/{epochs} EQS s={query_stride} o={offset} clips={selected_clips}/{len(train)}',dynamic_ncols=True)
             for raw in bar:
                 occurrences+=int(raw['query_valid_mask'].sum());unique_queries+=int(raw['spatial_num_samples'])
                 batch=move_batch(raw,device)
                 with training_precision.context(device):out=model(batch)
-                for key in ('logits','pred_xyz','temporal_pred_xyz'):finite_or_raise(key,out[key])
+                for key in ('logits','pred_xyz'):finite_or_raise(key,out[key])
                 loss=criterion(out,batch);finite_or_raise('loss',loss['loss'])
-                if loss['num_temporal_supervised']==0:continue
+                if loss['num_supervised_samples']==0:continue
                 (loss['loss']/accum).backward();pending+=1;batches+=1
-                names=('loss','spatial_loss','loss_cls','loss_reg','temporal_loss')
                 totals+=np.array([float(loss[k].detach()) for k in names])
                 if pending==accum:
                     for p in model.parameters():
@@ -131,10 +131,9 @@ def main():
                 torch.nn.utils.clip_grad_norm_(model.parameters(),cfg['train']['grad_clip_norm'])
                 opt.step();sched.step();opt.zero_grad(set_to_none=True);step+=1
             metrics,rows,health=validate(model,vloader,criterion,selector,device,evaluation_precision)
-            spatial_candidate=spatial_selection_metrics(metrics,epoch);temporal_candidate=temporal_selection_metrics(metrics,epoch)
-            improved_spatial=better_spatial(spatial_candidate,best_spatial);improved_temporal=better_temporal(temporal_candidate,best_temporal)
+            spatial_candidate=spatial_selection_metrics(metrics,epoch)
+            improved_spatial=better_spatial(spatial_candidate,best_spatial)
             if improved_spatial:best_spatial=spatial_candidate
-            if improved_temporal:best_temporal=temporal_candidate
             record=dict(epoch=epoch,global_step=step,query_stride=query_stride,query_offset=offset,
                         selected_clips=selected_clips,full_clips=len(train),selection_ratio=ratio,
                         valid_query_slots=valid_query_slots,query_occurrences=occurrences,unique_spatial_queries=unique_queries,
@@ -147,16 +146,15 @@ def main():
                 unique_spatial_queries=r.get('unique_spatial_queries'),spatial_dedup_ratio=r.get('spatial_dedup_ratio'),
                 **r['train'],**r['validation']['all']) for r in history])
             write_csv(output/f'validation_epoch_{epoch:03d}.csv',rows)
-            selection=dict(spatial=best_spatial,temporal=best_temporal)
+            selection=dict(spatial=best_spatial)
             metadata=dict(git_commit=git_commit,run_id=run_id,eqs=dict(stride=query_stride,current_offset=offset,
                 completed_coverage_cycles=epoch//query_stride))
             save_checkpoint(output/'last.pt',model,opt,sched,epoch,step,selection,effective_cfg,metadata)
             if improved_spatial:save_checkpoint(output/'best_spatial.pt',model,opt,sched,epoch,step,selection,effective_cfg,metadata)
-            if improved_temporal:save_checkpoint(output/'best_temporal.pt',model,opt,sched,epoch,step,selection,effective_cfg,metadata)
             print('ALL',metrics['all']);print('NO_CURRENT_SUPPORT',metrics['no_current_support']);completed=epoch
             if stop:break
     except KeyboardInterrupt:
-        selection=dict(spatial=best_spatial,temporal=best_temporal)
+        selection=dict(spatial=best_spatial)
         metadata=dict(git_commit=git_commit,run_id=run_id,eqs=dict(stride=query_stride,
             current_offset=train_sampler.offset_for_epoch(max(1,completed)),completed_coverage_cycles=completed//query_stride))
         save_checkpoint(output/'interrupt.pt',model,opt,sched,completed,step,selection,effective_cfg,metadata)

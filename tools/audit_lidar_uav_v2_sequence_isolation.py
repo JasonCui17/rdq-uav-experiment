@@ -53,7 +53,8 @@ def main():
     train=LiDARUAVDataset(cfg['data']['root'],ROOT/cfg['data']['split_file'],cfg['data']['train_split'])
     official=Path(cfg['data']['root']).parent
     val=LiDARUAVValidationDataset(official/'val',official/'validation_ref_new (for your ref).csv')
-    examples=[];report=dict(train=audit(train,False,cfg['temporal']['clip_length'],examples),validation=audit(val,True,cfg['temporal']['clip_length'],examples))
+    clip_length=cfg['data']['query_clip_length']
+    examples=[];report=dict(train=audit(train,False,clip_length,examples),validation=audit(val,True,clip_length,examples))
     modules=[]
     for name in ('test_lidar_uav_v2_sequence_isolation','test_lidar_uav_v2_query_causal','test_lidar_uav_v2_sbe'):
         spec=importlib.util.spec_from_file_location(name,ROOT/'tests'/f'{name}.py');m=importlib.util.module_from_spec(spec);spec.loader.exec_module(m);modules.append(m)

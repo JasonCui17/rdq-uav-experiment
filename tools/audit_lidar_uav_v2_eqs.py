@@ -42,10 +42,10 @@ def main():
     args=parser.parse_args();out=args.output;out.mkdir(parents=True,exist_ok=False)
     cfg=yaml.safe_load((ROOT/'configs/lidar_uav_v2.yaml').read_text());torch.set_num_threads(4)
     train_queries=LiDARUAVDataset(cfg['data']['root'],ROOT/cfg['data']['split_file'],cfg['data']['train_split'])
-    train=TemporalQueryClipDataset(train_queries,cfg['temporal']['clip_length'],stride=1)
+    train=TemporalQueryClipDataset(train_queries,cfg['data']['query_clip_length'],stride=cfg['data']['query_clip_stride'])
     official=Path(cfg['data']['root']).parent
     val_queries=LiDARUAVValidationDataset(official/'val',official/'validation_ref_new (for your ref).csv')
-    validation=TemporalQueryClipDataset(val_queries,cfg['temporal']['clip_length'],validation=True)
+    validation=TemporalQueryClipDataset(val_queries,cfg['data']['query_clip_length'],validation=True)
     full=len(train);sequence_full=Counter(r['sequence_id'] for r in train.clip_metadata)
     stride_summary={};per_sequence=[]
     appearance_rows={1:[],4:[]};appearance_summary={}

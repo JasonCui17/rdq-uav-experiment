@@ -8,12 +8,12 @@ import torch
 
 ROOT=Path(__file__).resolve().parents[1];sys.path.insert(0,str(ROOT/'src'))
 spec=importlib.util.spec_from_file_location('qc',ROOT/'tests/test_lidar_uav_v2_query_causal.py');qc=importlib.util.module_from_spec(spec);spec.loader.exec_module(qc)
-from rdq_uav.lidar_v2 import QueryCausalLoss,collate_temporal_queries
+from rdq_uav.lidar_v2 import CandidateLoss,collate_temporal_queries
 
 RESULTS={}
 
 
-class LegacyQueryCausalLoss(QueryCausalLoss):
+class LegacyCandidateLoss(CandidateLoss):
     """Frozen pre-cleanup label path for exact-equivalence tests only."""
     def labels(self,outputs,batch):
         spatial_gt=batch.get('spatial_target_xyz',batch['target_xyz']);spatial_valid=batch.get('spatial_target_valid',batch['target_valid'])
@@ -47,27 +47,27 @@ class RecentInputContractTests(unittest.TestCase):
         _,batch=batches();torch.manual_seed(42);model=qc.model().eval()
         with torch.no_grad():
             normal=model(batch);model_only={k:v for k,v in batch.items() if k!='supervision_recent_mask'};without=model(model_only)
-        keys=('logits','pred_xyz','fine_features','query_token','temporal_hidden','temporal_pred_xyz')
+        keys=('logits','pred_xyz','fine_features')
         diffs={key:maximum(normal[key],without[key]) for key in keys}
         self.assertEqual(max(diffs.values()),0.);RESULTS['mask_removed_output_diffs']=diffs
 
     def test_legacy_labels_and_losses_are_exact(self):
         legacy,clean=batches();torch.manual_seed(42);model=qc.model().eval()
         with torch.no_grad():old_output=model(legacy);new_output=model(clean)
-        old_criterion=LegacyQueryCausalLoss(qc.CFG);new_criterion=QueryCausalLoss(qc.CFG)
+        old_criterion=LegacyCandidateLoss(qc.CFG);new_criterion=CandidateLoss(qc.CFG)
         old_labels=old_criterion.labels(old_output,legacy);new_labels=new_criterion.labels(new_output,clean)
         for old,new in zip(old_labels[:3],new_labels[:3]):self.assertTrue(torch.equal(old,new))
         old_loss=old_criterion(old_output,legacy);new_loss=new_criterion(new_output,clean)
-        loss_diffs={key:abs(float(old_loss[key])-float(new_loss[key])) for key in ('loss','spatial_loss','loss_cls','loss_reg','temporal_loss')}
+        loss_diffs={key:abs(float(old_loss[key])-float(new_loss[key])) for key in ('loss','loss_cls','loss_reg')}
         counts=dict(positive=int(new_labels[0].sum()),ignore=int(new_labels[1].sum()),negative=int(new_labels[2].sum()),
             current=int(new_loss['num_supervised_samples']),no_current=int(new_loss['num_no_current_support']))
         self.assertEqual(max(loss_diffs.values()),0.);RESULTS.update(loss_diffs=loss_diffs,label_counts=counts)
 
     def test_gradient_exact_equivalence(self):
         legacy,clean=batches();torch.manual_seed(42);old=qc.model().train();new=qc.model().train();new.load_state_dict(old.state_dict())
-        LegacyQueryCausalLoss(qc.CFG)(old(legacy),legacy)['loss'].backward();QueryCausalLoss(qc.CFG)(new(clean),clean)['loss'].backward()
+        LegacyCandidateLoss(qc.CFG)(old(legacy),legacy)['loss'].backward();CandidateLoss(qc.CFG)(new(clean),clean)['loss'].backward()
         names=('voxel_embed.proj.weight','merge01.parent.weight','encoder0.blocks.0.qkv.weight','head.cls.2.weight',
-            'query_pool.xyz_embed.2.weight','temporal_transformer.blocks.0.qkv.weight','temporal_head.net.2.weight')
+            'head.reg.2.weight')
         diffs={}
         for name in names:
             a=dict(old.named_parameters())[name].grad;b=dict(new.named_parameters())[name].grad
@@ -76,8 +76,9 @@ class RecentInputContractTests(unittest.TestCase):
         RESULTS['gradient_diffs']=diffs
 
     def test_only_supervision_consumers_reference_mask(self):
-        model=(ROOT/'src/rdq_uav/lidar_v2/model.py').read_text();sbe=(ROOT/'src/rdq_uav/lidar_v2/sbe.py').read_text();temporal=(ROOT/'src/rdq_uav/lidar_v2/temporal.py').read_text()
-        self.assertNotIn('recent_mask',model);self.assertNotIn('recent_mask',sbe);self.assertNotIn('recent_mask',temporal)
+        model=(ROOT/'src/rdq_uav/lidar_v2/model.py').read_text();sbe=(ROOT/'src/rdq_uav/lidar_v2/sbe.py').read_text()
+        self.assertNotIn('recent_mask',model);self.assertNotIn('recent_mask',sbe)
+        self.assertFalse((ROOT/'src/rdq_uav/lidar_v2/temporal.py').exists())
         self.assertIn('supervision_recent_mask',(ROOT/'src/rdq_uav/lidar_v2/loss.py').read_text())
         self.assertIn('supervision_recent_mask',(ROOT/'src/rdq_uav/lidar_v2/runtime.py').read_text())
 
