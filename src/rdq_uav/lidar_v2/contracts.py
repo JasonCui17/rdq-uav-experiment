@@ -28,7 +28,7 @@ def _get(cfg,path):
 def validate_frozen_v2_config(cfg):
     """Reject public options that contradict the frozen pre-training architecture."""
     if 'temporal' in cfg:
-        raise ValueError(f'{ERROR} temporal architecture was removed; use data.query_clip_length for spatial sampling')
+        raise ValueError(f'{ERROR} temporal architecture was removed; spatial training uses independent queries')
     stale_loss={'temporal_weight','temporal_smooth_l1_beta'}&set(cfg.get('loss',{}))
     if stale_loss:
         raise ValueError(f'{ERROR} removed temporal loss fields: {sorted(stale_loss)}')
@@ -44,7 +44,10 @@ def validate_frozen_v2_config(cfg):
         'model.merge.explicit_octant_occupancy':True,'model.merge.occupancy_slots':8,
         'model.merge.attention_pool':False,'model.up.adjacent_only':True,
         'model.head.residual_scale_m':1.,'data.query_mode':'gt_timestamp','data.denoise':False,
-        'data.query_clip_length':8,'data.query_clip_stride':1,
+        'train.sample_unit':'spatial_query','train.validation_interval_epochs':4,'train.query_subsampling.enabled':True,
+        'train.query_subsampling.stride':4,'train.query_subsampling.offset_policy':'cyclic_epoch',
+        'train.query_subsampling.anchor':'query','train.query_subsampling.shuffle_selected':True,
+        'train.unique_query_packing.enabled':False,
         'evaluation.precision':'fp32','evaluation.k':[1,5,10,20],'evaluation.radii_m':[.5,1.,2.],
         'selector.version':'stable_topk100_radius1m_v1',
     }
@@ -93,6 +96,10 @@ def effective_config(cfg,device):
 
 
 def require_occurrence_aligned_evaluation(batch):
+    if 'occurrence_to_unique' not in batch:
+        if int(batch['spatial_num_samples'])!=int(batch['num_samples']) or len(batch['sample_id'])!=int(batch['num_samples']):
+            raise RuntimeError('Spatial evaluation batch is not query-aligned.')
+        return
     valid=batch['query_valid_mask'].flatten();mapping=batch['occurrence_to_unique'];expected=torch.arange(len(mapping),device=mapping.device)
     aligned=(not bool(batch.get('unique_query_packing',False)) and int(batch['spatial_num_samples'])==len(mapping)
         and torch.equal(mapping[valid],expected[valid]))

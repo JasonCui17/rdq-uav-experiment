@@ -237,7 +237,28 @@ def collate_temporal_queries(items,unique_query_packing=False):
     return batch
 
 def collate_lidar_samples(samples):
-    return collate_temporal_queries([{'queries':[q]} for q in samples])
+    """Pack independent spatial queries without temporal clip metadata."""
+    if not samples:raise ValueError('Cannot collate an empty spatial query batch')
+    for index,q in enumerate(samples):
+        assert_temporal_clip_integrity([q],clip_index=f'spatial_query:{index}',require_events=True)
+        if any(ts>q['query_time'] for ts in q['event_timestamps']) or bool((q['delta_t']>0).any()):
+            raise ValueError('Future event violation')
+    counts=torch.tensor([len(q['points']) for q in samples],dtype=torch.long);n=len(samples)
+    batch={k:torch.cat([q[k] for q in samples]) for k in ('points','sensor_id','delta_t','supervision_recent_mask')}
+    batch.update(num_samples=n,spatial_num_samples=n,
+        point_batch_index=torch.repeat_interleave(torch.arange(n),counts),point_counts=counts,
+        query_time=torch.tensor([q['query_time'] for q in samples],dtype=torch.float64),
+        target_valid=torch.tensor([q.get('target_valid',False) for q in samples],dtype=torch.bool),
+        spatial_target_valid=torch.tensor([q.get('target_valid',False) for q in samples],dtype=torch.bool),
+        sample_id=[q['sample_id'] for q in samples],sequence_id=[q['sequence_id'] for q in samples],
+        query_uid=[q.get('query_uid',q['sample_id']) for q in samples],
+        event_count=torch.tensor([q['event_count'] for q in samples]),
+        event_timestamps=[q['event_timestamps'] for q in samples],
+        event_sequence_ids=[q['event_sequence_ids'] for q in samples])
+    xyz=torch.stack([torch.as_tensor(q['target_xyz']).float() if q.get('target_valid',False) else torch.zeros(3) for q in samples])
+    timestamps=torch.tensor([q.get('target_timestamp',float('nan')) for q in samples],dtype=torch.float64)
+    batch.update(target_xyz=xyz,spatial_target_xyz=xyz,target_timestamp=timestamps)
+    return batch
 
 def build_query_history(builder,sequence_id,query_times,clip_length=8):
     if clip_length<1:raise ValueError('Positive clip length required')

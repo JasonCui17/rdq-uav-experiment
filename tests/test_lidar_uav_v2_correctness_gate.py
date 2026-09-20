@@ -125,6 +125,7 @@ class CorrectnessGateTests(unittest.TestCase):
         ('model.voxel.sbe.vqsa', 'enabled', False),
         ('model', 'voxel.embedding', 'legacy'),
         ('evaluation', 'precision', 'bf16'),
+        ('train.unique_query_packing', 'enabled', True),
     ]
     for parent, key, value in mutations:
         cfg = copy.deepcopy(CFG)

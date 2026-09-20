@@ -1,4 +1,4 @@
-"""LiDAR UAV V2 Query-Causal with selectable SBE-Lite / legacy voxel embedding."""
+"""LiDAR UAV V2 spatial candidate model with SBE-Lite voxel embedding."""
 from __future__ import annotations
 import math
 from typing import Any

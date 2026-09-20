@@ -15,7 +15,11 @@ def write_csv(path,rows):
     path=Path(path);path.parent.mkdir(parents=True,exist_ok=True)
     if not rows:return
     with path.open('w',newline='') as f:
-        w=csv.DictWriter(f,fieldnames=list(rows[0]));w.writeheader();w.writerows(rows)
+        fields=[]
+        for row in rows:
+            for key in row:
+                if key not in fields:fields.append(key)
+        w=csv.DictWriter(f,fieldnames=fields);w.writeheader();w.writerows(rows)
 
 def finite_or_raise(name,tensor,context=''):
     if not torch.isfinite(tensor).all():raise FloatingPointError(f'Non-finite {name}: {context}')
@@ -36,7 +40,8 @@ def inspect_dataset_timing(dataset,indices):
     return rows
 
 def evaluation_loss_batch(batch):
-    """Score endpoint only in validation rolling clips, without changing context."""
+    """Return direct-query validation labels; retain archived clip compatibility."""
+    if 'target_valid_clip' not in batch:return batch
     result=dict(batch)
     mask=batch['target_valid_clip']&batch['score_mask']&batch['query_valid_mask']
     result['target_valid_clip']=mask;result['target_valid']=mask.flatten()
@@ -60,13 +65,15 @@ def validate(model,loader,criterion,selector,device,precision='fp32',export_dir=
         for key in ('logits','pred_xyz'):finite_or_raise(key,out[key])
         labels_batch=evaluation_loss_batch(batch);loss=criterion(out,labels_batch)
         n=loss['num_supervised_samples'];ns+=n
-        no_support+=loss['num_no_current_support'];endpoints+=int(labels_batch['spatial_supervise_mask_occurrence'].sum())
+        no_support+=loss['num_no_current_support'];endpoints+=int(labels_batch.get('spatial_supervise_mask_occurrence',labels_batch['target_valid']).sum())
         spatial_sum+=float(loss['loss'])*n;cls_sum+=float(loss['loss_cls'])*n;reg_sum+=float(loss['loss_reg'])*n
         rows.extend(evaluate_batch(out,batch,selector,criterion))
         if export_dir is not None:
             chosen=selector(out);pos,_,_,_=criterion.labels(out,batch)
+            score=batch.get('score_mask')
+            score=torch.ones(len(chosen),dtype=torch.bool,device=batch['target_valid'].device) if score is None else score.flatten()
             for b,item in enumerate(chosen):
-                if not bool(batch['score_mask'].flatten()[b]):continue
+                if not bool(score[b]):continue
                 for kind in ('raw','nms'):
                     c=item[kind]
                     for rank in range(len(c['score'])):

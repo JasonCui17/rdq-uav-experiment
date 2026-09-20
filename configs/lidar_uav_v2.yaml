@@ -10,8 +10,6 @@ data:
   val_split: validation_sub
   test_split: heldout_test_sub
   num_merged_frames: 20
-  query_clip_length: 8
-  query_clip_stride: 1
   query_mode: gt_timestamp
   coordinate_config_id: EXISTING_MMUAV_COORDINATE_ASSUMPTION
   denoise: false
@@ -67,6 +65,7 @@ selector:
   nms_radius_m: 1.0
   final_topk: 20
 train:
+  sample_unit: spatial_query
   epochs: 100
   lr: 0.0002
   betas: [0.9, 0.999]
@@ -80,17 +79,15 @@ train:
   single_gpu_accumulate: 2
   dual_gpu_accumulate: 1
   amp_dtype: bfloat16
+  validation_interval_epochs: 4
   query_subsampling:
     enabled: true
     stride: 4
     offset_policy: cyclic_epoch
-    anchor: clip_end
-    dense_clip_context: true
+    anchor: query
     shuffle_selected: true
   unique_query_packing:
-    enabled: true
-    overlap_aware_batching: true
-    dedup_key: sequence_query_uid
+    enabled: false
 evaluation:
   precision: fp32
   batch_size: 1

@@ -41,10 +41,16 @@ class CandidateLoss(nn.Module):
             alpha=targets*self.alpha+(1-targets)*(1-self.alpha); cls=(alpha*(1-pt).pow(self.gamma)*ce).sum()/max(1,np_)
             reg=F.smooth_l1_loss(outputs["residual_xyz"][p].float(),target[p].float(),beta=self.beta,reduction="none").sum()/max(1,np_)
             sample_cls[b]=cls;sample_reg[b]=reg;sample_total[b]=cls+self.reg_weight*reg
-        occurrence=batch.get('occurrence_to_unique',torch.arange(spatial_n,device=sample_total.device))
-        occurrence_valid=batch['query_valid_mask'].flatten()
-        occurrence_supervise=batch.get('spatial_supervise_mask_occurrence',occurrence_valid)&occurrence_valid
-        mapped=occurrence[occurrence_supervise]
+        if 'occurrence_to_unique' in batch:
+            # Legacy clip/UQP compatibility path. Current spatial training does
+            # not create occurrence space.
+            occurrence=batch['occurrence_to_unique'];occurrence_valid=batch['query_valid_mask'].flatten()
+            occurrence_supervise=batch.get('spatial_supervise_mask_occurrence',occurrence_valid)&occurrence_valid
+            mapped=occurrence[occurrence_supervise]
+        else:
+            # One dataset item is one spatial query; supervise each valid query
+            # exactly once and average only over queries with a positive voxel.
+            mapped=torch.nonzero(spatial_valid,as_tuple=False).flatten()
         supervised_occurrence=sample_supervised[mapped];supervised_ids=mapped[supervised_occurrence]
         mean=lambda x:x[supervised_ids].mean() if len(supervised_ids) else zero
         num_pos=int(sample_pos[mapped].sum());num_neg=int(sample_neg[mapped].sum());num_ignore=int(sample_ignore[mapped].sum())

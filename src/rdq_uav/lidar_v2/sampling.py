@@ -1,4 +1,4 @@
-"""Epoch-cyclic clip sampling and update-plan math; never loads point clouds."""
+"""Epoch-cyclic query sampling and update-plan math; never loads point clouds."""
 from __future__ import annotations
 
 import math
@@ -7,18 +7,31 @@ from torch.utils.data import Sampler
 
 
 class EpochCyclicQuerySampler(Sampler[int]):
-    """Select complete dense clips by sequence-local anchor ordinal.
+    """Select independent queries by sequence-local ordinal.
 
-    Epoch numbering is one-based: offset=(epoch-1)%stride. Selection never
-    changes a clip's internal query indices or any query's LiDAR history.
+    Legacy clip datasets remain supported for archived UQP tests, but the
+    formal spatial path passes LiDARUAVDataset directly.
     """
     def __init__(self,dataset,stride=4,seed=42,shuffle_selected=True):
         if not isinstance(stride,int) or stride<1:raise ValueError('stride must be a positive integer')
-        if not hasattr(dataset,'clip_metadata'):raise TypeError('dataset must expose clip_metadata')
         self.dataset=dataset;self.stride=stride;self.seed=int(seed);self.shuffle_selected=bool(shuffle_selected);self.epoch=1
-        if len(dataset.clip_metadata)!=len(dataset):raise AssertionError('clip_metadata length mismatch')
-        for i,record in enumerate(dataset.clip_metadata):
-            if record['dataset_index']!=i:raise AssertionError('clip metadata index mismatch')
+        if hasattr(dataset,'records'):
+            groups={}
+            for index,record in enumerate(dataset.records):groups.setdefault(record['sequence_id'],[]).append(index)
+            metadata=[]
+            for sequence,indices in sorted(groups.items()):
+                indices.sort(key=lambda i:dataset.records[i]['query_time'])
+                for ordinal,index in enumerate(indices):
+                    record=dataset.records[index]
+                    metadata.append(dict(dataset_index=index,sequence_id=sequence,query_ordinal=ordinal,
+                        query_time=float(record['query_time']),sample_id=record['sample_id']))
+            self.metadata=sorted(metadata,key=lambda r:r['dataset_index']);self.mode='query'
+        elif hasattr(dataset,'clip_metadata'):
+            self.metadata=[dict(r,query_ordinal=r['anchor_query_ordinal']) for r in dataset.clip_metadata];self.mode='legacy_clip'
+        else:raise TypeError('dataset must expose records or legacy clip_metadata')
+        if len(self.metadata)!=len(dataset):raise AssertionError('sampling metadata length mismatch')
+        for i,record in enumerate(self.metadata):
+            if record['dataset_index']!=i:raise AssertionError('sampling metadata index mismatch')
 
     def set_epoch(self,epoch):
         if not isinstance(epoch,int) or epoch<1:raise ValueError('epoch must use one-based positive numbering')
@@ -31,7 +44,7 @@ class EpochCyclicQuerySampler(Sampler[int]):
 
     def selected_indices(self,epoch=None,shuffle=None):
         epoch=self.epoch if epoch is None else int(epoch);offset=self.offset_for_epoch(epoch)
-        indices=[r['dataset_index'] for r in self.dataset.clip_metadata if r['anchor_query_ordinal']%self.stride==offset]
+        indices=[r['dataset_index'] for r in self.metadata if r['query_ordinal']%self.stride==offset]
         do_shuffle=self.shuffle_selected if shuffle is None else bool(shuffle)
         if do_shuffle and len(indices)>1:
             generator=torch.Generator().manual_seed(self.seed+epoch)
@@ -87,12 +100,14 @@ class OverlapAwareBatchSampler(Sampler[list[int]]):
 
 
 def planned_epoch_stats(sampler,epochs,batch_size,accumulate):
-    """Dry-run clip/batch/update counts for absolute epochs 1..epochs."""
+    """Dry-run query/batch/update counts for absolute epochs 1..epochs."""
     if epochs<1 or batch_size<1 or accumulate<1:raise ValueError('positive plan arguments required')
     result=[]
     for epoch in range(1,epochs+1):
-        clips=len(sampler.selected_indices(epoch,shuffle=False))
-        batches=math.ceil(clips/batch_size)
-        result.append(dict(epoch=epoch,offset=sampler.offset_for_epoch(epoch),selected_clips=clips,
-                           batches=batches,optimizer_updates=math.ceil(batches/accumulate)))
+        queries=len(sampler.selected_indices(epoch,shuffle=False))
+        batches=math.ceil(queries/batch_size)
+        row=dict(epoch=epoch,offset=sampler.offset_for_epoch(epoch),selected_queries=queries,
+                 batches=batches,optimizer_updates=math.ceil(batches/accumulate))
+        if sampler.mode=='legacy_clip':row['selected_clips']=queries
+        result.append(row)
     return result

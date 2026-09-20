@@ -49,8 +49,10 @@ class UpdateScheduler:
 def evaluate_batch(outputs,batch,selector,criterion):
     require_occurrence_aligned_evaluation(batch)
     selected=selector(outputs); pos,_,_,_=criterion.labels(outputs,batch); rows=[]
+    score=batch.get('score_mask')
+    score=torch.ones(len(selected),dtype=torch.bool,device=batch['target_valid'].device) if score is None else score.flatten()
     for b,item in enumerate(selected):
-        if not bool(batch['score_mask'].flatten()[b]) or not bool(batch['target_valid'][b]):continue
+        if not bool(score[b]) or not bool(batch['target_valid'][b]):continue
         gt=batch["target_xyz"][b]; current=bool(torch.any(pos & (outputs["batch_index"]==b)))
         recent_points=batch["supervision_recent_mask"]&(batch["point_batch_index"]==b)
         recent_neighbors=int(torch.count_nonzero(torch.linalg.vector_norm(batch["points"][recent_points]-gt,dim=1)<=1.))
