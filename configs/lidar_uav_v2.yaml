@@ -65,8 +65,9 @@ selector:
   nms_radius_m: 1.0
   final_topk: 20
 train:
+  protocol: full_query_v1
   sample_unit: spatial_query
-  epochs: 100
+  epochs: 25
   lr: 0.0002
   betas: [0.9, 0.999]
   eps: 1.0e-8
@@ -79,15 +80,6 @@ train:
   single_gpu_accumulate: 2
   dual_gpu_accumulate: 1
   amp_dtype: bfloat16
-  validation_interval_epochs: 4
-  query_subsampling:
-    enabled: true
-    stride: 4
-    offset_policy: cyclic_epoch
-    anchor: query
-    shuffle_selected: true
-  unique_query_packing:
-    enabled: false
 evaluation:
   precision: fp32
   batch_size: 1

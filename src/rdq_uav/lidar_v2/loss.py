@@ -10,10 +10,10 @@ class CandidateLoss(nn.Module):
         super().__init__(); c=cfg["loss"] if "loss" in cfg else cfg
         self.alpha=float(c["focal_alpha"]); self.gamma=float(c["focal_gamma"]); self.beta=float(c["smooth_l1_beta"]); self.reg_weight=float(c["reg_weight"])
     def labels(self,outputs,batch):
-        if 'spatial_target_xyz' not in batch and 'target_xyz' not in batch:
+        if 'target_xyz' not in batch:
             n=len(outputs['logits']);mask=torch.zeros(n,dtype=torch.bool,device=outputs['logits'].device)
             return mask,mask.clone(),mask.clone(),outputs['pred_xyz'].new_zeros((n,3))
-        spatial_gt=batch.get('spatial_target_xyz',batch['target_xyz']);spatial_valid=batch.get('spatial_target_valid',batch['target_valid'])
+        spatial_gt=batch['target_xyz'];spatial_valid=batch['target_valid']
         h=outputs["layouts"]; inv=h.point_to_l0; n=len(outputs["logits"]); gt=spatial_gt[outputs["batch_index"]]
         point_gt=spatial_gt[batch["point_batch_index"]]; dist=torch.linalg.vector_norm(batch["points"]-point_gt,dim=1)
         all_min=dist.new_full((n,),torch.inf); all_min.scatter_reduce_(0,inv,dist,reduce="amin",include_self=True)
@@ -25,8 +25,8 @@ class CandidateLoss(nn.Module):
         valid=spatial_valid[outputs['batch_index']]
         return positive&valid,ignore&valid,negative&valid,encode_residual(gt,outputs["voxel_centers"],1.0)
     def forward(self,outputs,batch):
-        pos,ignore,neg,target=self.labels(outputs,batch);spatial_n=int(batch.get('spatial_num_samples',batch['num_samples']))
-        spatial_valid=batch.get('spatial_target_valid',batch['target_valid']);zero=outputs["logits"].sum()*0
+        pos,ignore,neg,target=self.labels(outputs,batch);spatial_n=int(batch['num_samples'])
+        spatial_valid=batch['target_valid'];zero=outputs["logits"].sum()*0
         sample_total=outputs['logits'].new_zeros(spatial_n,dtype=torch.float32)
         sample_cls=sample_total.clone();sample_reg=sample_total.clone();sample_supervised=torch.zeros(spatial_n,dtype=torch.bool,device=sample_total.device)
         sample_no_support=torch.zeros_like(sample_supervised);sample_pos=torch.zeros(spatial_n,dtype=torch.long,device=sample_total.device)
@@ -41,19 +41,10 @@ class CandidateLoss(nn.Module):
             alpha=targets*self.alpha+(1-targets)*(1-self.alpha); cls=(alpha*(1-pt).pow(self.gamma)*ce).sum()/max(1,np_)
             reg=F.smooth_l1_loss(outputs["residual_xyz"][p].float(),target[p].float(),beta=self.beta,reduction="none").sum()/max(1,np_)
             sample_cls[b]=cls;sample_reg[b]=reg;sample_total[b]=cls+self.reg_weight*reg
-        if 'occurrence_to_unique' in batch:
-            # Legacy clip/UQP compatibility path. Current spatial training does
-            # not create occurrence space.
-            occurrence=batch['occurrence_to_unique'];occurrence_valid=batch['query_valid_mask'].flatten()
-            occurrence_supervise=batch.get('spatial_supervise_mask_occurrence',occurrence_valid)&occurrence_valid
-            mapped=occurrence[occurrence_supervise]
-        else:
-            # One dataset item is one spatial query; supervise each valid query
-            # exactly once and average only over queries with a positive voxel.
-            mapped=torch.nonzero(spatial_valid,as_tuple=False).flatten()
-        supervised_occurrence=sample_supervised[mapped];supervised_ids=mapped[supervised_occurrence]
+        mapped=torch.nonzero(spatial_valid,as_tuple=False).flatten()
+        supervised_queries=sample_supervised[mapped];supervised_ids=mapped[supervised_queries]
         mean=lambda x:x[supervised_ids].mean() if len(supervised_ids) else zero
         num_pos=int(sample_pos[mapped].sum());num_neg=int(sample_neg[mapped].sum());num_ignore=int(sample_ignore[mapped].sum())
         return {"loss":mean(sample_total),"loss_cls":mean(sample_cls),"loss_reg":mean(sample_reg),"num_pos":num_pos,"num_neg":num_neg,
-                "num_ignore":num_ignore,"num_supervised_samples":int(supervised_occurrence.sum()),"num_no_current_support":int(sample_no_support[mapped].sum()),
+                "num_ignore":num_ignore,"num_supervised_samples":int(supervised_queries.sum()),"num_no_current_support":int(sample_no_support[mapped].sum()),
                 "positive_mask":pos,"ignore_mask":ignore,"negative_mask":neg}

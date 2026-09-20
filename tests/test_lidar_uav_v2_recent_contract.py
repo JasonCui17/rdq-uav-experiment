@@ -8,7 +8,7 @@ import torch
 
 ROOT=Path(__file__).resolve().parents[1];sys.path.insert(0,str(ROOT/'src'))
 spec=importlib.util.spec_from_file_location('qc',ROOT/'tests/test_lidar_uav_v2_query_causal.py');qc=importlib.util.module_from_spec(spec);spec.loader.exec_module(qc)
-from rdq_uav.lidar_v2 import CandidateLoss,collate_temporal_queries
+from rdq_uav.lidar_v2 import CandidateLoss,collate_lidar_samples
 
 RESULTS={}
 
@@ -16,7 +16,7 @@ RESULTS={}
 class LegacyCandidateLoss(CandidateLoss):
     """Frozen pre-cleanup label path for exact-equivalence tests only."""
     def labels(self,outputs,batch):
-        spatial_gt=batch.get('spatial_target_xyz',batch['target_xyz']);spatial_valid=batch.get('spatial_target_valid',batch['target_valid'])
+        spatial_gt=batch['target_xyz'];spatial_valid=batch['target_valid']
         h=outputs['layouts'];inv=h.point_to_l0;n=len(outputs['logits']);gt=spatial_gt[outputs['batch_index']]
         point_gt=spatial_gt[batch['point_batch_index']];dist=torch.linalg.vector_norm(batch['points']-point_gt,dim=1)
         all_min=dist.new_full((n,),torch.inf);all_min.scatter_reduce_(0,inv,dist,reduce='amin',include_self=True)
@@ -27,14 +27,10 @@ class LegacyCandidateLoss(CandidateLoss):
 
 
 def batches():
-    items=[]
-    for start in (0,4):
-        queries=[]
-        for i in range(start,start+8):
-            q=qc.query(i);q.update(sequence_id='A',sample_id=f'A_{i}',query_uid=i,event_sequence_ids=['A'])
-            queries.append(q)
-        items.append({'queries':queries})
-    clean=collate_temporal_queries(items,unique_query_packing=True)
+    queries=[]
+    for i in range(4):
+        q=qc.query(i);q.update(sequence_id='A',sample_id=f'A_{i}',query_uid=i,event_sequence_ids=['A']);queries.append(q)
+    clean=collate_lidar_samples(queries)
     legacy=copy.deepcopy(clean);legacy['recent_mask']=legacy.pop('supervision_recent_mask')
     return legacy,clean
 

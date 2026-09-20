@@ -13,8 +13,7 @@ import yaml
 
 ROOT=Path(__file__).resolve().parents[1];sys.path.insert(0,str(ROOT/'src'))
 from rdq_uav.lidar_v2 import (CandidateLoss,CandidateSelector,LiDARQueryBuilder,
-    LiDARUAVDetector,TemporalQueryClipDataset,collate_lidar_samples,
-    collate_temporal_queries)
+    LiDARUAVDetector,collate_lidar_samples)
 from rdq_uav.lidar_v2.runtime import evaluate_batch,summarize_metrics
 
 CFG=yaml.safe_load((ROOT/'configs/lidar_uav_v2.yaml').read_text())
@@ -30,7 +29,7 @@ def query(i,points=None,target=True,valid=True):
     if target:q.update(target_xyz=torch.tensor([.2,.1,.1]),target_timestamp=q['query_time'])
     return q
 
-def batch(queries):return collate_temporal_queries([{'queries':queries}])
+def batch(queries):return collate_lidar_samples(queries)
 def model():torch.manual_seed(42);return LiDARUAVDetector(CFG).eval()
 def diff(a,b):return float((a-b).abs().max()) if a.numel() else 0.
 def occurrence(output,index):
@@ -40,9 +39,7 @@ def occurrence(output,index):
 class SpatialCandidateTests(unittest.TestCase):
     def test_validation_endpoint_and_export_interface(self):
         from rdq_uav.lidar_v2.training import validate
-        clips=[{'queries':[query(0)],'score_last_only':True},
-               {'queries':[query(0),query(1,torch.empty((0,3)))],'score_last_only':True}]
-        loader=[collate_temporal_queries([c]) for c in clips]
+        loader=[batch([query(0)]),batch([query(1,torch.empty((0,3)))])]
         with tempfile.TemporaryDirectory() as directory:
             metrics,rows,health=validate(model(),loader,CandidateLoss(CFG),CandidateSelector(CFG),
                                        torch.device('cpu'),precision='fp32',export_dir=Path(directory)/'export')
@@ -74,7 +71,7 @@ class SpatialCandidateTests(unittest.TestCase):
 
     def test_gt_free_query_and_independent_target_time(self):
         m=model();b=batch([query(0,target=False),query(1,target=False)])
-        for key in ('gt_xyz','gt_timestamp','target_xyz','target_timestamp'):self.assertNotIn(key,b)
+        for key in ('gt_xyz','gt_timestamp'):self.assertNotIn(key,b)
         with torch.no_grad():out=m(b)
         self.assertTrue(torch.isfinite(out['logits']).all() and torch.isfinite(out['pred_xyz']).all())
         q=query(2);q['target_timestamp']=q['query_time']+99
@@ -85,7 +82,7 @@ class SpatialCandidateTests(unittest.TestCase):
         self.assertEqual(loss['num_supervised_samples'],0);self.assertEqual(float(loss['loss']),0.)
 
     def test_empty_observation_has_no_fake_candidate(self):
-        m=model();q=query(0,torch.empty((0,3)));b=collate_temporal_queries([{'queries':[q],'clip_length':3}])
+        m=model();q=query(0,torch.empty((0,3)));b=collate_lidar_samples([q])
         with torch.no_grad():out=m(b)
         self.assertEqual(len(out['logits']),0);self.assertEqual(len(out['pred_xyz']),0)
         self.assertEqual(CandidateLoss(CFG)(out,b)['num_supervised_samples'],0)
@@ -114,16 +111,16 @@ class SpatialCandidateTests(unittest.TestCase):
         for key in ('gt_xyz','gt_timestamp','target_xyz','target_timestamp'):self.assertNotIn(key,source)
         for p in (ROOT/'src/rdq_uav/lidar_v2').glob('*.py'):self.assertNotIn('from rdq_uav.lidar_v1',p.read_text())
 
-    def test_validation_scores_endpoint_once_and_spatial_groups(self):
+    def test_validation_scores_each_query_once_and_spatial_groups(self):
         class D:
             records=[dict(sequence_id=s,query_time=i,sample_id=f'{s}{i}') for s in ('a','b') for i in range(3)]
             def __getitem__(self,i):
                 q=query(i%3);q['sequence_id']=self.records[i]['sequence_id'];q['event_sequence_ids']=[q['sequence_id']];q['sample_id']=str(i);return q
-        ds=TemporalQueryClipDataset(D(),8,validation=True);self.assertEqual(len(ds),6)
+        ds=D();self.assertEqual(len(ds.records),6)
         rows=[];m=model()
         with torch.no_grad():
             for i in range(6):
-                b=collate_temporal_queries([ds[i]]);rows.extend(evaluate_batch(m(b),b,CandidateSelector(CFG),CandidateLoss(CFG)))
+                b=collate_lidar_samples([ds[i]]);rows.extend(evaluate_batch(m(b),b,CandidateSelector(CFG),CandidateLoss(CFG)))
         self.assertEqual(len(rows),6);self.assertEqual(len({r['sample_id'] for r in rows}),6)
         metrics=summarize_metrics(rows)['all'];self.assertIn('nms_recall_at_10_1m',metrics);self.assertNotIn('temporal_success_1m',metrics)
 

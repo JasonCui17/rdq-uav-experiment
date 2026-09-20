@@ -44,10 +44,7 @@ def validate_frozen_v2_config(cfg):
         'model.merge.explicit_octant_occupancy':True,'model.merge.occupancy_slots':8,
         'model.merge.attention_pool':False,'model.up.adjacent_only':True,
         'model.head.residual_scale_m':1.,'data.query_mode':'gt_timestamp','data.denoise':False,
-        'train.sample_unit':'spatial_query','train.validation_interval_epochs':4,'train.query_subsampling.enabled':True,
-        'train.query_subsampling.stride':4,'train.query_subsampling.offset_policy':'cyclic_epoch',
-        'train.query_subsampling.anchor':'query','train.query_subsampling.shuffle_selected':True,
-        'train.unique_query_packing.enabled':False,
+        'train.protocol':'full_query_v1','train.sample_unit':'spatial_query','train.epochs':25,
         'evaluation.precision':'fp32','evaluation.k':[1,5,10,20],'evaluation.radii_m':[.5,1.,2.],
         'selector.version':'stable_topk100_radius1m_v1',
     }
@@ -91,17 +88,5 @@ def effective_config(cfg,device):
     validate_frozen_v2_config(cfg);resolved=copy.deepcopy(cfg)
     train=resolve_precision(cfg['train']['amp_dtype'],device);evaluation=resolve_precision(cfg['evaluation']['precision'],device)
     resolved['effective_runtime']=dict(training_precision=train.effective,evaluation_precision=evaluation.effective,
-        residual_scale_m=1.0,validation_unique_query_packing=False,checkpoint_policy=copy.deepcopy(cfg['checkpoint_policy']))
+        residual_scale_m=1.0,checkpoint_policy=copy.deepcopy(cfg['checkpoint_policy']))
     return resolved,train,evaluation
-
-
-def require_occurrence_aligned_evaluation(batch):
-    if 'occurrence_to_unique' not in batch:
-        if int(batch['spatial_num_samples'])!=int(batch['num_samples']) or len(batch['sample_id'])!=int(batch['num_samples']):
-            raise RuntimeError('Spatial evaluation batch is not query-aligned.')
-        return
-    valid=batch['query_valid_mask'].flatten();mapping=batch['occurrence_to_unique'];expected=torch.arange(len(mapping),device=mapping.device)
-    aligned=(not bool(batch.get('unique_query_packing',False)) and int(batch['spatial_num_samples'])==len(mapping)
-        and torch.equal(mapping[valid],expected[valid]))
-    if not aligned:
-        raise RuntimeError('Evaluation currently requires occurrence-aligned spatial queries. Disable UQP for validation/evaluation.')
