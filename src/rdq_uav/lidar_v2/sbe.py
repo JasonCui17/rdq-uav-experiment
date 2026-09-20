@@ -36,6 +36,11 @@ def subvoxel_coordinates(q):
 
 class VoxelQuerySlotAggregation(nn.Module):
     """One learned voxel query cross-attends to eight masked SBE slots."""
+    # PyTorch 2.1 CUDA SDPA uses a grid dimension for the packed voxel batch
+    # and fails when it exceeds 65,535. Splitting that independent dimension
+    # is mathematically exact: attention never mixes different voxels.
+    CUDA_ATTENTION_BATCH_LIMIT=65535
+
     def __init__(self,slot_dim=11,embed_dim=16,heads=2,dropout=0.):
         super().__init__()
         self.slot_dim=slot_dim;self.embed_dim=embed_dim;self.heads=heads
@@ -46,6 +51,16 @@ class VoxelQuerySlotAggregation(nn.Module):
         nn.init.trunc_normal_(self.voxel_query,std=.02,a=-.04,b=.04)
         nn.init.trunc_normal_(self.attention.in_proj_weight,std=.02,a=-.04,b=.04)
         nn.init.zeros_(self.attention.in_proj_bias)
+
+    def _attend(self,query,slot_tokens,occupied,return_attention,limit):
+        dynamic_parts=[];weight_parts=[]
+        for start in range(0,len(slot_tokens),limit):
+            stop=min(start+limit,len(slot_tokens))
+            dynamic_part,weight_part=self.attention(query[start:stop],slot_tokens[start:stop],slot_tokens[start:stop],
+                key_padding_mask=~occupied[start:stop],need_weights=return_attention,average_attn_weights=False)
+            dynamic_parts.append(dynamic_part)
+            if return_attention:weight_parts.append(weight_part)
+        return torch.cat(dynamic_parts,0),torch.cat(weight_parts,0) if return_attention else None
 
     def forward(self,slot_stats,slot_count,return_attention=False):
         """[V,8,11]+integer [V,8] -> dynamic [V,16]."""
@@ -61,8 +76,8 @@ class VoxelQuerySlotAggregation(nn.Module):
         if not len(slot_stats):
             dynamic_sequence=slot_tokens.new_empty((0,1,self.embed_dim));weights=slot_tokens.new_empty((0,self.heads,1,8))
         else:
-            dynamic_sequence,weights=self.attention(query,slot_tokens,slot_tokens,key_padding_mask=~occupied,
-                need_weights=return_attention,average_attn_weights=False)
+            limit=self.CUDA_ATTENTION_BATCH_LIMIT if slot_tokens.device.type=='cuda' else len(slot_tokens)
+            dynamic_sequence,weights=self._attend(query,slot_tokens,occupied,return_attention,limit)
         dynamic=dynamic_sequence.squeeze(1)
         if return_attention:return dynamic,dict(slot_input=slot_input,slot_tokens=slot_tokens,voxel_query=query,
             dynamic_sequence=dynamic_sequence,key_padding_mask=~occupied,attention=weights)

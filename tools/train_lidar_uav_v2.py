@@ -34,7 +34,13 @@ def main():
     output=(args.output or ROOT/cfg['experiment']['output_dir']/'spatial_candidates_v1').resolve()
     protected=(ROOT/'outputs/own_multimodal_research/lidar_uav_v1').resolve()
     if output==protected or protected in output.parents:raise ValueError('V1 output directory is frozen')
-    if output.exists() and not args.precheck_only and not args.resume:raise FileExistsError(output)
+    if output.exists() and not args.precheck_only and not args.resume:
+        # A failure before the first optimizer update leaves only reproducible
+        # precheck/config artifacts. Allow that exact bootstrap state to restart;
+        # never overwrite a run that reached metrics or a checkpoint.
+        bootstrap={'effective_config.json','effective_config.yaml','precheck_samples.csv','resolved_config.yaml'}
+        existing={p.name for p in output.iterdir()}
+        if not existing.issubset(bootstrap):raise FileExistsError(output)
     output.mkdir(parents=True,exist_ok=True)
     cfg['data'].update(root=str(args.train_root),val_root=str(args.val_root),val_reference=str(args.val_reference))
     device=torch.device('cpu' if args.device=='cpu' else f'cuda:{args.device}')

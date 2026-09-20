@@ -55,6 +55,15 @@ class VQSATests(unittest.TestCase):
         with torch.no_grad():a=self.module(stats,counts);b=self.module(changed,counts)
         self.assertEqual(float((a-b).abs().max()),0.)
 
+    def test_attention_batch_chunking_is_exact(self):
+        stats=torch.randn(11,8,11);counts=torch.randint(0,4,(11,8));counts[:,0]=1
+        module=VoxelQuerySlotAggregation();occupied=counts>0
+        tokens=module.slot_embed(torch.cat((stats,module.slot_centers.expand(len(stats),-1,-1)),-1))
+        query=module.voxel_query.expand(len(stats),-1,-1)
+        a,aw=module._attend(query,tokens,occupied,True,100)
+        b,bw=module._attend(query,tokens,occupied,True,3)
+        torch.testing.assert_close(a,b,rtol=1e-6,atol=1e-8);torch.testing.assert_close(aw,bw,rtol=1e-6,atol=1e-8)
+
     def test_position_sensitivity(self):
         module=VoxelQuerySlotAggregation()
         with torch.no_grad():
