@@ -28,6 +28,56 @@ def _finite(records: Sequence[Mapping[str, Any]], field: str) -> np.ndarray:
     return values[np.isfinite(values)]
 
 
+def nearest_projected_distance_px(
+    pixels: np.ndarray, valid: np.ndarray, target_pixel: np.ndarray
+) -> float | None:
+    """Nearest valid projected token-center distance to one target pixel."""
+    pixels = np.asarray(pixels, dtype=np.float64)
+    valid = np.asarray(valid, dtype=bool)
+    target = np.asarray(target_pixel, dtype=np.float64).reshape(2)
+    if pixels.ndim != 2 or pixels.shape[1] != 2 or valid.shape != (len(pixels),):
+        raise ValueError("pixels must be [N,2] and valid must be [N]")
+    kept = pixels[valid & np.isfinite(pixels).all(axis=1)]
+    if not len(kept):
+        return None
+    return float(np.linalg.norm(kept - target[None, :], axis=1).min())
+
+
+def feature_neighborhood_hit(
+    pixels: np.ndarray,
+    valid: np.ndarray,
+    target_pixel: np.ndarray,
+    *,
+    stride: int,
+    image_scale_xy: tuple[float, float] = (1.0, 1.0),
+) -> bool:
+    """Whether any projected token lies in the target's 3x3 feature neighborhood.
+
+    ``pixels`` and ``target_pixel`` are calibrated left-camera coordinates.
+    ``image_scale_xy`` maps that camera coordinate system into the actual DINO
+    image tensor before the Swin stride is applied. This keeps P4 consistent
+    with later resized DINO inputs.
+    """
+    if stride <= 0:
+        raise ValueError("stride must be positive")
+    sx, sy = map(float, image_scale_xy)
+    if sx <= 0 or sy <= 0:
+        raise ValueError("image_scale_xy must be positive")
+    pixels = np.asarray(pixels, dtype=np.float64)
+    valid = np.asarray(valid, dtype=bool)
+    target = np.asarray(target_pixel, dtype=np.float64).reshape(2)
+    if pixels.ndim != 2 or pixels.shape[1] != 2 or valid.shape != (len(pixels),):
+        raise ValueError("pixels must be [N,2] and valid must be [N]")
+    kept = pixels[valid & np.isfinite(pixels).all(axis=1)]
+    if not len(kept):
+        return False
+    scaled = kept * np.asarray([sx, sy], dtype=np.float64)[None, :]
+    scaled_target = target * np.asarray([sx, sy], dtype=np.float64)
+    token_cells = np.floor(scaled / float(stride)).astype(np.int64)
+    target_cell = np.floor(scaled_target / float(stride)).astype(np.int64)
+    return bool(np.any(np.max(np.abs(token_cells - target_cell[None, :]), axis=1) <= 1))
+
+
 def summarize_geometry_measurements(
     records: Sequence[Mapping[str, Any]],
 ) -> dict[str, Any]:
@@ -80,9 +130,6 @@ def flatten_numeric_metrics(value: Any, prefix: str = "") -> dict[str, float]:
 def validate_threshold_contract(contract: Mapping[str, Any]) -> None:
     if contract.get("thresholds_frozen") is not True:
         raise ValueError("formal audit requires thresholds_frozen: true")
-    commit = contract.get("threshold_commit")
-    if not isinstance(commit, str) or len(commit) < 7:
-        raise ValueError("formal audit requires a committed threshold_commit")
     thresholds = contract.get("thresholds")
     if not isinstance(thresholds, Mapping) or not thresholds:
         raise ValueError("formal audit requires at least one numeric threshold")
@@ -95,7 +142,10 @@ def validate_threshold_contract(contract: Mapping[str, Any]) -> None:
 
 
 def evaluate_geometry_gate(
-    summary: Mapping[str, Any], contract: Mapping[str, Any]
+    summary: Mapping[str, Any],
+    contract: Mapping[str, Any],
+    *,
+    threshold_commit: str | None = None,
 ) -> dict[str, Any]:
     """Apply a frozen generic metric contract without inventing thresholds."""
 
@@ -119,6 +169,6 @@ def evaluate_geometry_gate(
         )
     return {
         "status": "PASS" if all(check["passed"] for check in checks) else "FAIL",
-        "threshold_commit": contract["threshold_commit"],
+        "threshold_commit": threshold_commit,
         "checks": checks,
     }

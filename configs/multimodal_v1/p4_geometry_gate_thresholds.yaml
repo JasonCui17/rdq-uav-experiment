@@ -1,6 +1,12 @@
-# P4 preregistration template. Formal audit is intentionally disabled until
-# every threshold below is replaced by an explicit metric rule and this file
-# is committed. Never fill these values after inspecting formal audit results.
+# P4 preregistration template.
+#
+# Workflow:
+# 1) run train_sub in dry-run mode;
+# 2) choose explicit numeric rules from train diagnostics only;
+# 3) set thresholds_frozen: true and commit this file;
+# 4) run validation_sub formal audit without editing thresholds afterward.
+#
+# Do not store a commit SHA inside this YAML: that is self-referential.
+# The formal audit records the last commit that changed this exact file.
 thresholds_frozen: false
-threshold_commit: null
 thresholds: {}
