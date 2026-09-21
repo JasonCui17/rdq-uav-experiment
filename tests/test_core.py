@@ -43,6 +43,11 @@ from tools.calibration.resolve_radar_coordinate_frame import (
     kabsch,
     proper_axis_rotations as radar_axis_rotations,
 )
+from tools.calibration.resolve_lidar_coordinate_frames import (
+    distance_metrics as lidar_distance_metrics,
+    nearest_timestamp as nearest_lidar_timestamp,
+    proper_axis_rotations as lidar_axis_rotations,
+)
 from tools.radar_target_association_audit import (
     candidate_rules,
     deterministic_shuffle_indices as association_shuffle_indices,
@@ -75,6 +80,26 @@ def model_config(variant: str) -> dict:
 
 
 class CoreTests(unittest.TestCase):
+    def test_lidar_frame_resolution_has_24_proper_axes(self) -> None:
+        rotations = lidar_axis_rotations()
+        self.assertEqual(len(rotations), 24)
+        for rotation in rotations:
+            np.testing.assert_allclose(rotation @ rotation.T, np.eye(3))
+            self.assertAlmostEqual(float(np.linalg.det(rotation)), 1.0)
+
+    def test_lidar_nearest_timestamp(self) -> None:
+        timestamps = np.asarray([1.0, 1.2, 1.4])
+        self.assertEqual(nearest_lidar_timestamp(1.31, timestamps), 2)
+        self.assertEqual(nearest_lidar_timestamp(0.5, timestamps), 0)
+        self.assertEqual(nearest_lidar_timestamp(2.0, timestamps), 2)
+        self.assertIsNone(nearest_lidar_timestamp(1.0, np.asarray([])))
+
+    def test_lidar_hit_denominator_is_eligible_only(self) -> None:
+        metrics = lidar_distance_metrics(np.asarray([0.25, 0.75, 3.0]))
+        self.assertEqual(metrics["eligible_frames"], 3)
+        self.assertAlmostEqual(metrics["hit_within_0.5m"], 1 / 3)
+        self.assertAlmostEqual(metrics["hit_within_1m"], 2 / 3)
+
     def test_nearest_projection_row_is_deterministic(self) -> None:
         rows = [{"radar_time": "1.0"}, {"radar_time": "1.2"}, {"radar_time": "1.4"}]
         self.assertEqual(nearest_projection_row(rows, 1.31, "radar_time")["radar_time"], "1.4")

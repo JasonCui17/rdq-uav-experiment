@@ -1,0 +1,20 @@
+{
+  "case": "b1_1064_Mavic2_official_test",
+  "class_name": "Mavic2",
+  "official_split": "official_test",
+  "experiment_split": "val",
+  "image_time": 1692845566.019225,
+  "v1_image": "/home/jasoncui/datasets/MMAUD/official/v1/Mavic2/image/1692845566.019225.png",
+  "nearest_gt_file": "/home/jasoncui/datasets/MMAUD/official/v1/Mavic2/ground_truth/1692845566.008983.npy",
+  "nearest_gt_time": 1692845566.008983,
+  "nearest_gt_dt_s": -0.010241985321044922,
+  "official_image": "/home/jasoncui/datasets/MMAUD/official/2d_detection/test/images/b1_1064.png",
+  "fail_strategy_nearest_gt": true,
+  "fail_strategy_interpolated": false,
+  "proj_nearest_u": 629.3308819436862,
+  "proj_nearest_v": 380.62910730919486,
+  "proj_interp_u": 629.6321752194092,
+  "proj_interp_v": 388.8963785651006,
+  "err_nearest_px": 10.952533539342088,
+  "err_interp_px": 3.073327224702665
+}

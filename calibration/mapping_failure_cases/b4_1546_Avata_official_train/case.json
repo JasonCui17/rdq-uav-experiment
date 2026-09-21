@@ -1,0 +1,20 @@
+{
+  "case": "b4_1546_Avata_official_train",
+  "class_name": "Avata",
+  "official_split": "official_train",
+  "experiment_split": "test",
+  "image_time": 1692849167.359361,
+  "v1_image": "/home/jasoncui/datasets/MMAUD/official/v1/Avata/image/1692849167.359361.png",
+  "nearest_gt_file": "/home/jasoncui/datasets/MMAUD/official/v1/Avata/ground_truth/1692849167.360998.npy",
+  "nearest_gt_time": 1692849167.360998,
+  "nearest_gt_dt_s": 0.0016369819641113281,
+  "official_image": "/home/jasoncui/datasets/MMAUD/official/2d_detection/images/train2017/b4_1546.png",
+  "fail_strategy_nearest_gt": true,
+  "fail_strategy_interpolated": true,
+  "proj_nearest_u": 577.6264964745254,
+  "proj_nearest_v": 469.76380598350033,
+  "proj_interp_u": 578.2657299867146,
+  "proj_interp_v": 475.40470743587775,
+  "err_nearest_px": 7.354625207817153,
+  "err_interp_px": 6.330685455001533
+}
