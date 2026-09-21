@@ -1,12 +1,50 @@
-# P4 preregistration template.
-#
-# Workflow:
-# 1) run train_sub in dry-run mode;
-# 2) choose explicit numeric rules from train diagnostics only;
-# 3) set thresholds_frozen: true and commit this file;
-# 4) run validation_sub formal audit without editing thresholds afterward.
-#
-# Do not store a commit SHA inside this YAML: that is self-referential.
-# The formal audit records the last commit that changed this exact file.
-thresholds_frozen: false
-thresholds: {}
+thresholds_frozen: true
+
+thresholds:
+  groups.real.nearest_3d_distance_m.median:
+    op: le
+    value: 1.0
+
+  groups.real.nearest_3d_distance_m.p95:
+    op: le
+    value: 2.0
+
+  groups.real.image_reprojection_distance_px.median:
+    op: le
+    value: 12.0
+
+  groups.real.image_reprojection_distance_px.p95:
+    op: le
+    value: 32.0
+
+  groups.real.pixel_coverage.coverage_at_16px:
+    op: ge
+    value: 0.90
+
+  groups.real.pixel_coverage.coverage_at_32px:
+    op: ge
+    value: 0.97
+
+  groups.real.feature_neighborhood_coverage.stride_4_3x3:
+    op: ge
+    value: 0.65
+
+  groups.real.feature_neighborhood_coverage.stride_8_3x3:
+    op: ge
+    value: 0.80
+
+  groups.real.feature_neighborhood_coverage.stride_16_3x3:
+    op: ge
+    value: 0.85
+
+  groups.same_sequence_shuffled.nearest_3d_distance_m.median:
+    op: ge
+    value: 2.0
+
+  groups.same_sequence_shuffled.image_reprojection_distance_px.median:
+    op: ge
+    value: 24.0
+
+  groups.same_sequence_shuffled.pixel_coverage.coverage_at_32px:
+    op: le
+    value: 0.70
