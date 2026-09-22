@@ -1,0 +1,15 @@
+candidate:
+  radar:
+    raw_topk: 100
+    pre_nms_topk: 100
+    nms_radius_m: 1.0
+    final_topk: 50
+  rgb:
+    pre_topk: 100
+    nms_iou: 0.70
+    final_topk: 50
+association:
+  geometry_gate_px: 16.0
+  feature_cost: cosine
+  infeasible_cost: 1000000.0
+  score_cost: false

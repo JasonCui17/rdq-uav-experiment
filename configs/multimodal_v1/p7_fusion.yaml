@@ -1,0 +1,26 @@
+fusion:
+  query_dim: 128
+  gate:
+    type_embedding_dim: 16
+    hidden_dim: 128
+  decoder:
+    dim: 128
+    heads: 4
+    ffn_dim: 256
+    layers: 2
+    dropout: 0.1
+    norm_first: true
+  postprocess:
+    nms_2d_iou: 0.70
+    radius_3d_m: 1.0
+    final_topk: 50
+loss:
+  lambda_R: 1.0
+  lambda_V: 1.0
+  lambda_F: 1.0
+  lambda_cls: 1.0
+  lambda_2d: 2.0
+  lambda_3d: 2.0
+  lambda_valid: 0.25
+  focal_alpha: 0.25
+  focal_gamma: 2.0
