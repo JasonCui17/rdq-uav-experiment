@@ -1,0 +1,99 @@
+<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>MMAUD · GT 辅助连续帧标注</title>
+<style>
+:root{font-family:system-ui,-apple-system,'Segoe UI',sans-serif;color:#e6edf3;background:#101820;font-size:14px}*{box-sizing:border-box}body{margin:0}header{display:flex;align-items:center;justify-content:space-between;padding:13px 22px;background:#1c2a35;border-bottom:1px solid #324450;gap:16px;flex-wrap:wrap}h1{font-size:17px;margin:0}.sub{color:#9bb0bf;font-size:12px}select,input,button{background:#243441;color:#e6edf3;border:1px solid #475d6c;border-radius:6px;padding:7px 10px}button{cursor:pointer}button:hover{background:#395066}button:disabled{opacity:.4;cursor:not-allowed}.main{display:grid;grid-template-columns:minmax(0,1fr) 340px;gap:14px;padding:14px;max-width:1800px;margin:auto}.panel{background:#1a2731;border:1px solid #324450;border-radius:10px;padding:13px}.toolbar{display:flex;align-items:center;flex-wrap:wrap;gap:7px}.toolbar .spacer{flex:1}.badge{padding:3px 8px;border-radius:4px;background:#334552;font-size:12px}.confirmed{color:#9ae6bb}.draft{color:#ffcf7d}.invalid{color:#ffa9a9}.warn{color:#ffb68b}.stage{display:flex;align-items:center;justify-content:center;overflow:hidden;max-height:calc(100vh - 225px);background:#0a1219;border-radius:8px;margin-top:10px}canvas{max-width:100%;display:block;touch-action:none;cursor:crosshair}#mainCanvas{max-height:calc(100vh - 230px)}#zoomCanvas{width:100%;background:#0a1219;border-radius:5px;cursor:crosshair}h3{font-size:14px;margin:4px 0 10px}.detail{font-size:12px;color:#afc0cb;line-height:1.8;overflow-wrap:anywhere}.actions{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:7px;margin:10px 0}.primary{background:#167458;border-color:#209870}.danger{background:#824347;border-color:#b35e62}.range{display:flex;gap:8px;margin-top:8px;align-items:center}.range input{min-width:0;width:90px}.error{white-space:pre-wrap;color:#ff9b9b;font-size:12px;min-height:18px}.hint{font-size:12px;color:#9fb2c0;line-height:1.8}.progress{height:8px;background:#30404e;border-radius:6px;overflow:hidden;display:flex;margin:10px 0}.progress span{background:#21996b}.progress span:nth-child(2){background:#d19a44}#thumbs{display:grid;grid-template-columns:repeat(auto-fill,minmax(110px,1fr));gap:4px;max-height:140px;overflow:auto;margin-top:8px}#thumbs button{font-size:11px;text-align:left;padding:5px 6px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}#thumbs button.active{outline:2px solid #3ad19d}#thumbs button[data-status=confirmed],#thumbs button[data-status=confirmed_negative]{border-left:4px solid #2aa779}#thumbs button[data-status=draft]{border-left:4px solid #dca349}#thumbs button[data-status=invalid]{border-left:4px solid #c95959}.selection{display:flex;gap:7px;flex-wrap:wrap}.selection button{font-size:12px}@media(max-width:950px){.main{grid-template-columns:1fr}.stage,#mainCanvas{max-height:none}}
+</style></head><body>
+<header><div><h1>MMAUD · GT 辅助批量 bbox 标注</h1><div class="sub">已有 YOLO 标注不覆盖 · 预测框仅人工确认后保存 · WSL 本地网页</div></div><div class="toolbar">Sequence <select id="seq"></select><button id="refresh">刷新当前 Sequence</button><span id="counts" class="badge">加载中</span></div></header>
+<div class="main"><div><div class="panel"><div class="toolbar"><button id="prev">← A 上一帧</button><button id="next">D 下一帧 →</button><span class="badge" id="position">0 / 0</span><span id="stateBadge" class="badge">—</span><span class="spacer"></span><button id="reset">撤销当前未保存修改</button><button id="redraw">重新画框</button></div><div class="stage"><canvas id="mainCanvas" width="1280" height="960"></canvas></div><div id="filename" class="detail"></div><div id="warning" class="warn detail"></div></div><div class="panel" style="margin-top:12px"><h3>整段帧导航</h3><div class="toolbar"><button id="nextDraft">下一个待审核</button><button id="nextInvalid">下一个异常</button><button id="recompute">全段重新生成未确认框</button></div><div class="progress" id="progress"></div><div id="thumbs"></div></div></div>
+<aside><div class="panel"><h3>局部放大 · 滚轮缩放</h3><canvas id="zoomCanvas" width="440" height="330"></canvas><div class="detail" id="zoomInfo">倍率 6×；拖动框、拖动角点或空白处重画</div><div class="toolbar"><button id="zoomOut">−</button><button id="zoomIn">＋</button><button id="centerZoom">居中到框</button></div><div class="hint" style="margin-top:8px">全图和局部窗口都可以用鼠标操作；方向键移动 1px，Shift+方向键调节宽/高，Ctrl+方向键移动 5px。</div></div>
+<div class="panel" style="margin-top:12px"><h3>当前帧审核</h3><div class="actions"><button id="save" class="primary">Enter · 确认并下一帧</button><button id="saveStay">仅确认当前帧</button><button id="negative" class="danger">清空并确认无框</button><button id="uncertain">无法确认 / 跳过</button><button id="forceAnchor">异常复核后启用参考</button><button id="propagate">从当前帧重新向后生成</button></div><div id="details" class="detail"></div><div class="error" id="error"></div></div>
+<div class="panel" style="margin-top:12px"><h3>批量操作</h3><div class="hint">填写显示的帧序号（从 1 开始，包含两端）。批量删除会将所选帧保存为空 YOLO txt；原文件首次修改时自动备份。</div><div class="range"><label>从 <input id="rangeFrom" type="number" min="1" value="1"></label><label>到 <input id="rangeTo" type="number" min="1" value="1"></label></div><div class="actions"><button id="bulkDelete" class="danger">批量删除框</button><button id="bulkConfirm" class="primary">批量确认候选框</button></div><div class="hint">批量确认仅接受没有异常警告的待审核框。已有确认框和人工修改框不会被批量传播覆盖。</div></div></aside></div>
+<script>
+'use strict';
+const $=id=>document.getElementById(id);
+let seq='',data=null,index=0,image=null,edit=[],dirty=false,zoom=6,redraw=false,drag=null,zoomCenter=null;
+const main=$('mainCanvas'),zcanvas=$('zoomCanvas'),mctx=main.getContext('2d'),zctx=zcanvas.getContext('2d');
+const statusNames={confirmed:'已确认有框',confirmed_negative:'已确认无框',draft:'待审核候选',invalid:'投影/传播异常',unlabeled:'无标注',uncertain:'无法确认'};
+async function api(path,options){const res=await fetch(path,options);const body=await res.json();if(!res.ok)throw new Error(body.error||res.statusText);return body;}
+function tell(msg){$('error').textContent=msg||''}
+function frame(){return data?.frames[index]}
+function cloneBoxes(boxes){return JSON.parse(JSON.stringify(boxes))}
+function currentBox(){return edit[0]?.box||null}
+function center(){let b=currentBox();return zoomCenter||(b?[(b[0]+b[2])/2,(b[1]+b[3])/2]:(frame()?.projection||[main.width/2,main.height/2]))}
+function zoomRect(){const c=center(),w=main.width/zoom,h=main.height/zoom;return [c[0]-w/2,c[1]-h/2,w,h]}
+function mappedBox(box,x,y,sx,sy){return [(box[0]-x)*sx,(box[1]-y)*sy,(box[2]-x)*sx,(box[3]-y)*sy]}
+function boxDrawing(ctx,box,col,scale=1){ctx.strokeStyle=col;ctx.lineWidth=2;ctx.strokeRect(box[0],box[1],box[2]-box[0],box[3]-box[1]);ctx.fillStyle=col;for(const [x,y] of [[box[0],box[1]],[box[2],box[1]],[box[0],box[3]],[box[2],box[3]]])ctx.fillRect(x-3,y-3,6,6)}
+function draw(){
+ if(!data)return;
+ for(const [canvas,ctx,isZoom] of [[main,mctx,false],[zcanvas,zctx,true]]){
+   ctx.clearRect(0,0,canvas.width,canvas.height);ctx.fillStyle='#0d151c';ctx.fillRect(0,0,canvas.width,canvas.height);
+   if(!image)continue;
+   let x=0,y=0,w=main.width,h=main.height;
+   if(isZoom)[x,y,w,h]=zoomRect();
+   const sx=canvas.width/w,sy=canvas.height/h;
+   ctx.drawImage(image,x,y,w,h,0,0,canvas.width,canvas.height);
+   const f=frame();if(f.projection){const [px,py]=f.projection;const u=(px-x)*sx,v=(py-y)*sy;ctx.strokeStyle='#24d5aa';ctx.lineWidth=2;ctx.beginPath();ctx.moveTo(u-11,v);ctx.lineTo(u+11,v);ctx.moveTo(u,v-11);ctx.lineTo(u,v+11);ctx.stroke()}
+   for(let i=0;i<edit.length;i++){const box=mappedBox(edit[i].box,x,y,sx,sy);boxDrawing(ctx,box,i===0?'#ffbd54':'#72a7ff')}
+ }
+ $('zoomInfo').textContent=`倍率 ${zoom.toFixed(1)}× · 黄色框为当前可编辑框 · 绿色十字为 GT 投影`;
+}
+function setFrame(idx){if(!data?.frames?.length)return;idx=Math.max(0,Math.min(data.frames.length-1,idx));index=idx;localStorage.setItem('gtbbox_last_'+seq,String(idx));dirty=false;redraw=false;zoomCenter=null;edit=cloneBoxes(frame().boxes);$('position').textContent=`${index+1} / ${data.frames.length}`;$('rangeFrom').value=index+1;$('rangeTo').value=index+1;let f=frame();$('stateBadge').textContent=statusNames[f.status]||f.status;$('stateBadge').className='badge '+f.status;$('filename').textContent=`${f.name} | 图片时间 ${f.time.toFixed(6)}`;$('warning').textContent=f.warning||'';$('details').innerHTML=`GT 匹配偏差：${f.gt_gap_s==null?'无':f.gt_gap_s.toFixed(4)+' s'}<br>GT 文件：${f.gt_name||'无'}<br>投影点：${f.projection?f.projection.map(x=>x.toFixed(1)).join(', '):'无'}<br>投影点到框距离：${f.discrepancy_px??'无'} px<br>候选来源：${f.candidate_anchor||f.source}<br>参考资格：${f.anchor_usable?'有效':'无效/尚未确认'}`;tell('');image=null;draw();let im=new Image();let expectSeq=seq,expected=f.name;im.onload=()=>{if(seq!==expectSeq||frame()?.name!==expected)return;image=im;main.width=data.resolution[0];main.height=data.resolution[1];draw()};im.onerror=()=>tell('图片加载失败');im.src=`/api/image?seq=${encodeURIComponent(seq)}&name=${encodeURIComponent(f.name)}`;const active=$('thumbs').querySelector('.active');if(active)active.classList.remove('active');let button=$('thumbs').querySelector(`[data-index="${index}"]`);if(button){button.classList.add('active');button.scrollIntoView({block:'nearest'})}}
+function updateData(next,stayName){data=next;renderOverview();let i=next.frames.findIndex(f=>f.name===stayName);setFrame(i<0?index:i)}
+function renderOverview(){const c=data.counts,n=data.frames.length;$('counts').textContent=`已确认 ${c.confirmed+c.confirmed_negative} / ${n} · 待审核 ${c.draft} · 异常 ${c.invalid}`;$('progress').innerHTML=`<span style="width:${100*(c.confirmed+c.confirmed_negative)/n}%"></span><span style="width:${100*c.draft/n}%"></span>`;const fragment=document.createDocumentFragment();data.frames.forEach((f,i)=>{const b=document.createElement('button');b.textContent=`${i+1} · ${f.name.slice(-14)}`;b.dataset.status=f.status;b.dataset.index=i;b.title=`${f.name} · ${statusNames[f.status]}`;b.onclick=()=>navigate(i);fragment.append(b)});$('thumbs').replaceChildren(fragment)}
+async function loadSequence(value){try{tell('');seq=value;localStorage.setItem('gtbbox_sequence',seq);data=await api('/api/frames?seq='+encodeURIComponent(value));index=0;renderOverview();setFrame(Number(localStorage.getItem('gtbbox_last_'+seq)||0))}catch(e){tell(String(e))}}
+async function post(path,payload){return api(path,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({seq,...payload})})}
+async function save({negative=false,uncertain=false,force=false,next=false}={}){try{let f=frame();if(!f)return;let boxes=negative?[]:edit;if(!negative&&!uncertain&&!boxes.length){tell('当前没有框：请画框，或点击“清空并确认无框”');return}let oldIndex=index;const result=await post('/api/save',{name:f.name,boxes,uncertain,force_anchor:force});updateData(result,f.name);if(next && oldIndex<data.frames.length-1)setFrame(oldIndex+1)}catch(e){tell(String(e))}}
+function navigate(i){if(dirty && !window.confirm('当前框尚未确认保存，仍要切换图片吗？'))return;setFrame(i)}
+function bound(x,min,max){return Math.max(min,Math.min(max,x))}
+function fixBox(b){const W=main.width,H=main.height;const w=Math.max(1,b[2]-b[0]),h=Math.max(1,b[3]-b[1]);let x=bound(b[0],0,W-w),y=bound(b[1],0,H-h);return [x,y,Math.min(W,x+w),Math.min(H,y+h)]}
+function shift(dx,dy){if(!edit.length)return;let b=edit[0].box;edit[0].box=fixBox([b[0]+dx,b[1]+dy,b[2]+dx,b[3]+dy]);dirty=true;zoomCenter=null;draw()}
+function resize(dx,dy){if(!edit.length)return;let b=edit[0].box;edit[0].box=[bound(b[0]-dx/2,0,main.width),bound(b[1]-dy/2,0,main.height),bound(b[2]+dx/2,0,main.width),bound(b[3]+dy/2,0,main.height)];if(edit[0].box[2]-edit[0].box[0]<1||edit[0].box[3]-edit[0].box[1]<1){edit[0].box=b;return}dirty=true;zoomCenter=null;draw()}
+function canvasPoint(canvas,event){const rect=canvas.getBoundingClientRect(),u=(event.clientX-rect.left)/rect.width*canvas.width,v=(event.clientY-rect.top)/rect.height*canvas.height;if(canvas===main)return [bound(u,0,main.width),bound(v,0,main.height)];const [x,y,w,h]=zoomRect();return [bound(x+u/canvas.width*w,0,main.width),bound(y+v/canvas.height*h,0,main.height)]}
+function hit(point){const b=currentBox();if(!b)return null;let margin=Math.max(4,main.width/Math.max(800,main.getBoundingClientRect().width)*5);for(const [key,x,y] of [['nw',b[0],b[1]],['ne',b[2],b[1]],['sw',b[0],b[3]],['se',b[2],b[3]]])if(Math.hypot(point[0]-x,point[1]-y)<margin)return key;return point[0]>=b[0]&&point[0]<=b[2]&&point[1]>=b[1]&&point[1]<=b[3]?'move':null}
+function enableDrawing(canvas){canvas.addEventListener('pointerdown',e=>{if(!frame()||!image)return;canvas.setPointerCapture(e.pointerId);if(canvas===zcanvas)zoomCenter=center().slice();let p=canvasPoint(canvas,e),action=redraw?'draw':hit(p)||'draw';drag={start:p,prior:currentBox()?.slice()||null,action};if(action==='draw'){edit=[{class_id:0,box:[p[0],p[1],p[0]+1,p[1]+1]}];redraw=false}e.preventDefault()});canvas.addEventListener('pointermove',e=>{if(!drag)return;const [x,y]=canvasPoint(canvas,e),[sx,sy]=drag.start,b=drag.prior;if(drag.action==='draw'){edit[0].box=[Math.min(sx,x),Math.min(sy,y),Math.max(sx,x),Math.max(sy,y)]}else if(drag.action==='move'){edit[0].box=fixBox([b[0]+x-sx,b[1]+y-sy,b[2]+x-sx,b[3]+y-sy])}else{let n=b.slice();if(drag.action.includes('n'))n[1]=Math.min(y,b[3]-1);if(drag.action.includes('s'))n[3]=Math.max(y,b[1]+1);if(drag.action.includes('w'))n[0]=Math.min(x,b[2]-1);if(drag.action.includes('e'))n[2]=Math.max(x,b[0]+1);edit[0].box=n}dirty=true;if(canvas!==zcanvas)zoomCenter=null;draw();e.preventDefault()});canvas.addEventListener('pointerup',()=>{drag=null;zoomCenter=null;if(edit.length&&(edit[0].box[2]-edit[0].box[0]<1||edit[0].box[3]-edit[0].box[1]<1)){edit=[];draw()}});canvas.addEventListener('wheel',e=>{e.preventDefault();let p=canvasPoint(canvas,e);zoomCenter=p;zoom=bound(zoom*(e.deltaY<0?1.2:1/1.2),2,30);draw()},{passive:false})}
+enableDrawing(main);enableDrawing(zcanvas);
+document.addEventListener('keydown',e=>{if(e.target.closest('input,select,textarea'))return;const k=e.key;if(['ArrowLeft','ArrowRight','ArrowUp','ArrowDown'].includes(k)){e.preventDefault();const dx=k==='ArrowLeft'?-1:k==='ArrowRight'?1:0,dy=k==='ArrowUp'?-1:k==='ArrowDown'?1:0;if(e.shiftKey)resize(dx,dy);else shift(dx*(e.ctrlKey?5:1),dy*(e.ctrlKey?5:1));return}if(k==='Enter'){e.preventDefault();save({next:true})}else if(k.toLowerCase()==='a')navigate(index-1);else if(k.toLowerCase()==='d')navigate(index+1)});
+$('prev').onclick=()=>navigate(index-1);$('next').onclick=()=>navigate(index+1);$('reset').onclick=()=>setFrame(index);$('redraw').onclick=()=>{redraw=true;tell('在全图或局部放大窗口的空白处拖动，重新绘制 bbox')};$('save').onclick=()=>save({next:true});$('saveStay').onclick=()=>save();$('negative').onclick=()=>{if(confirm('确认此帧无框？将写入空 YOLO txt。'))save({negative:true})};$('uncertain').onclick=()=>save({uncertain:true,next:true});$('forceAnchor').onclick=()=>{if(!edit.length){tell('先手动画出有效框');return}if(confirm('已人工复核该框？启用异常投影参考可能造成后续整段标注错误。'))save({force:true})};$('propagate').onclick=async()=>{try{const f=frame();updateData(await post('/api/recompute',{after:f.name}),f.name)}catch(e){tell(String(e))}};
+$('zoomIn').onclick=()=>{zoom=bound(zoom*1.2,2,30);draw()};$('zoomOut').onclick=()=>{zoom=bound(zoom/1.2,2,30);draw()};$('centerZoom').onclick=()=>{zoomCenter=null;draw()};$('nextDraft').onclick=()=>{const i=data.frames.findIndex((f,j)=>j>index&&f.status==='draft');if(i<0)tell('后面没有待审核帧');else navigate(i)};$('nextInvalid').onclick=()=>{const i=data.frames.findIndex((f,j)=>j>index&&f.status==='invalid');if(i<0)tell('后面没有异常帧');else navigate(i)};$('recompute').onclick=async()=>{try{if(!confirm('重新生成全 Sequence 的未确认候选框？已确认 YOLO 不变。'))return;updateData(await post('/api/recompute',{}),frame().name)}catch(e){tell(String(e))}};
+function selectedNames(){let a=Number($('rangeFrom').value),b=Number($('rangeTo').value);if(!Number.isInteger(a)||!Number.isInteger(b)||a<1||b<a||b>data.frames.length)throw Error('帧序号范围无效');return data.frames.slice(a-1,b).map(f=>f.name)}
+$('bulkDelete').onclick=async()=>{try{let names=selectedNames();if(!confirm(`将 ${names.length} 帧保存为空 YOLO txt（覆盖已有框会自动备份）。确定吗？`))return;updateData(await post('/api/bulk',{names,action:'delete'}),names[0])}catch(e){tell(String(e))}};
+
+$('bulkConfirm').onclick = async () => {
+    try {
+        const names = selectedNames();
+        if (!confirm(
+            `已选择 ${names.length} 帧。\n` +
+            `将只确认正常的待审核候选框，` +
+            `自动跳过已有标注和异常帧。\n` +
+            `请确认已审核所选候选框。`
+        )) return;
+
+        const result = await post('/api/bulk', {
+            names,
+            action: 'confirm'
+        });
+
+        updateData(result, names[0]);
+
+        const info = result.bulk_result;
+        const skipped = info.skipped || [];
+
+        let message =
+            `批量确认完成：保存 ${info.saved} 帧，` +
+            `跳过 ${skipped.length} 帧。`;
+
+        if (skipped.length) {
+            message += '\n跳过明细（前 10 帧）：\n' +
+                skipped.slice(0, 10)
+                    .map(item => `${item.name}: ${item.reason}`)
+                    .join('\n');
+        }
+
+        tell(message);
+    } catch (e) {
+        tell(String(e));
+    }
+};
+$('seq').onchange=()=>{if(dirty&&!confirm('当前修改未保存，确定切换 Sequence？')){$('seq').value=seq;return}loadSequence($('seq').value)};
+$('refresh').onclick=()=>{if(dirty&&!confirm('当前未保存修改将丢失，仍要刷新？'))return;loadSequence(seq)};
+(async()=>{try{const result=await api('/api/sequences');$('seq').innerHTML=result.sequences.map(name=>`<option value="${name}">${name}</option>`).join('');if(result.sequences.length){const previous=localStorage.getItem('gtbbox_sequence');const chosen=result.sequences.includes(previous)?previous:result.sequences[0];$('seq').value=chosen;loadSequence(chosen);}else tell('未找到 seqXXXX/Image 目录')}catch(e){tell(String(e))}})();
+</script></body></html>
