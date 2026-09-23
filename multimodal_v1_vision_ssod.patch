@@ -1,0 +1,1225 @@
+diff --git a/configs/multimodal_v1/vision_ssod.yaml b/configs/multimodal_v1/vision_ssod.yaml
+new file mode 100644
+index 0000000..91cad73
+--- /dev/null
++++ b/configs/multimodal_v1/vision_ssod.yaml
+@@ -0,0 +1,58 @@
++# Geometry-Guided Semi-Supervised DINO for MMAUD left camera.
++# 3D projection is a weak cue only; it is never synthesized into a bbox GT.
++data:
++  root: /home/jasoncui/datasets/MMAUD/official/train
++  split_file: outputs/mmuav_paper_reproduction/splits/splits.json
++  train_split: train_sub
++  annotation_manifest: manifests/multimodal_v1/vision_5pct_annotations.jsonl
++  camera_config: configs/calibration/mmaud_v1_omni.yaml
++  geometry_calibration: calibration/official_left_p4_current_geometry.json
++  max_image_gap_s: 0.04
++  labeled_train_fraction: 0.04
++  calibration_fraction: 0.01
++  range_edges_m: [20.0, 40.0, 60.0, 100.0]
++  seed: 20260922
++
++model:
++  detrex_root: third_party/detrex
++  config: third_party/detrex/projects/dino/configs/dino-swin/dino_swin_tiny_224_4scale_12ep.py
++  checkpoint: checkpoints/dino_swin_t/dino_swin_tiny_224_22kto1k_finetune_4scale_12ep.pth
++  num_classes: 1
++
++optimizer:
++  type: AdamW
++  lr: 0.0001
++  backbone_lr: 0.00001
++  weight_decay: 0.0001
++  grad_clip_norm: 0.1
++  amp: true
++
++burn_in:
++  steps: 1000
++
++ssod:
++  steps: 4000
++  unlabeled_per_step: 3
++  ema_decay: 0.999
++  lambda_unsup: 1.0
++  ramp_fraction: 0.10
++  weak_short_edges: [720, 800, 880]
++  max_size: 1333
++  horizontal_flip_p: 0.5
++  # High: full cls + L1 + GIoU.
++  high_geometry_px: 16.0
++  high_stability_iou: 0.60
++  high_min_precision: 0.95
++  high_success_iou: 0.50
++  # Medium: classification only. This IoU threshold defines calibration
++  # "localized correct" and does not become a regression target.
++  medium_geometry_px: 32.0
++  medium_stability_iou: 0.40
++  medium_min_precision: 0.80
++  medium_success_iou: 0.10
++  calibration_min_count: 5
++
++output:
++  directory: outputs/own_multimodal_research/vision_ssod
++  log_every: 20
++  save_every: 500
+diff --git a/src/rdq_uav/multimodal_v1/vision/__init__.py b/src/rdq_uav/multimodal_v1/vision/__init__.py
+index 087a7db..30e588f 100644
+--- a/src/rdq_uav/multimodal_v1/vision/__init__.py
++++ b/src/rdq_uav/multimodal_v1/vision/__init__.py
+@@ -1,6 +1,18 @@
+ """Shared DINO--Swin vision path for Multimodal V1."""
+ 
+ from .dino_adapter import DINOAdapter
++from .ssod import (
++    CalibrationObservation,
++    PseudoLabel,
++    PseudoLabelPolicy,
++    PseudoQuality,
++    ViewTransform,
++    calibrate_score_threshold,
++    classification_only_pseudo_loss,
++    ema_update,
++    linear_unsup_weight,
++    mine_geometry_guided_pseudo,
++)
+ from .swin_adapter import (
+     SwinPyramidAdapter,
+     SwinPyramidOutput,
+@@ -9,9 +21,19 @@ from .swin_adapter import (
+ )
+ 
+ __all__ = [
++    "CalibrationObservation",
+     "DINOAdapter",
++    "PseudoLabel",
++    "PseudoLabelPolicy",
++    "PseudoQuality",
+     "SwinPyramidAdapter",
+     "SwinPyramidOutput",
+     "SwinStageInput",
+     "SwinStageOutput",
++    "ViewTransform",
++    "calibrate_score_threshold",
++    "classification_only_pseudo_loss",
++    "ema_update",
++    "linear_unsup_weight",
++    "mine_geometry_guided_pseudo",
+ ]
+diff --git a/src/rdq_uav/multimodal_v1/vision/dino_adapter.py b/src/rdq_uav/multimodal_v1/vision/dino_adapter.py
+index 35b878e..cbae476 100644
+--- a/src/rdq_uav/multimodal_v1/vision/dino_adapter.py
++++ b/src/rdq_uav/multimodal_v1/vision/dino_adapter.py
+@@ -43,7 +43,39 @@ class DINOAdapter(nn.Module):
+                 "decoder_features_all_layers":decoder_states,"aux_outputs":self.detector._set_aux_loss(stacked_classes,stacked_boxes),
+                 "enc_outputs":{"pred_logits":encoder_logits,"pred_boxes":encoder_reference},"pyramid":pyramid,"multi_level_features":tuple(multi_level_features)}
+ 
++    @staticmethod
++    def _image_masks(images: Any) -> torch.Tensor:
++        batch_size,_,height,width=images.tensor.shape
++        if batch_size != len(images.image_sizes):
++            raise ValueError("ImageList image_sizes length does not match tensor batch")
++        masks=images.tensor.new_ones(batch_size,height,width)
++        for index,(valid_h,valid_w) in enumerate(images.image_sizes):
++            masks[index,:int(valid_h),:int(valid_w)]=0
++        return masks
++
++    def forward_raw(
++        self,
++        batched_inputs:Sequence[Mapping[str,Any]],
++        pre_stage_transform:PreStageTransform|None=None,
++        *,
++        allow_training_candidate_path:bool=False,
++    )->dict[str,Any]:
++        """Return raw DINO queries for eval or SSOD classification-only training.
++
++        Native ``detector.forward`` remains the owner of supervised/high-quality
++        pseudo-label training because it includes DINO denoising and its official
++        criterion. This seam exists only for candidate extraction and the frozen
++        medium-quality classification-only SSOD branch.
++        """
++        images=self.detector.preprocess_image(list(batched_inputs))
++        image_masks=self._image_masks(images)
++        pyramid=self.swin(images.tensor,pre_stage_transform=pre_stage_transform)
++        output=self.forward_from_pyramid(
++            pyramid,image_masks,
++            allow_training_candidate_path=allow_training_candidate_path,
++        )
++        output["image_sizes"]=tuple(images.image_sizes)
++        return output
++
+     def forward(self,batched_inputs:Sequence[Mapping[str,Any]],pre_stage_transform:PreStageTransform|None=None)->dict[str,Any]:
+-        images=self.detector.preprocess_image(list(batched_inputs)); batch_size,_,height,width=images.tensor.shape
+-        image_masks=images.tensor.new_zeros(batch_size,height,width); pyramid=self.swin(images.tensor,pre_stage_transform=pre_stage_transform)
+-        output=self.forward_from_pyramid(pyramid,image_masks); output["image_sizes"]=tuple(images.image_sizes); return output
++        return self.forward_raw(batched_inputs,pre_stage_transform=pre_stage_transform)
+diff --git a/src/rdq_uav/multimodal_v1/vision/ssod.py b/src/rdq_uav/multimodal_v1/vision/ssod.py
+new file mode 100644
+index 0000000..d7c908d
+--- /dev/null
++++ b/src/rdq_uav/multimodal_v1/vision/ssod.py
+@@ -0,0 +1,335 @@
++"""Geometry-guided semi-supervised utilities for the single-class UAV DINO path.
++
++The 3D target projection is a weak localization cue only. It is never converted
++into a synthetic bounding box. High-quality teacher boxes supervise class + box;
++medium-quality teacher boxes supervise classification only.
++"""
++from __future__ import annotations
++
++from dataclasses import dataclass
++from enum import IntEnum
++from typing import Any, Mapping, Sequence
++
++import torch
++
++
++class PseudoQuality(IntEnum):
++    IGNORE = 0
++    MEDIUM = 1
++    HIGH = 2
++
++
++@dataclass(frozen=True)
++class ViewTransform:
++    """Invertible resize + optional horizontal flip from source camera pixels."""
++
++    source_wh: tuple[int, int]
++    view_wh: tuple[int, int]
++    horizontal_flip: bool = False
++
++    def __post_init__(self) -> None:
++        sw, sh = self.source_wh
++        vw, vh = self.view_wh
++        if min(sw, sh, vw, vh) <= 0:
++            raise ValueError("source/view dimensions must be positive")
++
++    @property
++    def scale_xy(self) -> tuple[float, float]:
++        sw, sh = self.source_wh
++        vw, vh = self.view_wh
++        return vw / sw, vh / sh
++
++    def source_points_to_view(self, points_xy: torch.Tensor) -> torch.Tensor:
++        points = torch.as_tensor(points_xy)
++        if points.shape[-1] != 2:
++            raise ValueError("points must end in XY")
++        sx, sy = self.scale_xy
++        out = points * points.new_tensor((sx, sy))
++        if self.horizontal_flip:
++            out = torch.stack((out.new_tensor(float(self.view_wh[0])) - out[..., 0], out[..., 1]), dim=-1)
++        return out
++
++    def source_boxes_to_view(self, boxes_xyxy: torch.Tensor) -> torch.Tensor:
++        boxes = torch.as_tensor(boxes_xyxy)
++        if boxes.shape[-1] != 4:
++            raise ValueError("boxes must end in XYXY")
++        sx, sy = self.scale_xy
++        x1, y1, x2, y2 = (boxes * boxes.new_tensor((sx, sy, sx, sy))).unbind(-1)
++        if self.horizontal_flip:
++            width = boxes.new_tensor(float(self.view_wh[0]))
++            x1, x2 = width - x2, width - x1
++        return torch.stack((x1, y1, x2, y2), dim=-1)
++
++    def view_boxes_to_source(self, boxes_xyxy: torch.Tensor) -> torch.Tensor:
++        boxes = torch.as_tensor(boxes_xyxy)
++        if boxes.shape[-1] != 4:
++            raise ValueError("boxes must end in XYXY")
++        x1, y1, x2, y2 = boxes.unbind(-1)
++        if self.horizontal_flip:
++            width = boxes.new_tensor(float(self.view_wh[0]))
++            x1, x2 = width - x2, width - x1
++        sx, sy = self.scale_xy
++        return torch.stack((x1 / sx, y1 / sy, x2 / sx, y2 / sy), dim=-1)
++
++
++@dataclass(frozen=True)
++class PseudoLabelPolicy:
++    tau_high: float
++    tau_mid: float
++    high_geometry_px: float = 16.0
++    medium_geometry_px: float = 32.0
++    high_stability_iou: float = 0.60
++    medium_stability_iou: float = 0.40
++
++    def __post_init__(self) -> None:
++        if not 0 <= self.tau_mid <= self.tau_high <= 1:
++            raise ValueError("require 0 <= tau_mid <= tau_high <= 1")
++        if self.high_geometry_px > self.medium_geometry_px:
++            raise ValueError("high geometry gate cannot be wider than medium gate")
++        if self.high_stability_iou < self.medium_stability_iou:
++            raise ValueError("high stability requirement cannot be weaker than medium")
++
++
++@dataclass(frozen=True)
++class TeacherCandidate:
++    box_xyxy_source: torch.Tensor
++    score: float
++    geometry_px: float
++    query_index: int
++
++
++@dataclass(frozen=True)
++class PseudoLabel:
++    quality: PseudoQuality
++    box_xyxy_source: torch.Tensor
++    score: float
++    geometry_px: float
++    stability_iou: float
++
++    @property
++    def valid(self) -> bool:
++        return self.quality != PseudoQuality.IGNORE
++
++
++@dataclass(frozen=True)
++class CalibrationObservation:
++    score: float
++    geometry_px: float
++    stability_iou: float
++    iou_to_gt: float
++
++
++def box_iou_xyxy(box_a: torch.Tensor, box_b: torch.Tensor) -> torch.Tensor:
++    a = torch.as_tensor(box_a)
++    b = torch.as_tensor(box_b, device=a.device, dtype=a.dtype)
++    if a.shape[-1] != 4 or b.shape[-1] != 4:
++        raise ValueError("box IoU expects XYXY")
++    left_top = torch.maximum(a[..., :2], b[..., :2])
++    right_bottom = torch.minimum(a[..., 2:], b[..., 2:])
++    inter_wh = (right_bottom - left_top).clamp(min=0)
++    inter = inter_wh[..., 0] * inter_wh[..., 1]
++    area_a = ((a[..., 2] - a[..., 0]).clamp(min=0) * (a[..., 3] - a[..., 1]).clamp(min=0))
++    area_b = ((b[..., 2] - b[..., 0]).clamp(min=0) * (b[..., 3] - b[..., 1]).clamp(min=0))
++    union = area_a + area_b - inter
++    return torch.where(union > 0, inter / union, torch.zeros_like(union))
++
++
++def point_to_box_distance(point_xy: torch.Tensor, boxes_xyxy: torch.Tensor) -> torch.Tensor:
++    point = torch.as_tensor(point_xy)
++    boxes = torch.as_tensor(boxes_xyxy, device=point.device, dtype=point.dtype)
++    if point.shape != (2,) or boxes.ndim != 2 or boxes.shape[1] != 4:
++        raise ValueError("expected point [2] and boxes [N,4]")
++    px, py = point
++    dx = torch.maximum(torch.maximum(boxes[:, 0] - px, px - boxes[:, 2]), torch.zeros_like(boxes[:, 0]))
++    dy = torch.maximum(torch.maximum(boxes[:, 1] - py, py - boxes[:, 3]), torch.zeros_like(boxes[:, 1]))
++    return torch.sqrt(dx.square() + dy.square())
++
++
++def _normalized_cxcywh_to_view_xyxy(boxes: torch.Tensor, view_wh: tuple[int, int]) -> torch.Tensor:
++    if boxes.ndim != 2 or boxes.shape[1] != 4:
++        raise ValueError("DINO boxes must be [Q,4] normalized cxcywh")
++    width, height = view_wh
++    cx, cy, bw, bh = boxes.unbind(1)
++    scale = boxes.new_tensor((width, height, width, height))
++    return torch.stack((cx - bw / 2, cy - bh / 2, cx + bw / 2, cy + bh / 2), dim=1) * scale
++
++
++def source_xyxy_to_normalized_cxcywh(box_xyxy_source: torch.Tensor, transform: ViewTransform) -> torch.Tensor:
++    box = transform.source_boxes_to_view(torch.as_tensor(box_xyxy_source))
++    width, height = transform.view_wh
++    x1, y1, x2, y2 = box.unbind(-1)
++    out = torch.stack(((x1 + x2) / 2, (y1 + y2) / 2, x2 - x1, y2 - y1), dim=-1)
++    return out / out.new_tensor((width, height, width, height))
++
++
++def select_single_uav_candidate(
++    pred_logits: torch.Tensor,
++    pred_boxes: torch.Tensor,
++    *,
++    transform: ViewTransform,
++    projected_point_source: torch.Tensor,
++    max_geometry_px: float,
++) -> TeacherCandidate | None:
++    """Select the highest-score one-class DINO query inside a geometry envelope."""
++    logits = torch.as_tensor(pred_logits)
++    boxes = torch.as_tensor(pred_boxes, device=logits.device, dtype=logits.dtype)
++    if logits.ndim == 2 and logits.shape[1] == 1:
++        logits = logits[:, 0]
++    if logits.ndim != 1 or boxes.shape != (len(logits), 4):
++        raise ValueError("expected one-class logits [Q] / boxes [Q,4]")
++    if len(logits) == 0:
++        return None
++    source_boxes = transform.view_boxes_to_source(_normalized_cxcywh_to_view_xyxy(boxes, transform.view_wh))
++    score = logits.sigmoid()
++    finite = torch.isfinite(score) & torch.isfinite(source_boxes).all(1)
++    positive_size = (source_boxes[:, 2] > source_boxes[:, 0]) & (source_boxes[:, 3] > source_boxes[:, 1])
++    distance = point_to_box_distance(projected_point_source.to(logits), source_boxes)
++    feasible = finite & positive_size & (distance <= float(max_geometry_px))
++    if not bool(feasible.any()):
++        return None
++    candidates = torch.nonzero(feasible, as_tuple=False).flatten()
++    candidate_scores = score[candidates]
++    best_local = torch.argmax(candidate_scores)
++    index = int(candidates[best_local].item())
++    return TeacherCandidate(
++        box_xyxy_source=source_boxes[index],
++        score=float(score[index].detach().item()),
++        geometry_px=float(distance[index].detach().item()),
++        query_index=index,
++    )
++
++
++def mine_geometry_guided_pseudo(
++    weak1: Mapping[str, torch.Tensor],
++    weak2: Mapping[str, torch.Tensor],
++    *,
++    transform1: ViewTransform,
++    transform2: ViewTransform,
++    projected_point_source: torch.Tensor,
++    policy: PseudoLabelPolicy,
++) -> PseudoLabel:
++    """Mine one pseudo UAV box from two teacher weak views."""
++    c1 = select_single_uav_candidate(
++        weak1["pred_logits"], weak1["pred_boxes"], transform=transform1,
++        projected_point_source=projected_point_source, max_geometry_px=policy.medium_geometry_px,
++    )
++    c2 = select_single_uav_candidate(
++        weak2["pred_logits"], weak2["pred_boxes"], transform=transform2,
++        projected_point_source=projected_point_source, max_geometry_px=policy.medium_geometry_px,
++    )
++    if c1 is None or c2 is None:
++        dtype = weak1["pred_boxes"].dtype
++        device = weak1["pred_boxes"].device
++        return PseudoLabel(PseudoQuality.IGNORE, torch.zeros(4, dtype=dtype, device=device), 0.0, float("inf"), 0.0)
++
++    stability = float(box_iou_xyxy(c1.box_xyxy_source, c2.box_xyxy_source).detach().item())
++    score = min(c1.score, c2.score)
++    geometry = max(c1.geometry_px, c2.geometry_px)
++    chosen = c1 if c1.score >= c2.score else c2
++    if score >= policy.tau_high and geometry <= policy.high_geometry_px and stability >= policy.high_stability_iou:
++        quality = PseudoQuality.HIGH
++    elif score >= policy.tau_mid and geometry <= policy.medium_geometry_px and stability >= policy.medium_stability_iou:
++        quality = PseudoQuality.MEDIUM
++    else:
++        quality = PseudoQuality.IGNORE
++    return PseudoLabel(quality, chosen.box_xyxy_source, score, geometry, stability)
++
++
++def calibrate_score_threshold(
++    observations: Sequence[CalibrationObservation],
++    *,
++    geometry_limit_px: float,
++    stability_min_iou: float,
++    success_iou_threshold: float,
++    minimum_precision: float,
++    min_count: int = 5,
++) -> float:
++    """Lowest teacher score threshold meeting precision on labeled calibration data."""
++    eligible = [
++        obs for obs in observations
++        if obs.geometry_px <= geometry_limit_px and obs.stability_iou >= stability_min_iou
++    ]
++    if len(eligible) < min_count:
++        raise RuntimeError(f"only {len(eligible)} eligible calibration observations; need {min_count}")
++    thresholds = sorted({float(obs.score) for obs in eligible})
++    for threshold in thresholds:
++        selected = [obs for obs in eligible if obs.score >= threshold]
++        if len(selected) < min_count:
++            continue
++        precision = sum(obs.iou_to_gt >= success_iou_threshold for obs in selected) / len(selected)
++        if precision >= minimum_precision:
++            return threshold
++    raise RuntimeError(
++        f"no score threshold reaches precision={minimum_precision:.3f} "
++        f"for IoU>={success_iou_threshold:.3f}"
++    )
++
++
++@torch.no_grad()
++def ema_update(teacher: torch.nn.Module, student: torch.nn.Module, decay: float = 0.999) -> None:
++    """EMA parameters; copy non-floating buffers exactly from student."""
++    if not 0 <= decay < 1:
++        raise ValueError("EMA decay must be in [0,1)")
++    teacher_state = teacher.state_dict()
++    student_state = student.state_dict()
++    if teacher_state.keys() != student_state.keys():
++        raise ValueError("teacher/student state_dict keys differ")
++    for key, teacher_value in teacher_state.items():
++        student_value = student_state[key].to(device=teacher_value.device)
++        if teacher_value.dtype.is_floating_point:
++            teacher_value.mul_(decay).add_(student_value.to(dtype=teacher_value.dtype), alpha=1.0 - decay)
++        else:
++            teacher_value.copy_(student_value)
++
++
++def linear_unsup_weight(step: int, total_steps: int, *, target: float = 1.0, ramp_fraction: float = 0.10) -> float:
++    if total_steps <= 0 or step < 0:
++        raise ValueError("invalid SSOD step/total_steps")
++    if not 0 <= ramp_fraction <= 1:
++        raise ValueError("ramp_fraction must be in [0,1]")
++    ramp_steps = max(1, int(round(total_steps * ramp_fraction))) if ramp_fraction > 0 else 0
++    if ramp_steps == 0:
++        return float(target)
++    return float(target) * min(1.0, float(step + 1) / float(ramp_steps))
++
++
++def _distributed_num_boxes(targets: Sequence[Mapping[str, torch.Tensor]], device: torch.device) -> float:
++    count = float(sum(int(len(target["labels"])) for target in targets))
++    value = torch.tensor([count], dtype=torch.float32, device=device)
++    if torch.distributed.is_available() and torch.distributed.is_initialized():
++        torch.distributed.all_reduce(value)
++        value /= torch.distributed.get_world_size()
++    return float(value.clamp(min=1).item())
++
++
++def classification_only_pseudo_loss(
++    criterion: Any,
++    outputs: Mapping[str, Any],
++    targets: Sequence[Mapping[str, torch.Tensor]],
++) -> dict[str, torch.Tensor]:
++    """DINO matcher + focal classification only; deliberately excludes box/GIoU."""
++    if not hasattr(criterion, "matcher") or not hasattr(criterion, "loss_labels"):
++        raise TypeError("criterion must expose matcher and loss_labels")
++    main = {"pred_logits": outputs["pred_logits"], "pred_boxes": outputs["pred_boxes"]}
++    num_boxes = _distributed_num_boxes(targets, main["pred_logits"].device)
++    result: dict[str, torch.Tensor] = {}
++
++    def add_level(level_outputs: Mapping[str, torch.Tensor], suffix: str = "") -> None:
++        indices = criterion.matcher(level_outputs, targets)
++        raw = criterion.loss_labels(level_outputs, targets, indices, num_boxes)
++        for key, value in raw.items():
++            weighted_key = key + suffix
++            weight = criterion.weight_dict.get(weighted_key, criterion.weight_dict.get(key, 1.0))
++            result[weighted_key] = value * float(weight)
++
++    add_level(main)
++    for index, aux in enumerate(outputs.get("aux_outputs", ())):
++        add_level(aux, f"_{index}")
++    return result
++
++
++def weighted_loss_sum(losses: Mapping[str, torch.Tensor]) -> torch.Tensor:
++    values = list(losses.values())
++    if not values:
++        raise ValueError("loss dictionary is empty")
++    return torch.stack([value if value.ndim == 0 else value.sum() for value in values]).sum()
+diff --git a/src/rdq_uav/multimodal_v1/vision/ssod_data.py b/src/rdq_uav/multimodal_v1/vision/ssod_data.py
+new file mode 100644
+index 0000000..d8a6364
+--- /dev/null
++++ b/src/rdq_uav/multimodal_v1/vision/ssod_data.py
+@@ -0,0 +1,139 @@
++"""Manifest contracts and deterministic stratified subset selection for vision SSOD."""
++from __future__ import annotations
++
++from dataclasses import dataclass
++import hashlib
++import json
++import math
++from pathlib import Path
++from typing import Any, Iterable, Mapping, Sequence
++
++import numpy as np
++
++
++@dataclass(frozen=True)
++class VisionLabelRecord:
++    sequence_id: str
++    query_uid: object
++    query_time: float
++    image_path: str
++    role: str
++    gt_xyz_m: tuple[float, float, float]
++    range_m: float
++    box_xyxy_px: tuple[float, float, float, float] | None
++    gt_2d_valid: bool
++
++    @property
++    def key(self) -> tuple[str, object]:
++        return self.sequence_id, self.query_uid
++
++
++def _stable_rank(record: Mapping[str, Any], seed: int) -> str:
++    payload = f"{seed}|{record['sequence_id']}|{record['query_uid']}|{record['query_time']:.9f}"
++    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
++
++
++def _range_bin(value: float, edges: Sequence[float]) -> int:
++    for index, upper in enumerate(edges):
++        if value < upper:
++            return index
++    return len(edges)
++
++
++def _allocate(total: int, strata_sizes: Mapping[tuple[str, int], int]) -> dict[tuple[str, int], int]:
++    if total <= 0 or not strata_sizes:
++        return {key: 0 for key in strata_sizes}
++    population = sum(strata_sizes.values())
++    raw = {key: total * size / population for key, size in strata_sizes.items()}
++    base = {key: min(strata_sizes[key], int(math.floor(value))) for key, value in raw.items()}
++    remaining = total - sum(base.values())
++    order = sorted(strata_sizes, key=lambda key: (-(raw[key] - base[key]), key))
++    while remaining > 0:
++        progressed = False
++        for key in order:
++            if base[key] < strata_sizes[key]:
++                base[key] += 1
++                remaining -= 1
++                progressed = True
++                if remaining == 0:
++                    break
++        if not progressed:
++            break
++    return base
++
++
++def assign_stratified_roles(
++    records: Sequence[Mapping[str, Any]],
++    *,
++    labeled_train_fraction: float = 0.04,
++    calibration_fraction: float = 0.01,
++    range_edges_m: Sequence[float] = (20.0, 40.0, 60.0, 100.0),
++    seed: int = 20260922,
++    total_limit: int | None = None,
++) -> dict[tuple[str, object], str]:
++    """Select train/calibration labels by sequence + GT range, without val/test leakage."""
++    if labeled_train_fraction < 0 or calibration_fraction < 0 or labeled_train_fraction + calibration_fraction > 1:
++        raise ValueError("invalid labeled fractions")
++    if not records:
++        return {}
++    target_total = int(round(len(records) * (labeled_train_fraction + calibration_fraction)))
++    if total_limit is not None:
++        target_total = min(target_total, int(total_limit))
++    target_total = max(1, target_total)
++    calibration_total = int(round(target_total * calibration_fraction / max(labeled_train_fraction + calibration_fraction, 1e-12)))
++    calibration_total = min(calibration_total, target_total)
++
++    strata: dict[tuple[str, int], list[Mapping[str, Any]]] = {}
++    for record in records:
++        key = (str(record["sequence_id"]), _range_bin(float(record["range_m"]), range_edges_m))
++        strata.setdefault(key, []).append(record)
++    for values in strata.values():
++        values.sort(key=lambda record: _stable_rank(record, seed))
++
++    selected_alloc = _allocate(target_total, {key: len(values) for key, values in strata.items()})
++    selected_by_stratum = {key: values[:selected_alloc[key]] for key, values in strata.items()}
++    calibration_alloc = _allocate(calibration_total, {key: len(values) for key, values in selected_by_stratum.items()})
++
++    roles: dict[tuple[str, object], str] = {}
++    for key, values in selected_by_stratum.items():
++        cal_count = calibration_alloc[key]
++        cal_records = sorted(values, key=lambda record: _stable_rank(record, seed + 1))[:cal_count]
++        cal_keys = {(str(record["sequence_id"]), record["query_uid"]) for record in cal_records}
++        for record in values:
++            query_key = (str(record["sequence_id"]), record["query_uid"])
++            roles[query_key] = "labeled_calibration" if query_key in cal_keys else "labeled_train"
++    return roles
++
++
++def load_label_manifest(path: str | Path, *, require_boxes: bool = True) -> list[VisionLabelRecord]:
++    records: list[VisionLabelRecord] = []
++    seen: set[tuple[str, object]] = set()
++    with Path(path).open("r", encoding="utf-8") as handle:
++        for line_number, line in enumerate(handle, 1):
++            if not line.strip():
++                continue
++            item = json.loads(line)
++            key = (str(item["sequence_id"]), item["query_uid"])
++            if key in seen:
++                raise ValueError(f"duplicate manifest key {key} at line {line_number}")
++            seen.add(key)
++            role = str(item["role"])
++            if role not in {"labeled_train", "labeled_calibration"}:
++                raise ValueError(f"invalid role {role!r}")
++            valid = bool(item.get("gt_2d_valid", False))
++            raw_box = item.get("box_xyxy_px")
++            box = None if raw_box is None else tuple(float(x) for x in raw_box)
++            if box is not None:
++                if len(box) != 4 or not np.isfinite(box).all() or box[2] <= box[0] or box[3] <= box[1]:
++                    raise ValueError(f"invalid bbox for {key}")
++            if require_boxes and (not valid or box is None):
++                raise ValueError(f"manifest record {key} has no verified 2D bbox")
++            xyz = tuple(float(x) for x in item["gt_xyz_m"])
++            if len(xyz) != 3 or not np.isfinite(xyz).all():
++                raise ValueError(f"invalid gt_xyz for {key}")
++            records.append(VisionLabelRecord(
++                sequence_id=key[0], query_uid=key[1], query_time=float(item["query_time"]),
++                image_path=str(item["image_path"]), role=role, gt_xyz_m=xyz,
++                range_m=float(item["range_m"]), box_xyxy_px=box, gt_2d_valid=valid,
++            ))
++    return records
+diff --git a/tests/test_multimodal_v1_vision_ssod.py b/tests/test_multimodal_v1_vision_ssod.py
+new file mode 100644
+index 0000000..d584296
+--- /dev/null
++++ b/tests/test_multimodal_v1_vision_ssod.py
+@@ -0,0 +1,137 @@
++from __future__ import annotations
++
++import importlib.util
++import sys
++from pathlib import Path
++import tempfile
++import unittest
++
++import torch
++
++ROOT = Path(__file__).resolve().parents[1]
++
++
++def load_module(name: str, relative: str):
++    spec = importlib.util.spec_from_file_location(name, ROOT / relative)
++    module = importlib.util.module_from_spec(spec)
++    sys.modules[name] = module
++    assert spec.loader is not None
++    spec.loader.exec_module(module)
++    return module
++
++
++ssod = load_module("ssod_under_test", "src/rdq_uav/multimodal_v1/vision/ssod.py")
++ssod_data = load_module("ssod_data_under_test", "src/rdq_uav/multimodal_v1/vision/ssod_data.py")
++
++
++class SSODCoreTests(unittest.TestCase):
++    def test_view_transform_round_trip_with_flip(self):
++        transform = ssod.ViewTransform((1280, 960), (1067, 800), True)
++        box = torch.tensor([100.0, 200.0, 240.0, 330.0])
++        restored = transform.view_boxes_to_source(transform.source_boxes_to_view(box))
++        self.assertTrue(torch.allclose(box, restored, atol=1e-4))
++
++    def test_high_medium_ignore_policy(self):
++        # One query in each view, same source box after inverse transform.
++        transform = ssod.ViewTransform((100, 100), (100, 100), False)
++        box = torch.tensor([[0.50, 0.50, 0.20, 0.20]])
++        point = torch.tensor([50.0, 50.0])
++        high = ssod.mine_geometry_guided_pseudo(
++            {"pred_logits": torch.tensor([[4.0]]), "pred_boxes": box},
++            {"pred_logits": torch.tensor([[4.0]]), "pred_boxes": box},
++            transform1=transform, transform2=transform, projected_point_source=point,
++            policy=ssod.PseudoLabelPolicy(tau_high=.9, tau_mid=.5),
++        )
++        self.assertEqual(high.quality, ssod.PseudoQuality.HIGH)
++        medium = ssod.mine_geometry_guided_pseudo(
++            {"pred_logits": torch.tensor([[1.0]]), "pred_boxes": box},
++            {"pred_logits": torch.tensor([[1.0]]), "pred_boxes": box},
++            transform1=transform, transform2=transform, projected_point_source=point,
++            policy=ssod.PseudoLabelPolicy(tau_high=.9, tau_mid=.5),
++        )
++        self.assertEqual(medium.quality, ssod.PseudoQuality.MEDIUM)
++        ignored = ssod.mine_geometry_guided_pseudo(
++            {"pred_logits": torch.tensor([[-2.0]]), "pred_boxes": box},
++            {"pred_logits": torch.tensor([[-2.0]]), "pred_boxes": box},
++            transform1=transform, transform2=transform, projected_point_source=point,
++            policy=ssod.PseudoLabelPolicy(tau_high=.9, tau_mid=.5),
++        )
++        self.assertEqual(ignored.quality, ssod.PseudoQuality.IGNORE)
++
++    def test_geometry_rejects_high_score_wrong_region(self):
++        transform = ssod.ViewTransform((100, 100), (100, 100), False)
++        wrong_box = torch.tensor([[0.10, 0.10, 0.10, 0.10]])
++        candidate = ssod.select_single_uav_candidate(
++            torch.tensor([[10.0]]), wrong_box, transform=transform,
++            projected_point_source=torch.tensor([90.0, 90.0]), max_geometry_px=16.0,
++        )
++        self.assertIsNone(candidate)
++
++    def test_calibration_selects_lowest_threshold_meeting_precision(self):
++        obs = [
++            ssod.CalibrationObservation(.2, 0, .9, .0),
++            ssod.CalibrationObservation(.4, 0, .9, .6),
++            ssod.CalibrationObservation(.6, 0, .9, .7),
++            ssod.CalibrationObservation(.8, 0, .9, .8),
++            ssod.CalibrationObservation(.9, 0, .9, .9),
++        ]
++        threshold = ssod.calibrate_score_threshold(
++            obs, geometry_limit_px=16, stability_min_iou=.6,
++            success_iou_threshold=.5, minimum_precision=1.0, min_count=2,
++        )
++        self.assertAlmostEqual(threshold, .4)
++
++    def test_ema_updates_parameters_and_copies_integer_buffer(self):
++        class Tiny(torch.nn.Module):
++            def __init__(self, value):
++                super().__init__(); self.w=torch.nn.Parameter(torch.tensor([value])); self.register_buffer("n", torch.tensor([int(value)]))
++        teacher=Tiny(0.0); student=Tiny(2.0)
++        ssod.ema_update(teacher,student,decay=.75)
++        self.assertTrue(torch.allclose(teacher.w,torch.tensor([.5])))
++        self.assertEqual(int(teacher.n.item()),2)
++
++    def test_medium_pseudo_loss_is_classification_only(self):
++        class Matcher:
++            def __call__(self, outputs, targets):
++                device=outputs["pred_logits"].device
++                return [(torch.tensor([0],device=device),torch.tensor([0],device=device))]
++        class Criterion:
++            def __init__(self):
++                self.matcher=Matcher(); self.weight_dict={"loss_class":2.0,"loss_bbox":99.0,"loss_giou":99.0}
++            def loss_labels(self, outputs, targets, indices, num_boxes):
++                return {"loss_class": outputs["pred_logits"][0,0,0].square()+1}
++        outputs={"pred_logits":torch.tensor([[[.2],[.1]]]),"pred_boxes":torch.rand(1,2,4),"aux_outputs":[]}
++        targets=[{"labels":torch.zeros(1,dtype=torch.long),"boxes":torch.rand(1,4)}]
++        losses=ssod.classification_only_pseudo_loss(Criterion(),outputs,targets)
++        self.assertEqual(set(losses),{"loss_class"})
++        self.assertNotIn("loss_bbox",losses); self.assertNotIn("loss_giou",losses)
++
++    def test_unsup_ramp(self):
++        self.assertAlmostEqual(ssod.linear_unsup_weight(0,100,target=1,ramp_fraction=.1), .1)
++        self.assertAlmostEqual(ssod.linear_unsup_weight(9,100,target=1,ramp_fraction=.1), 1.0)
++        self.assertAlmostEqual(ssod.linear_unsup_weight(99,100,target=1,ramp_fraction=.1), 1.0)
++
++
++class ManifestTests(unittest.TestCase):
++    def test_stratified_roles_are_deterministic_disjoint_and_train_only(self):
++        records=[]
++        for seq in ("seqA","seqB"):
++            for i in range(100):
++                records.append({"sequence_id":seq,"query_uid":i,"query_time":float(i),"range_m":10.0 + (i%5)*20})
++        a=ssod_data.assign_stratified_roles(records, seed=7)
++        b=ssod_data.assign_stratified_roles(records, seed=7)
++        self.assertEqual(a,b)
++        self.assertEqual(len(a),10)  # 5% of 200
++        self.assertEqual(set(a.values()),{"labeled_train","labeled_calibration"})
++        self.assertEqual(sum(v=="labeled_calibration" for v in a.values()),2)
++
++    def test_manifest_requires_verified_box(self):
++        with tempfile.TemporaryDirectory() as directory:
++            path=Path(directory)/"manifest.jsonl"
++            path.write_text('{"sequence_id":"s","query_uid":1,"query_time":1.0,"image_path":"x.png","role":"labeled_train","gt_xyz_m":[1,2,3],"range_m":3.7,"box_xyxy_px":null,"gt_2d_valid":false}\n')
++            with self.assertRaises(ValueError):
++                ssod_data.load_label_manifest(path,require_boxes=True)
++
++
++if __name__ == "__main__":
++    unittest.main()
+diff --git a/tools/build_multimodal_v1_vision_label_manifest.py b/tools/build_multimodal_v1_vision_label_manifest.py
+new file mode 100755
+index 0000000..2fd5654
+--- /dev/null
++++ b/tools/build_multimodal_v1_vision_label_manifest.py
+@@ -0,0 +1,105 @@
++#!/usr/bin/env python3
++"""Create a deterministic train-only 5% MMAUD image manifest for manual UAV bbox labeling."""
++from __future__ import annotations
++
++import argparse
++import json
++from pathlib import Path
++import sys
++
++import numpy as np
++import yaml
++
++ROOT = Path(__file__).resolve().parents[1]
++sys.path.insert(0, str(ROOT / "src"))
++
++
++def parse_args() -> argparse.Namespace:
++    parser = argparse.ArgumentParser()
++    parser.add_argument("--config", type=Path, default=ROOT / "configs/multimodal_v1/vision_ssod.yaml")
++    parser.add_argument("--output", type=Path)
++    parser.add_argument("--total-limit", type=int, help="Diagnostic subset cap, e.g. 64; formal run omits this.")
++    return parser.parse_args()
++
++
++def main() -> None:
++    args = parse_args()
++    cfg = yaml.safe_load(args.config.read_text())
++    data_cfg = cfg["data"]
++    output = args.output or ROOT / data_cfg["annotation_manifest"]
++
++    from rdq_uav.lidar_v2.data import LiDARUAVDataset
++    from rdq_uav.multimodal_v1.data import LeftImageIndex
++    from rdq_uav.multimodal_v1.vision.ssod_data import assign_stratified_roles
++
++    root = Path(data_cfg["root"])
++    split_file = ROOT / data_cfg["split_file"]
++    geometry_path = ROOT / data_cfg["geometry_calibration"]
++    geometry = json.loads(geometry_path.read_text())
++    image_index = LeftImageIndex(
++        root,
++        time_offset_s=float(geometry["time_offset_s"]),
++        max_abs_gap_s=float(data_cfg["max_image_gap_s"]),
++    )
++    dataset = LiDARUAVDataset(root, split_file, data_cfg["train_split"])
++
++    candidates = []
++    for record in dataset.records:
++        match = image_index.match(record["sequence_id"], record["query_time"])
++        if not match.valid or match.path is None:
++            continue
++        xyz = np.load(record["target_path"], allow_pickle=False).reshape(3).astype(np.float64)
++        if not np.isfinite(xyz).all():
++            continue
++        candidates.append({
++            "sequence_id": record["sequence_id"],
++            "query_uid": record["query_uid"],
++            "query_time": float(record["query_time"]),
++            "image_path": str(match.path),
++            "image_time": float(match.image_time),
++            "image_query_gap_s": float(match.gap_s),
++            "gt_xyz_m": xyz.tolist(),
++            "range_m": float(np.linalg.norm(xyz)),
++        })
++
++    roles = assign_stratified_roles(
++        candidates,
++        labeled_train_fraction=float(data_cfg["labeled_train_fraction"]),
++        calibration_fraction=float(data_cfg["calibration_fraction"]),
++        range_edges_m=tuple(float(x) for x in data_cfg["range_edges_m"]),
++        seed=int(data_cfg["seed"]),
++        total_limit=args.total_limit,
++    )
++    selected = []
++    for record in candidates:
++        key = (record["sequence_id"], record["query_uid"])
++        if key not in roles:
++            continue
++        item = dict(record)
++        item.update(
++            role=roles[key],
++            box_xyxy_px=None,
++            gt_2d_valid=False,
++            annotation_note="Fill box_xyxy_px=[x1,y1,x2,y2] in source 1280x960 left-camera pixels, then set gt_2d_valid=true.",
++        )
++        selected.append(item)
++    selected.sort(key=lambda x: (x["role"], x["sequence_id"], str(x["query_uid"])))
++
++    output.parent.mkdir(parents=True, exist_ok=True)
++    with output.open("w", encoding="utf-8") as handle:
++        for item in selected:
++            handle.write(json.dumps(item, ensure_ascii=False) + "\n")
++    counts = {role: sum(item["role"] == role for item in selected) for role in ("labeled_train", "labeled_calibration")}
++    print(json.dumps({
++        "status": "PASS",
++        "source_split": data_cfg["train_split"],
++        "eligible_train_queries": len(candidates),
++        "selected": len(selected),
++        "counts": counts,
++        "output": str(output),
++        "total_limit": args.total_limit,
++    }, indent=2))
++
++
++if __name__ == "__main__":
++    main()
+diff --git a/tools/train_multimodal_v1_vision_ssod.py b/tools/train_multimodal_v1_vision_ssod.py
+new file mode 100755
+index 0000000..11872ba
+--- /dev/null
++++ b/tools/train_multimodal_v1_vision_ssod.py
+@@ -0,0 +1,325 @@
++#!/usr/bin/env python3
++"""Train the single-class UAV DINO with geometry-guided semi-supervision.
++
++Pipeline:
++  V0 burn-in: verified labeled_train boxes -> native DINO criterion.
++  Calibration: labeled_calibration selects tau_high/tau_mid.
++  V1 SSOD: 1 labeled + 3 unlabeled attempts per optimizer step.
++    HIGH pseudo -> native DINO cls + L1 + GIoU.
++    MEDIUM pseudo -> DINO matcher + classification loss only.
++    IGNORE -> no positive or negative pseudo supervision.
++
++The 3D GT projection is used only to filter teacher boxes. It is never converted
++into a bounding-box target.
++"""
++from __future__ import annotations
++
++import argparse
++import copy
++import json
++import math
++from pathlib import Path
++import random
++import sys
++import time
++from typing import Any
++
++import numpy as np
++from PIL import Image, ImageEnhance, ImageFilter, ImageOps
++import torch
++import yaml
++
++ROOT = Path(__file__).resolve().parents[1]
++
++
++def parse_args() -> argparse.Namespace:
++    p=argparse.ArgumentParser()
++    p.add_argument("--config",type=Path,default=ROOT/"configs/multimodal_v1/vision_ssod.yaml")
++    p.add_argument("--device",default="cuda")
++    p.add_argument("--tiny",action="store_true",help="20 burn-in + 20 SSOD steps for correctness/overfit diagnostics")
++    p.add_argument("--burn-in-only",action="store_true")
++    p.add_argument("--output-dir",type=Path)
++    return p.parse_args()
++
++
++def resolve(path_value: str | Path) -> Path:
++    path=Path(path_value)
++    return path if path.is_absolute() else ROOT/path
++
++
++def resize_wh(source_wh: tuple[int,int],short_edge:int,max_size:int)->tuple[int,int]:
++    width,height=source_wh
++    scale=float(short_edge)/float(min(width,height))
++    if float(max(width,height))*scale>float(max_size):
++        scale=float(max_size)/float(max(width,height))
++    return int(width*scale+0.5),int(height*scale+0.5)
++
++
++def load_source_rgb(path: str | Path,source_wh:tuple[int,int])->Image.Image:
++    image=Image.open(path).convert("RGB")
++    width,height=source_wh
++    if image.width<width or image.height<height:
++        raise ValueError(f"image {image.size} smaller than calibrated {source_wh}")
++    return image.crop((0,0,width,height))
++
++
++def apply_geometry(image:Image.Image,transform:Any)->Image.Image:
++    out=image.resize(transform.view_wh,Image.Resampling.BILINEAR)
++    if transform.horizontal_flip:
++        out=ImageOps.mirror(out)
++    return out
++
++
++def weak_photo(image:Image.Image,rng:random.Random)->Image.Image:
++    out=ImageEnhance.Brightness(image).enhance(1.0+rng.uniform(-.05,.05))
++    out=ImageEnhance.Contrast(out).enhance(1.0+rng.uniform(-.05,.05))
++    out=ImageEnhance.Color(out).enhance(1.0+rng.uniform(-.05,.05))
++    return out
++
++
++def strong_photo(image:Image.Image,rng:random.Random)->Image.Image:
++    out=ImageEnhance.Brightness(image).enhance(1.0+rng.uniform(-.30,.30))
++    out=ImageEnhance.Contrast(out).enhance(1.0+rng.uniform(-.30,.30))
++    out=ImageEnhance.Color(out).enhance(1.0+rng.uniform(-.30,.30))
++    if rng.random()<.20:
++        out=ImageOps.grayscale(out).convert("RGB")
++    if rng.random()<.20:
++        out=out.filter(ImageFilter.GaussianBlur(radius=rng.uniform(.1,1.2)))
++    return out
++
++
++def pil_tensor(image:Image.Image,device:torch.device)->torch.Tensor:
++    array=np.asarray(image,dtype=np.float32).copy()
++    return torch.from_numpy(array).permute(2,0,1).contiguous().to(device)
++
++
++def make_transform(source_wh,short_edges,max_size,flip_p,rng,ViewTransform):
++    edge=int(rng.choice(short_edges)); view_wh=resize_wh(source_wh,edge,max_size)
++    return ViewTransform(source_wh,view_wh,rng.random()<flip_p)
++
++
++def make_instances(box_source,transform,device,Instances,Boxes):
++    box_view=transform.source_boxes_to_view(torch.as_tensor(box_source,dtype=torch.float32,device=device)).reshape(1,4)
++    h,w=transform.view_wh[1],transform.view_wh[0]
++    instances=Instances((h,w)); instances.gt_boxes=Boxes(box_view); instances.gt_classes=torch.zeros(1,dtype=torch.long,device=device)
++    return instances
++
++
++def native_input(tensor,transform,instances=None):
++    item={"image":tensor,"height":transform.view_wh[1],"width":transform.view_wh[0]}
++    if instances is not None:item["instances"]=instances
++    return item
++
++
++def sum_losses(loss_dict):
++    values=[value if value.ndim==0 else value.sum() for value in loss_dict.values()]
++    if not values:raise RuntimeError("empty DINO loss dictionary")
++    return torch.stack(values).sum()
++
++
++def build_optimizer(model,cfg):
++    lr=float(cfg["lr"]); backbone_lr=float(cfg["backbone_lr"]); weight_decay=float(cfg["weight_decay"])
++    backbone=[]; other=[]
++    for name,param in model.named_parameters():
++        if not param.requires_grad:continue
++        (backbone if name.startswith("backbone.") else other).append(param)
++    return torch.optim.AdamW([
++        {"params":backbone,"lr":backbone_lr},
++        {"params":other,"lr":lr},
++    ],weight_decay=weight_decay)
++
++
++def build_train_pool(dataset,image_index,excluded_keys):
++    pool=[]
++    for record in dataset.records:
++        key=(record["sequence_id"],record["query_uid"])
++        if key in excluded_keys:continue
++        match=image_index.match(record["sequence_id"],record["query_time"])
++        if not match.valid or match.path is None:continue
++        pool.append({"record":record,"image_path":str(match.path)})
++    if not pool:raise RuntimeError("unlabeled train pool is empty")
++    return pool
++
++
++def project_gt_source(record,projection,device,project_omni_radtan):
++    xyz=np.load(record["target_path"],allow_pickle=False).reshape(3).astype(np.float32)
++    point=torch.from_numpy(xyz).to(device).reshape(1,3)
++    pixel,valid=project_omni_radtan(point,torch.zeros(1,dtype=torch.long,device=device),projection)
++    if not bool(valid.item()):return None
++    return pixel[0]
++
++
++def teacher_raw(adapter,tensor,transform):
++    output=adapter.forward_raw([native_input(tensor,transform)])
++    return {"pred_logits":output["pred_logits"][0],"pred_boxes":output["pred_boxes"][0]}
++
++
++def mine_one(teacher_adapter,image,point_source,cfg,rng,ViewTransform,PseudoLabelPolicy,mine_geometry_guided_pseudo,device):
++    short_edges=tuple(int(x) for x in cfg["weak_short_edges"]); max_size=int(cfg["max_size"]); flip_p=float(cfg["horizontal_flip_p"])
++    t1=make_transform(image.size,short_edges,max_size,flip_p,rng,ViewTransform)
++    t2=make_transform(image.size,short_edges,max_size,flip_p,rng,ViewTransform)
++    w1=pil_tensor(weak_photo(apply_geometry(image,t1),rng),device)
++    w2=pil_tensor(weak_photo(apply_geometry(image,t2),rng),device)
++    with torch.no_grad():
++        o1=teacher_raw(teacher_adapter,w1,t1); o2=teacher_raw(teacher_adapter,w2,t2)
++    policy=PseudoLabelPolicy(
++        tau_high=float(cfg["tau_high"]),tau_mid=float(cfg["tau_mid"]),
++        high_geometry_px=float(cfg["high_geometry_px"]),medium_geometry_px=float(cfg["medium_geometry_px"]),
++        high_stability_iou=float(cfg["high_stability_iou"]),medium_stability_iou=float(cfg["medium_stability_iou"]),
++    )
++    pseudo=mine_geometry_guided_pseudo(o1,o2,transform1=t1,transform2=t2,projected_point_source=point_source,policy=policy)
++    return pseudo,t1
++
++
++def calibration_observations(records,teacher_adapter,projection,source_wh,ssod_cfg,rng,device,modules):
++    ViewTransform,PseudoLabelPolicy,mine_geometry_guided_pseudo,box_iou_xyxy,project_omni_radtan=modules
++    observations=[]
++    permissive=dict(ssod_cfg); permissive["tau_high"]=0.0; permissive["tau_mid"]=0.0
++    for index,record in enumerate(records):
++        image=load_source_rgb(record.image_path,source_wh)
++        # Calibration manifest stores GT XYZ directly; project without reading sequence files.
++        xyz=torch.tensor(record.gt_xyz_m,dtype=torch.float32,device=device).reshape(1,3)
++        point,valid=project_omni_radtan(xyz,torch.zeros(1,dtype=torch.long,device=device),projection)
++        if not bool(valid.item()):continue
++        pseudo,_=mine_one(teacher_adapter,image,point[0],permissive,rng,ViewTransform,PseudoLabelPolicy,mine_geometry_guided_pseudo,device)
++        if not pseudo.valid:continue
++        gt=torch.tensor(record.box_xyxy_px,dtype=torch.float32,device=device)
++        observations.append(modules[5](pseudo.score,pseudo.geometry_px,pseudo.stability_iou,float(box_iou_xyxy(pseudo.box_xyxy_source,gt).item())))
++    return observations
++
++
++def save_checkpoint(path,student,teacher,optimizer,step,metadata):
++    path.parent.mkdir(parents=True,exist_ok=True)
++    torch.save({"student":student.state_dict(),"teacher":None if teacher is None else teacher.state_dict(),"optimizer":optimizer.state_dict(),"step":step,"metadata":metadata},path)
++
++
++def main()->None:
++    args=parse_args(); cfg=yaml.safe_load(args.config.read_text())
++    device=torch.device(args.device)
++    if device.type=="cuda" and not torch.cuda.is_available():raise RuntimeError("CUDA requested but unavailable")
++    data_cfg=cfg["data"]; model_cfg=cfg["model"]; opt_cfg=cfg["optimizer"]; ssod_cfg=dict(cfg["ssod"])
++    burn_steps=20 if args.tiny else int(cfg["burn_in"]["steps"]); ssod_steps=20 if args.tiny else int(ssod_cfg["steps"])
++    output_dir=args.output_dir or resolve(cfg["output"]["directory"]); output_dir.mkdir(parents=True,exist_ok=True)
++    rng=random.Random(int(data_cfg["seed"])); torch.manual_seed(int(data_cfg["seed"])); np.random.seed(int(data_cfg["seed"])%(2**32-1))
++
++    detrex=resolve(model_cfg["detrex_root"]); sys.path.insert(0,str(detrex)); sys.path.insert(0,str(detrex/"detectron2")); sys.path.insert(0,str(ROOT/"src"))
++    from detectron2.checkpoint import DetectionCheckpointer
++    from detectron2.config import LazyConfig,instantiate
++    from detectron2.structures import Boxes,Instances
++    from rdq_uav.lidar_v2.data import LiDARUAVDataset
++    from rdq_uav.multimodal_v1.data import LeftImageIndex
++    from rdq_uav.multimodal_v1.interaction.geometry_local import project_omni_radtan
++    from rdq_uav.multimodal_v1.projection import load_left_projection_context
++    from rdq_uav.multimodal_v1.vision.dino_adapter import DINOAdapter
++    from rdq_uav.multimodal_v1.vision.ssod import (
++        CalibrationObservation,PseudoLabelPolicy,PseudoQuality,ViewTransform,box_iou_xyxy,
++        calibrate_score_threshold,classification_only_pseudo_loss,ema_update,
++        linear_unsup_weight,mine_geometry_guided_pseudo,source_xyxy_to_normalized_cxcywh,weighted_loss_sum,
++    )
++    from rdq_uav.multimodal_v1.vision.ssod_data import load_label_manifest
++    from rdq_uav.multimodal_v1.vision.uav_dino import adapt_dino_class_head_to_single_uav
++
++    manifest=load_label_manifest(resolve(data_cfg["annotation_manifest"]),require_boxes=True)
++    labeled=[r for r in manifest if r.role=="labeled_train"]; calibration=[r for r in manifest if r.role=="labeled_calibration"]
++    if not labeled or not calibration:raise RuntimeError("manifest needs both labeled_train and labeled_calibration verified boxes")
++    excluded={r.key for r in manifest}
++
++    camera_cfg=yaml.safe_load(resolve(data_cfg["camera_config"]).read_text()); source_wh=tuple(int(x) for x in camera_cfg["cameras"]["left"]["resolution"])
++    geometry=json.loads(resolve(data_cfg["geometry_calibration"]).read_text())
++    projection=load_left_projection_context(resolve(data_cfg["camera_config"]),resolve(data_cfg["geometry_calibration"]),image_scale_xy=torch.ones(1,2),device=device)
++    dataset=LiDARUAVDataset(resolve(data_cfg["root"]),resolve(data_cfg["split_file"]),data_cfg["train_split"])
++    image_index=LeftImageIndex(resolve(data_cfg["root"]),time_offset_s=float(geometry["time_offset_s"]),max_abs_gap_s=float(data_cfg["max_image_gap_s"]))
++    unlabeled=build_train_pool(dataset,image_index,excluded)
++
++    dino_cfg=LazyConfig.load(str(resolve(model_cfg["config"]))); dino_cfg.model.device=str(device)
++    student=instantiate(dino_cfg.model).to(device)
++    DetectionCheckpointer(student).load(str(resolve(model_cfg["checkpoint"])))
++    adapt_dino_class_head_to_single_uav(student)
++    optimizer=build_optimizer(student,opt_cfg)
++    amp=bool(opt_cfg.get("amp",True)) and device.type=="cuda"; scaler=torch.cuda.amp.GradScaler(enabled=amp)
++
++    print(json.dumps({"labeled_train":len(labeled),"labeled_calibration":len(calibration),"unlabeled":len(unlabeled),"burn_steps":burn_steps,"ssod_steps":ssod_steps,"device":str(device)},indent=2))
++
++    # V0 supervised burn-in.
++    student.train(); start=time.time()
++    for step in range(burn_steps):
++        record=labeled[step%len(labeled)]; image=load_source_rgb(record.image_path,source_wh)
++        transform=make_transform(source_wh,ssod_cfg["weak_short_edges"],ssod_cfg["max_size"],ssod_cfg["horizontal_flip_p"],rng,ViewTransform)
++        strong=pil_tensor(strong_photo(apply_geometry(image,transform),rng),device)
++        instances=make_instances(record.box_xyxy_px,transform,device,Instances,Boxes)
++        optimizer.zero_grad(set_to_none=True)
++        with torch.cuda.amp.autocast(enabled=amp):
++            losses=student([native_input(strong,transform,instances)]); loss=sum_losses(losses)
++        scaler.scale(loss).backward(); scaler.unscale_(optimizer)
++        torch.nn.utils.clip_grad_norm_(student.parameters(),float(opt_cfg["grad_clip_norm"]))
++        scaler.step(optimizer); scaler.update()
++        if (step+1)%int(cfg["output"]["log_every"])==0 or step==0:
++            print(f"[burn-in] step={step+1}/{burn_steps} loss={float(loss.detach()):.5f}")
++    save_checkpoint(output_dir/"burn_in.pt",student,None,optimizer,burn_steps,{"stage":"burn_in"})
++    if args.burn_in_only:
++        return
++
++    # Teacher begins as exact post-burn-in student.
++    teacher=copy.deepcopy(student).eval()
++    for parameter in teacher.parameters():parameter.requires_grad_(False)
++    teacher_adapter=DINOAdapter(teacher).eval(); student_adapter=DINOAdapter(student)
++
++    modules=(ViewTransform,PseudoLabelPolicy,mine_geometry_guided_pseudo,box_iou_xyxy,project_omni_radtan,CalibrationObservation)
++    observations=calibration_observations(calibration,teacher_adapter,projection,source_wh,ssod_cfg,rng,device,modules)
++    tau_high=calibrate_score_threshold(observations,geometry_limit_px=float(ssod_cfg["high_geometry_px"]),stability_min_iou=float(ssod_cfg["high_stability_iou"]),success_iou_threshold=float(ssod_cfg["high_success_iou"]),minimum_precision=float(ssod_cfg["high_min_precision"]),min_count=int(ssod_cfg["calibration_min_count"]))
++    tau_mid=calibrate_score_threshold(observations,geometry_limit_px=float(ssod_cfg["medium_geometry_px"]),stability_min_iou=float(ssod_cfg["medium_stability_iou"]),success_iou_threshold=float(ssod_cfg["medium_success_iou"]),minimum_precision=float(ssod_cfg["medium_min_precision"]),min_count=int(ssod_cfg["calibration_min_count"]))
++    tau_mid=min(tau_mid,tau_high); ssod_cfg.update(tau_high=tau_high,tau_mid=tau_mid)
++    calibration_report={"tau_high":tau_high,"tau_mid":tau_mid,"observations":len(observations),"medium_success_iou":float(ssod_cfg["medium_success_iou"])}
++    (output_dir/"calibration.json").write_text(json.dumps(calibration_report,indent=2)+"\n")
++    print("[calibration]",json.dumps(calibration_report))
++
++    pseudo_counts={"high":0,"medium":0,"ignore":0,"invalid_projection":0}
++    unlabeled_per_step=int(ssod_cfg["unlabeled_per_step"])
++    for step in range(ssod_steps):
++        optimizer.zero_grad(set_to_none=True); student.train(); teacher.eval()
++        record=labeled[(burn_steps+step)%len(labeled)]; image=load_source_rgb(record.image_path,source_wh)
++        transform=make_transform(source_wh,ssod_cfg["weak_short_edges"],ssod_cfg["max_size"],ssod_cfg["horizontal_flip_p"],rng,ViewTransform)
++        tensor=pil_tensor(strong_photo(apply_geometry(image,transform),rng),device)
++        instances=make_instances(record.box_xyxy_px,transform,device,Instances,Boxes)
++        with torch.cuda.amp.autocast(enabled=amp):
++            supervised=sum_losses(student([native_input(tensor,transform,instances)]))
++        scaler.scale(supervised).backward()
++
++        lambda_u=linear_unsup_weight(step,ssod_steps,target=float(ssod_cfg["lambda_unsup"]),ramp_fraction=float(ssod_cfg["ramp_fraction"]))
++        unsup_value=0.0
++        for offset in range(unlabeled_per_step):
++            sample=unlabeled[(step*unlabeled_per_step+offset)%len(unlabeled)]; source=load_source_rgb(sample["image_path"],source_wh)
++            point=project_gt_source(sample["record"],projection,device,project_omni_radtan)
++            if point is None:
++                pseudo_counts["invalid_projection"]+=1; continue
++            pseudo,strong_transform=mine_one(teacher_adapter,source,point,ssod_cfg,rng,ViewTransform,PseudoLabelPolicy,mine_geometry_guided_pseudo,device)
++            if pseudo.quality==PseudoQuality.IGNORE:
++                pseudo_counts["ignore"]+=1; continue
++            strong_tensor=pil_tensor(strong_photo(apply_geometry(source,strong_transform),rng),device)
++            if pseudo.quality==PseudoQuality.HIGH:
++                pseudo_counts["high"]+=1
++                pseudo_instances=make_instances(pseudo.box_xyxy_source,strong_transform,device,Instances,Boxes)
++                with torch.cuda.amp.autocast(enabled=amp):
++                    u_loss=sum_losses(student([native_input(strong_tensor,strong_transform,pseudo_instances)]))
++            else:
++                pseudo_counts["medium"]+=1
++                with torch.cuda.amp.autocast(enabled=amp):
++                    raw=student_adapter.forward_raw([native_input(strong_tensor,strong_transform)],allow_training_candidate_path=True)
++                    target_box=source_xyxy_to_normalized_cxcywh(pseudo.box_xyxy_source,strong_transform).reshape(1,4).to(device)
++                    targets=[{"labels":torch.zeros(1,dtype=torch.long,device=device),"boxes":target_box}]
++                    u_loss=weighted_loss_sum(classification_only_pseudo_loss(student.criterion,raw,targets))
++            scale=lambda_u/max(1,unlabeled_per_step); scaler.scale(u_loss*scale).backward(); unsup_value+=float(u_loss.detach())*scale
++
++        scaler.unscale_(optimizer); torch.nn.utils.clip_grad_norm_(student.parameters(),float(opt_cfg["grad_clip_norm"]))
++        scaler.step(optimizer); scaler.update(); ema_update(teacher,student,decay=float(ssod_cfg["ema_decay"]))
++        if (step+1)%int(cfg["output"]["log_every"])==0 or step==0:
++            print(f"[ssod] step={step+1}/{ssod_steps} sup={float(supervised.detach()):.5f} unsup={unsup_value:.5f} lambda_u={lambda_u:.3f} pseudo={pseudo_counts}")
++        if (step+1)%int(cfg["output"]["save_every"])==0:
++            save_checkpoint(output_dir/f"ssod_step_{step+1:06d}.pt",student,teacher,optimizer,step+1,{"stage":"ssod",**calibration_report,"pseudo_counts":dict(pseudo_counts)})
++
++    save_checkpoint(output_dir/"vision_ssod_final.pt",student,teacher,optimizer,ssod_steps,{"stage":"ssod_final",**calibration_report,"pseudo_counts":pseudo_counts,"elapsed_s":time.time()-start})
++    print(json.dumps({"status":"PASS","output":str(output_dir/"vision_ssod_final.pt"),"pseudo_counts":pseudo_counts,"calibration":calibration_report},indent=2))
++
++
++if __name__=="__main__":
++    main()

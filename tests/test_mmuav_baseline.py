@@ -6,21 +6,94 @@ import tempfile
 import unittest
 
 import numpy as np
+import torch
 
 from rdq_uav.baselines.mmuav_preprocess import (
+    MyLSTMClassifier,
     _accumulate_lidar_360_blocks,
     extract_feature_set_predict,
     farthest_point_sample,
 )
 from tools.run_mmuav_candidate_baseline import (
     SensorFrame,
+    build_eps_comparison_diagnostics,
+    build_pre_lstm_cluster_diagnostics,
     build_processing_units,
     build_unique_sensor_frame_index,
+    save_pre_lstm_cluster_diagnostics,
+    save_eps_comparison_diagnostics,
     select_processing_units,
+)
+from tools.audit_mmuav_positive_clusters_geometry import nearest_path, summarize_cluster
+from tools.run_mmuav_diagnostics_batch import (
+    build_diagnostic_windows,
+    diagnostic_complete,
 )
 
 
 class MMUAVBaselineTests(unittest.TestCase):
+    def test_batch_diagnostics_preserve_source_final_20_window(self) -> None:
+        frames = []
+        for frame_index in range(45):
+            frame = SensorFrame(
+                sequence_id="Seq", sensor_type="lidar_360",
+                timestamp=f"{frame_index / 10:.1f}", path=Path(f"{frame_index}.npy"),
+            )
+            frame.splits.add("train")
+            frame.manifest_units.add(("train", 3))
+            frames.append(frame)
+        windows, audit = build_diagnostic_windows({("Seq", "lidar_360"): frames})
+        self.assertEqual([window.name for window in windows], [
+            "train_block03_chunk000", "train_block03_chunk001",
+            "train_block03_final20",
+        ])
+        self.assertEqual([frame.timestamp for frame in windows[0].frames], [
+            f"{index / 10:.1f}" for index in range(20)
+        ])
+        self.assertEqual([frame.timestamp for frame in windows[-1].frames], [
+            f"{index / 10:.1f}" for index in range(25, 45)
+        ])
+        self.assertEqual(audit[0]["remainder_frames"], 5)
+        self.assertTrue(audit[0]["source_final_20_window"])
+
+    def test_batch_diagnostic_complete_requires_both_eps_outputs(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            unit_dir = Path(temporary_directory)
+            required = [
+                unit_dir / "diagnostics/pre_lstm_clusters/cluster_diagnostics.json",
+                unit_dir / "diagnostics/pre_lstm_clusters/cluster_features.npz",
+                unit_dir / "diagnostics/eps1_cluster_features.npz",
+                unit_dir / "diagnostics/eps_comparison.json",
+                unit_dir / "unit_metadata.json",
+            ]
+            for path in required:
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.touch()
+            self.assertTrue(diagnostic_complete(unit_dir))
+            required[-2].unlink()
+            self.assertFalse(diagnostic_complete(unit_dir))
+
+    def test_weak_geometry_audit_keeps_missing_bbox_inconclusive(self) -> None:
+        times = np.asarray([1.0, 2.0, 3.0])
+        paths = [Path("1.npy"), Path("2.npy"), Path("3.npy")]
+        selected_time, selected_path = nearest_path(times, paths, 1.6)
+        self.assertEqual(selected_time, 2.0)
+        self.assertEqual(selected_path, Path("2.npy"))
+        rows = [
+            {
+                "cluster_id": 12,
+                "distance_center_to_gt_m": distance,
+                "min_point_to_gt_m": distance / 2,
+                "projection_valid": True,
+                "official_bbox_available": False,
+            }
+            for distance in (1.0, 2.0)
+        ]
+        summary = summarize_cluster(rows, 0.98)
+        self.assertEqual(summary["verdict"], "INCONCLUSIVE")
+        self.assertEqual(summary["geometry_confidence"], "LOW")
+        self.assertIsNone(summary["inside_gt_bbox_frames"])
+
     def test_adapter_keeps_all_native_rate_frames_inside_manifest_ranges(self) -> None:
         with tempfile.TemporaryDirectory() as temporary_directory:
             root = Path(temporary_directory)
@@ -135,6 +208,67 @@ class MMUAVBaselineTests(unittest.TestCase):
         self.assertEqual(timestamps["25"], [str(index) for index in range(6, 26)])
         self.assertEqual(blocks["20"].shape, (20, 4))
         self.assertEqual(blocks["25"].shape, (20, 4))
+
+    def test_pre_lstm_diagnostic_shapes_and_sidecar(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            root = Path(temporary_directory)
+            checkpoint = root / "lstm_model.pth"
+            torch.manual_seed(0)
+            model = MyLSTMClassifier(9, 64, 1, 2)
+            torch.save(model.state_dict(), checkpoint)
+            frames = OrderedDict()
+            for frame_index in range(20):
+                offsets = np.linspace(-0.05, 0.05, 12)
+                first = np.column_stack((
+                    offsets,
+                    np.zeros_like(offsets),
+                    np.full_like(offsets, 1.0 + frame_index * 0.001),
+                ))
+                second = first + np.asarray([10.0, 0.0, 0.0])
+                frames[str(float(frame_index))] = np.vstack((first, second))
+
+            diagnostic = build_pre_lstm_cluster_diagnostics(frames, checkpoint)
+            cluster_count = diagnostic["summary"]["dbscan_clusters"]
+            self.assertEqual(cluster_count, 2)
+            self.assertEqual(diagnostic["features"].shape, (2, 20, 9))
+            self.assertEqual(diagnostic["logits"].shape, (2, 2))
+            self.assertEqual(diagnostic["probabilities"].shape, (2, 2))
+            np.testing.assert_allclose(
+                diagnostic["probabilities"].sum(axis=1), np.ones(2), atol=1e-6
+            )
+            self.assertEqual(diagnostic["per_frame_counts"].shape, (2, 20))
+            np.testing.assert_array_equal(
+                diagnostic["per_frame_counts"], np.full((2, 20), 12)
+            )
+
+            output_dir = root / "diagnostics"
+            report = save_pre_lstm_cluster_diagnostics(
+                diagnostic, output_dir, root / "missing_calibration.json"
+            )
+            self.assertTrue((output_dir / "cluster_diagnostics.json").is_file())
+            self.assertTrue((output_dir / "cluster_features.npz").is_file())
+            self.assertEqual(
+                report["gt_oracle_status"], "SKIPPED_UNVERIFIED_TRANSFORM"
+            )
+            arrays = np.load(output_dir / "cluster_features.npz")
+            self.assertEqual(arrays["features"].shape, (2, 20, 9))
+            self.assertEqual(arrays["logits"].shape, (2, 2))
+            self.assertEqual(arrays["probabilities"].shape, (2, 2))
+
+            comparison = build_eps_comparison_diagnostics(frames, checkpoint)
+            self.assertEqual(comparison["eps2"]["features"].shape, (2, 20, 9))
+            self.assertEqual(comparison["eps1"]["features"].shape, (2, 20, 9))
+            self.assertEqual(comparison["eps1"]["logits"].shape, (2, 2))
+            self.assertEqual(comparison["eps1"]["probabilities"].shape, (2, 2))
+            comparison_report = save_eps_comparison_diagnostics(
+                comparison, output_dir
+            )
+            self.assertFalse(comparison_report["gt_used"])
+            self.assertTrue((output_dir / "eps_comparison.json").is_file())
+            eps1_arrays = np.load(output_dir / "eps1_cluster_features.npz")
+            self.assertEqual(eps1_arrays["features"].shape, (2, 20, 9))
+            self.assertEqual(eps1_arrays["logits"].shape, (2, 2))
+            self.assertEqual(eps1_arrays["probabilities"].shape, (2, 2))
 
 
 if __name__ == "__main__":

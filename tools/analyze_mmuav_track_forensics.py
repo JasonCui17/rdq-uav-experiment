@@ -10,7 +10,7 @@ import matplotlib.pyplot as plt
 ROOT=Path(__file__).resolve().parents[1]
 sys.path[:0]=[str(ROOT/'src'),str(ROOT/'tools')]
 from build_mmuav_cluster_dataset import load_gt
-from rdq_uav.mmuav.track_robustness import select_track_v2,supported
+from rdq_uav.mmuav.track_robustness import select_track_v1 as select_track_v2,supported
 from document_mmuav_archive import nearest,series,rows
 BASE=ROOT/'outputs/mmuav_paper_reproduction'
 OUT=BASE/'posthoc_robustness/seq0065'

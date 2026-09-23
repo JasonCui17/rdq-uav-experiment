@@ -1,0 +1,72 @@
+experiment:
+  name: multimodal_v1_e5_full
+  seed: 42
+  output_dir: outputs/own_multimodal_research/multimodal_v1/e5_full_v1_seed42
+
+data:
+  root: /home/jasoncui/datasets/MMAUD/official/train
+  split_file: outputs/mmuav_paper_reproduction/splits/splits.json
+  train_split: train_sub
+  val_split: validation_sub
+  max_events: 20
+  max_image_gap_s: 0.04
+  annotation_manifest: manifests/multimodal_v1/vision_manual161_train.jsonl
+  camera_config: configs/calibration/mmaud_v1_omni.yaml
+  geometry_calibration: calibration/official_left_p4_current_geometry.json
+  dino_short_edge: 800
+  dino_max_size: 1333
+  num_workers: 0
+
+initialization:
+  lidar_config: configs/lidar_uav_v2.yaml
+  lidar_checkpoint: outputs/own_multimodal_research/lidar_uav_v2/spatial_only_full_query_seed42/best_spatial.pt
+  dino_root: third_party/detrex
+  dino_config: third_party/detrex/projects/dino/configs/dino-swin/dino_swin_tiny_224_4scale_12ep.py
+  dino_checkpoint: checkpoints/dino_swin_t/dino_swin_tiny_224_22kto1k_finetune_4scale_12ep.pth
+  p6_config: configs/multimodal_v1/p6_candidates.yaml
+
+loss:
+  lambda_R: 1.0
+  lambda_V: 1.0
+  lambda_F: 1.0
+  lambda_cls: 1.0
+  lambda_2d: 2.0
+  lambda_3d: 2.0
+  lambda_valid: 0.25
+  focal_alpha: 0.25
+  focal_gamma: 2.0
+
+training:
+  epochs: 12
+  batch_size: 1
+  accumulate: 4
+  amp: true
+  amp_dtype: bfloat16
+  grad_clip_norm: 1.0
+  weight_decay: 0.0001
+  warmup_fraction: 0.05
+  final_lr_ratio: 0.01
+  modality_dropout: 0.0
+  stages:
+    - {name: T1, start_epoch: 1, end_epoch: 1}
+    - {name: T2, start_epoch: 2, end_epoch: 8}
+    - {name: T3, start_epoch: 9, end_epoch: 12}
+  learning_rates:
+    new_modules: 0.0001
+    radar: 0.00002
+    dino_head: 0.00001
+    swin_last_two: 0.000001
+
+validation:
+  every_epochs: 1
+  precision: fp32
+  max_samples: null
+
+checkpoint:
+  last: last.pt
+  best: best.pt
+  primary_metric: final_3d_success_1m
+  tie_breaker: final_3d_median_error
+
+logging:
+  log_every_updates: 20

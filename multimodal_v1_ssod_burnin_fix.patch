@@ -1,0 +1,91 @@
+--- a/tools/train_multimodal_v1_vision_ssod.py
++++ b/tools/train_multimodal_v1_vision_ssod.py
+@@ -38,6 +38,8 @@
+     p.add_argument("--device",default="cuda")
+     p.add_argument("--tiny",action="store_true",help="20 burn-in + 20 SSOD steps for correctness/overfit diagnostics")
+     p.add_argument("--burn-in-only",action="store_true")
++    p.add_argument("--annotation-manifest",type=Path,help="Override data.annotation_manifest")
++    p.add_argument("--burn-steps",type=int,help="Override burn-in steps; useful for tiny overfit")
+     p.add_argument("--output-dir",type=Path)
+     return p.parse_args()
+ 
+@@ -129,13 +131,15 @@
+     ],weight_decay=weight_decay)
+ 
+ 
+-def build_train_pool(dataset,image_index,excluded_keys):
++def build_train_pool(dataset,image_index,excluded_keys,excluded_images):
+     pool=[]
+     for record in dataset.records:
+         key=(record["sequence_id"],record["query_uid"])
+         if key in excluded_keys:continue
+         match=image_index.match(record["sequence_id"],record["query_time"])
+         if not match.valid or match.path is None:continue
++        image_key=(record["sequence_id"],match.path.name)
++        if image_key in excluded_images:continue
+         pool.append({"record":record,"image_path":str(match.path)})
+     if not pool:raise RuntimeError("unlabeled train pool is empty")
+     return pool
+@@ -198,7 +202,9 @@
+     device=torch.device(args.device)
+     if device.type=="cuda" and not torch.cuda.is_available():raise RuntimeError("CUDA requested but unavailable")
+     data_cfg=cfg["data"]; model_cfg=cfg["model"]; opt_cfg=cfg["optimizer"]; ssod_cfg=dict(cfg["ssod"])
+-    burn_steps=20 if args.tiny else int(cfg["burn_in"]["steps"]); ssod_steps=20 if args.tiny else int(ssod_cfg["steps"])
++    burn_steps=(20 if args.tiny else int(cfg["burn_in"]["steps"])) if args.burn_steps is None else int(args.burn_steps)
++    if burn_steps <= 0: raise ValueError("burn-steps must be positive")
++    ssod_steps=20 if args.tiny else int(ssod_cfg["steps"])
+     output_dir=args.output_dir or resolve(cfg["output"]["directory"]); output_dir.mkdir(parents=True,exist_ok=True)
+     rng=random.Random(int(data_cfg["seed"])); torch.manual_seed(int(data_cfg["seed"])); np.random.seed(int(data_cfg["seed"])%(2**32-1))
+ 
+@@ -219,17 +225,23 @@
+     from rdq_uav.multimodal_v1.vision.ssod_data import load_label_manifest
+     from rdq_uav.multimodal_v1.vision.uav_dino import adapt_dino_class_head_to_single_uav
+ 
+-    manifest=load_label_manifest(resolve(data_cfg["annotation_manifest"]),require_boxes=True)
++    manifest_path=resolve(args.annotation_manifest) if args.annotation_manifest is not None else resolve(data_cfg["annotation_manifest"])
++    manifest=load_label_manifest(manifest_path,require_boxes=True)
+     labeled=[r for r in manifest if r.role=="labeled_train"]; calibration=[r for r in manifest if r.role=="labeled_calibration"]
+-    if not labeled or not calibration:raise RuntimeError("manifest needs both labeled_train and labeled_calibration verified boxes")
++    if not labeled:raise RuntimeError("manifest needs at least one labeled_train verified box")
++    if not args.burn_in_only and not calibration:
++        raise RuntimeError("SSOD stage needs labeled_calibration verified boxes; burn-in-only does not")
+     excluded={r.key for r in manifest}
++    excluded_images={(r.sequence_id,Path(r.image_path).name) for r in manifest}
+ 
+     camera_cfg=yaml.safe_load(resolve(data_cfg["camera_config"]).read_text()); source_wh=tuple(int(x) for x in camera_cfg["cameras"]["left"]["resolution"])
+     geometry=json.loads(resolve(data_cfg["geometry_calibration"]).read_text())
+     projection=load_left_projection_context(resolve(data_cfg["camera_config"]),resolve(data_cfg["geometry_calibration"]),image_scale_xy=torch.ones(1,2),device=device)
+-    dataset=LiDARUAVDataset(resolve(data_cfg["root"]),resolve(data_cfg["split_file"]),data_cfg["train_split"])
+-    image_index=LeftImageIndex(resolve(data_cfg["root"]),time_offset_s=float(geometry["time_offset_s"]),max_abs_gap_s=float(data_cfg["max_image_gap_s"]))
+-    unlabeled=build_train_pool(dataset,image_index,excluded)
++    unlabeled=[]
++    if not args.burn_in_only:
++        dataset=LiDARUAVDataset(resolve(data_cfg["root"]),resolve(data_cfg["split_file"]),data_cfg["train_split"])
++        image_index=LeftImageIndex(resolve(data_cfg["root"]),time_offset_s=float(geometry["time_offset_s"]),max_abs_gap_s=float(data_cfg["max_image_gap_s"]))
++        unlabeled=build_train_pool(dataset,image_index,excluded,excluded_images)
+ 
+     dino_cfg=LazyConfig.load(str(resolve(model_cfg["config"]))); dino_cfg.model.device=str(device)
+     student=instantiate(dino_cfg.model).to(device)
+@@ -238,7 +250,7 @@
+     optimizer=build_optimizer(student,opt_cfg)
+     amp=bool(opt_cfg.get("amp",True)) and device.type=="cuda"; scaler=torch.cuda.amp.GradScaler(enabled=amp)
+ 
+-    print(json.dumps({"labeled_train":len(labeled),"labeled_calibration":len(calibration),"unlabeled":len(unlabeled),"burn_steps":burn_steps,"ssod_steps":ssod_steps,"device":str(device)},indent=2))
++    print(json.dumps({"manifest":str(manifest_path),"labeled_train":len(labeled),"labeled_calibration":len(calibration),"unlabeled":len(unlabeled),"burn_steps":burn_steps,"ssod_steps":0 if args.burn_in_only else ssod_steps,"device":str(device)},indent=2))
+ 
+     # V0 supervised burn-in.
+     student.train(); start=time.time()
+@@ -254,9 +266,11 @@
+         torch.nn.utils.clip_grad_norm_(student.parameters(),float(opt_cfg["grad_clip_norm"]))
+         scaler.step(optimizer); scaler.update()
+         if (step+1)%int(cfg["output"]["log_every"])==0 or step==0:
+-            print(f"[burn-in] step={step+1}/{burn_steps} loss={float(loss.detach()):.5f}")
+-    save_checkpoint(output_dir/"burn_in.pt",student,None,optimizer,burn_steps,{"stage":"burn_in"})
++            primary={k:float(v.detach()) for k,v in losses.items() if k in {"loss_class","loss_bbox","loss_giou"}}
++            print(f"[burn-in] step={step+1}/{burn_steps} loss={float(loss.detach()):.5f} primary={json.dumps(primary,sort_keys=True)}")
++    save_checkpoint(output_dir/"burn_in.pt",student,None,optimizer,burn_steps,{"stage":"burn_in","manifest":str(manifest_path)})
+     if args.burn_in_only:
++        print(json.dumps({"status":"PASS","stage":"burn_in_only","steps":burn_steps,"labeled_train":len(labeled),"checkpoint":str(output_dir/"burn_in.pt")},indent=2))
+         return
+ 
+     # Teacher begins as exact post-burn-in student.

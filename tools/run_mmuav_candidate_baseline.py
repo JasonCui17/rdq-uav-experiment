@@ -19,6 +19,7 @@ from pathlib import Path
 from typing import Any
 
 import numpy as np
+import torch
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(PROJECT_ROOT / "src"))
@@ -26,6 +27,9 @@ sys.path.insert(0, str(PROJECT_ROOT / "src"))
 from rdq_uav.baselines.mmuav_preprocess import (  # noqa: E402
     SOURCE_COMMIT,
     SOURCE_REPO,
+    _accumulate_lidar_360_blocks,
+    _dbscan_labels,
+    extract_feature_set_predict,
     load_original_checkpoint,
     process_fusion,
     process_lidar_360,
@@ -376,6 +380,313 @@ def load_xyz_frames(frames: list[SensorFrame]) -> dict[str, np.ndarray]:
     return data
 
 
+def _gt_oracle_status(calibration_path: Path) -> tuple[str, dict[str, Any]]:
+    """Check transform credibility without reading any GT labels."""
+    if not calibration_path.is_file():
+        return "SKIPPED_UNVERIFIED_TRANSFORM", {
+            "reason": f"calibration file does not exist: {calibration_path}",
+        }
+    try:
+        calibration = json.loads(calibration_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        return "SKIPPED_UNVERIFIED_TRANSFORM", {"reason": repr(exc)}
+    credibility = calibration.get("credibility", {})
+    if credibility.get("credible") is not True:
+        return "SKIPPED_UNVERIFIED_TRANSFORM", {
+            "reason": "Mid360-to-GT calibration is explicitly not credible",
+            "calibration_path": str(calibration_path.resolve()),
+            "credibility": credibility,
+        }
+    return "AVAILABLE_BUT_NOT_IMPLEMENTED", {
+        "reason": (
+            "A credible transform was found, but this audit intentionally refuses to "
+            "silently choose a sensor-to-GT timestamp association convention."
+        ),
+        "calibration_path": str(calibration_path.resolve()),
+    }
+
+
+def _prepare_single_diagnostic_block(
+    lidar_360_data: dict[str, np.ndarray],
+) -> tuple[str, list[str], np.ndarray]:
+    if len(lidar_360_data) != 20:
+        raise ValueError(
+            "--diagnostic requires exactly one 20-frame Mid360 processing unit; "
+            f"received {len(lidar_360_data)} frames"
+        )
+    blocks, block_timestamps = _accumulate_lidar_360_blocks(lidar_360_data)
+    if len(blocks) != 1:
+        raise RuntimeError(f"Expected exactly one accumulated block, got {len(blocks)}")
+    block_timestamp, data_with_ind = next(iter(blocks.items()))
+    frame_timestamps = block_timestamps[block_timestamp]
+    return block_timestamp, frame_timestamps, data_with_ind
+
+
+def _diagnose_accumulated_block(
+    block_timestamp: str,
+    frame_timestamps: list[str],
+    data_with_ind: np.ndarray,
+    model: torch.nn.Module,
+    eps: float,
+) -> dict[str, Any]:
+    """Observe DBSCAN/features/LSTM without feeding results into the baseline."""
+    if data_with_ind.size == 0:
+        labels = np.empty((0,), dtype=np.int64)
+        data = np.empty((0, 3), dtype=np.float64)
+        time_ind = np.empty((0,), dtype=np.float64)
+    else:
+        time_ind = data_with_ind[:, 0]
+        data = data_with_ind[:, 1:]
+        # DIAGNOSTIC REPLAY: min_samples and the selected eps are observational.
+        labels = _dbscan_labels(data, eps=eps, min_samples=10)
+    features, cluster_labels_array = extract_feature_set_predict(data, labels, time_ind)
+    cluster_ids = cluster_labels_array.reshape(-1).astype(np.int64)
+    if features.shape != (len(cluster_ids), 20, 9):
+        raise RuntimeError(f"Expected features [M,20,9], got {features.shape}")
+
+    if len(cluster_ids):
+        with torch.no_grad():
+            logits_tensor = model(torch.as_tensor(features, dtype=torch.float32))
+            probabilities_tensor = torch.softmax(logits_tensor, dim=1)
+            predictions_tensor = torch.argmax(logits_tensor, dim=1)
+        logits = logits_tensor.cpu().numpy()
+        probabilities = probabilities_tensor.cpu().numpy()
+        predictions = predictions_tensor.cpu().numpy().astype(np.int64)
+    else:
+        # Keep the required rank even when DBSCAN forms no non-noise clusters.
+        logits = np.empty((0, 2), dtype=np.float32)
+        probabilities = np.empty((0, 2), dtype=np.float32)
+        predictions = np.empty((0,), dtype=np.int64)
+    if logits.shape != (len(cluster_ids), 2):
+        raise RuntimeError(f"Expected logits [M,2], got {logits.shape}")
+    if probabilities.shape != (len(cluster_ids), 2):
+        raise RuntimeError(f"Expected probabilities [M,2], got {probabilities.shape}")
+
+    centers = np.empty((len(cluster_ids), 3), dtype=np.float64)
+    num_points = np.empty((len(cluster_ids),), dtype=np.int64)
+    per_frame_counts = np.empty((len(cluster_ids), 20), dtype=np.int64)
+    records = []
+    for cluster_index, cluster_id in enumerate(cluster_ids):
+        member_mask = labels == cluster_id
+        cluster_points = data[member_mask]
+        cluster_times = time_ind[member_mask]
+        centers[cluster_index] = cluster_points.mean(axis=0)
+        num_points[cluster_index] = cluster_points.shape[0]
+        per_frame_counts[cluster_index] = np.asarray([
+            np.count_nonzero(cluster_times == frame_index)
+            for frame_index in range(1, 21)
+        ])
+        records.append({
+            "cluster_id": int(cluster_id),
+            "num_points": int(num_points[cluster_index]),
+            "center_xyz": centers[cluster_index].tolist(),
+            "per_frame_point_count": per_frame_counts[cluster_index].tolist(),
+            "feature_20x9": features[cluster_index].tolist(),
+            "lstm_logits": logits[cluster_index].tolist(),
+            "lstm_probability": probabilities[cluster_index].tolist(),
+            "predicted_class": int(predictions[cluster_index]),
+            "gt_oracle_status": "PENDING_STATUS_CHECK",
+            "oracle_min_center_distance_m": None,
+            "oracle_min_point_distance_m": None,
+            "oracle_hit_1m": None,
+            "oracle_hit_2m": None,
+            "oracle_hit_5m": None,
+        })
+    p_uav = probabilities[:, 1] if len(cluster_ids) else np.empty((0,), dtype=np.float32)
+    boundary_index = int(np.argmin(np.abs(p_uav - 0.5))) if len(p_uav) else None
+    noise_points = int(np.count_nonzero(labels == -1))
+    return {
+        "block_timestamp": block_timestamp,
+        "frame_timestamps": frame_timestamps,
+        "dbscan_eps": eps,
+        "dbscan_min_samples": 10,
+        "features": features,
+        "logits": logits,
+        "probabilities": probabilities,
+        "predictions": predictions,
+        "cluster_ids": cluster_ids,
+        "centers": centers,
+        "num_points": num_points,
+        "per_frame_counts": per_frame_counts,
+        "records": records,
+        "summary": {
+            "dbscan_clusters": int(len(cluster_ids)),
+            "noise_points": noise_points,
+            "largest_cluster_points": 0 if not len(num_points) else int(num_points.max()),
+            "median_cluster_points": 0.0 if not len(num_points) else float(np.median(num_points)),
+            "max_P_uav": None if not len(p_uav) else float(p_uav.max()),
+            "mean_P_uav": None if not len(p_uav) else float(p_uav.mean()),
+            "positive_clusters": int(np.count_nonzero(predictions == 1)),
+            "closest_to_decision_boundary_cluster": None if boundary_index is None else {
+                "cluster_id": int(cluster_ids[boundary_index]),
+                "P_uav": float(p_uav[boundary_index]),
+            },
+        },
+    }
+
+
+def build_pre_lstm_cluster_diagnostics(
+    lidar_360_data: dict[str, np.ndarray],
+    checkpoint_path: Path,
+) -> dict[str, Any]:
+    """Replay the unchanged eps=2 Mid360 diagnostic path for observation only."""
+    block_timestamp, frame_timestamps, data_with_ind = _prepare_single_diagnostic_block(
+        lidar_360_data
+    )
+    model = load_original_checkpoint(checkpoint_path)
+    return _diagnose_accumulated_block(
+        block_timestamp, frame_timestamps, data_with_ind, model, eps=2
+    )
+
+
+def build_eps_comparison_diagnostics(
+    lidar_360_data: dict[str, np.ndarray], checkpoint_path: Path,
+) -> dict[str, dict[str, Any]]:
+    """Run eps=2 baseline replay and eps=1 diagnostic on one shared point cloud."""
+    block_timestamp, frame_timestamps, data_with_ind = _prepare_single_diagnostic_block(
+        lidar_360_data
+    )
+    model = load_original_checkpoint(checkpoint_path)
+    return {
+        "eps2": _diagnose_accumulated_block(
+            block_timestamp, frame_timestamps, data_with_ind, model, eps=2
+        ),
+        "eps1": _diagnose_accumulated_block(
+            block_timestamp, frame_timestamps, data_with_ind, model, eps=1
+        ),
+    }
+
+
+def save_pre_lstm_cluster_diagnostics(
+    diagnostic: dict[str, Any], output_dir: Path, calibration_path: Path,
+) -> dict[str, Any]:
+    output_dir.mkdir(parents=True, exist_ok=True)
+    oracle_status, oracle_detail = _gt_oracle_status(calibration_path)
+    for record in diagnostic["records"]:
+        record["gt_oracle_status"] = oracle_status
+    np.savez_compressed(
+        output_dir / "cluster_features.npz",
+        features=diagnostic["features"],
+        logits=diagnostic["logits"],
+        probabilities=diagnostic["probabilities"],
+        predictions=diagnostic["predictions"],
+        cluster_ids=diagnostic["cluster_ids"],
+        centers=diagnostic["centers"],
+        num_points=diagnostic["num_points"],
+        per_frame_counts=diagnostic["per_frame_counts"],
+    )
+    json_payload = {
+        "diagnostic_only": True,
+        "affects_baseline_output": False,
+        "block_timestamp": diagnostic["block_timestamp"],
+        "frame_timestamps": diagnostic["frame_timestamps"],
+        "dbscan": {
+            "eps": diagnostic["dbscan_eps"],
+            "min_samples": diagnostic["dbscan_min_samples"],
+        },
+        "shapes": {
+            "features": list(diagnostic["features"].shape),
+            "logits": list(diagnostic["logits"].shape),
+            "probabilities": list(diagnostic["probabilities"].shape),
+        },
+        "gt_oracle_status": oracle_status,
+        "gt_oracle_detail": oracle_detail,
+        "summary": diagnostic["summary"],
+        "clusters": diagnostic["records"],
+    }
+    write_json(json_payload, output_dir / "cluster_diagnostics.json")
+
+    print(f"DBSCAN clusters: {len(diagnostic['cluster_ids'])}")
+    print("cluster | points | center_xyz | P(bg) | P(uav) | pred")
+    for index, cluster_id in enumerate(diagnostic["cluster_ids"]):
+        center = ",".join(f"{value:.3f}" for value in diagnostic["centers"][index])
+        probability = diagnostic["probabilities"][index]
+        print(
+            f"{int(cluster_id)} | {int(diagnostic['num_points'][index])} | "
+            f"[{center}] | {probability[0]:.3f} | {probability[1]:.3f} | "
+            f"{int(diagnostic['predictions'][index])}"
+        )
+    summary = diagnostic["summary"]
+    print(f"max_P_uav={summary['max_P_uav']}")
+    print(f"mean_P_uav={summary['mean_P_uav']}")
+    print(f"positive_clusters={summary['positive_clusters']}")
+    print(
+        "closest_to_decision_boundary_cluster="
+        f"{summary['closest_to_decision_boundary_cluster']}"
+    )
+    print(f"gt_oracle_status={oracle_status}")
+    return json_payload
+
+
+def save_eps_comparison_diagnostics(
+    comparison: dict[str, dict[str, Any]], diagnostics_dir: Path,
+) -> dict[str, Any]:
+    """Save the eps=1 sidecar and compact eps=2/eps=1 comparison."""
+    diagnostics_dir.mkdir(parents=True, exist_ok=True)
+    eps1 = comparison["eps1"]
+    np.savez_compressed(
+        diagnostics_dir / "eps1_cluster_features.npz",
+        features=eps1["features"],
+        logits=eps1["logits"],
+        probabilities=eps1["probabilities"],
+        predictions=eps1["predictions"],
+        cluster_ids=eps1["cluster_ids"],
+        centers=eps1["centers"],
+        num_points=eps1["num_points"],
+        per_frame_counts=eps1["per_frame_counts"],
+    )
+    rows = []
+    for name in ("eps2", "eps1"):
+        diagnostic = comparison[name]
+        summary = diagnostic["summary"]
+        rows.append({
+            "eps": diagnostic["dbscan_eps"],
+            "min_samples": diagnostic["dbscan_min_samples"],
+            "num_clusters": summary["dbscan_clusters"],
+            "noise_points": summary["noise_points"],
+            "largest_cluster_points": summary["largest_cluster_points"],
+            "median_cluster_points": summary["median_cluster_points"],
+            "positive_clusters": summary["positive_clusters"],
+            "max_P_uav": summary["max_P_uav"],
+            "mean_P_uav": summary["mean_P_uav"],
+        })
+    payload = {
+        "diagnostic_only": True,
+        "affects_baseline_output": False,
+        "gt_used": False,
+        "shared_accumulated_point_cloud": True,
+        "baseline": "eps=2,min_samples=10",
+        "control": "eps=1,min_samples=10",
+        "comparison": rows,
+        "eps1_shapes": {
+            "features": list(eps1["features"].shape),
+            "logits": list(eps1["logits"].shape),
+            "probabilities": list(eps1["probabilities"].shape),
+        },
+    }
+    write_json(payload, diagnostics_dir / "eps_comparison.json")
+
+    print("eps | num_clusters | noise_points | largest_cluster_points | "
+          "median_cluster_points | positive_clusters | max_P_uav | mean_P_uav")
+    for row in rows:
+        print(
+            f"{row['eps']} | {row['num_clusters']} | {row['noise_points']} | "
+            f"{row['largest_cluster_points']} | {row['median_cluster_points']:.1f} | "
+            f"{row['positive_clusters']} | {row['max_P_uav']} | {row['mean_P_uav']}"
+        )
+    print("eps=1 clusters:")
+    print("cluster | points | center_xyz | P(bg) | P(uav) | pred")
+    for index, cluster_id in enumerate(eps1["cluster_ids"]):
+        center = ",".join(f"{value:.3f}" for value in eps1["centers"][index])
+        probability = eps1["probabilities"][index]
+        print(
+            f"{int(cluster_id)} | {int(eps1['num_points'][index])} | "
+            f"[{center}] | {probability[0]:.3f} | {probability[1]:.3f} | "
+            f"{int(eps1['predictions'][index])}"
+        )
+    return payload
+
+
 def checkpoint_audit(source_repo: Path, checkpoint: Path) -> dict[str, Any]:
     result: dict[str, Any] = {
         "source_repo": SOURCE_REPO, "source_commit": SOURCE_COMMIT,
@@ -557,6 +868,8 @@ def run_full(
     processing_units: list[ProcessingUnit], output_dir: Path,
     checkpoint_path: Path, source_audit: dict[str, Any], index_audit: dict[str, Any],
     schemas: dict[str, Any], unit_audit: dict[str, Any], seed: int,
+    diagnostic: bool = False,
+    lidar_calibration_path: Path = PROJECT_ROOT / "calibration/lidar360_frame_resolution.json",
 ) -> None:
     if not source_audit["checkpoint_exists"] or not source_audit["checkpoint_load_success"]:
         raise RuntimeError("MISSING_ORIGINAL_CHECKPOINT or checkpoint load failure; Mid360 run stopped")
@@ -565,6 +878,17 @@ def run_full(
         raise RuntimeError("scikit-learn is missing; full DBSCAN path cannot run")
     if output_dir.exists() and any(output_dir.iterdir()):
         raise FileExistsError(f"Refusing to overwrite non-empty output directory: {output_dir}")
+    if diagnostic:
+        if len(processing_units) != 1:
+            raise ValueError(
+                "--diagnostic supports exactly one processing unit; select it with --unit"
+            )
+        mid360_count = len(processing_units[0].sensor_frames["lidar_360"])
+        if mid360_count != 20:
+            raise ValueError(
+                "--diagnostic supports exactly 20 Mid360 frames; "
+                f"selected unit contains {mid360_count}"
+            )
     output_dir.mkdir(parents=True, exist_ok=True)
     # REPRODUCIBILITY CHANGE:
     # does not modify FPS algorithm
@@ -589,6 +913,35 @@ def run_full(
         mid_audit = process_lidar_360(
             lidar_raw, sequence_dir / "lidar_360_processed", checkpoint_path
         )
+        diagnostic_audit = None
+        if diagnostic:
+            # DIAGNOSTIC SIDECAR:
+            # Replay the exact pre-LSTM path only for observation. The replayed
+            # labels/predictions are never used by fusion or candidate generation.
+            diagnostic_comparison = build_eps_comparison_diagnostics(
+                lidar_raw, checkpoint_path
+            )
+            diagnostic_data = diagnostic_comparison["eps2"]
+            if diagnostic_data["summary"]["dbscan_clusters"] != mid_audit["dbscan_clusters"]:
+                raise RuntimeError(
+                    "Diagnostic replay cluster count differs from baseline processing: "
+                    f"{diagnostic_data['summary']['dbscan_clusters']} vs "
+                    f"{mid_audit['dbscan_clusters']}"
+                )
+            if diagnostic_data["summary"]["positive_clusters"] != mid_audit["lstm_positive_clusters"]:
+                raise RuntimeError(
+                    "Diagnostic replay prediction count differs from baseline processing: "
+                    f"{diagnostic_data['summary']['positive_clusters']} vs "
+                    f"{mid_audit['lstm_positive_clusters']}"
+                )
+            diagnostic_audit = save_pre_lstm_cluster_diagnostics(
+                diagnostic_data,
+                sequence_dir / "diagnostics/pre_lstm_clusters",
+                lidar_calibration_path,
+            )
+            diagnostic_audit["eps_comparison"] = save_eps_comparison_diagnostics(
+                diagnostic_comparison, sequence_dir / "diagnostics"
+            )
         avia_processed = read_lidar_files(sequence_dir / "livox_avia_processed")
         lidar_processed = read_lidar_files(sequence_dir / "lidar_360_processed")
         fusion_audit = process_fusion(
@@ -606,6 +959,7 @@ def run_full(
             "time_end": unit.time_end,
             "avia": avia_audit, "mid360": mid_audit,
             "fusion": fusion_audit, "candidate": candidate_audit,
+            "pre_lstm_diagnostic": diagnostic_audit,
         }
     write_json(audit, output_dir / "baseline_audit.json")
     write_summary(audit, output_dir / "baseline_summary.md")
@@ -624,6 +978,18 @@ def parse_args() -> argparse.Namespace:
         help="Run one exact generated unit, e.g. Mavic2/train_block00_chunk000.",
     )
     parser.add_argument("--seed", type=int, default=0)
+    parser.add_argument(
+        "--diagnostic", action="store_true",
+        help=(
+            "Save a read-only DBSCAN-to-LSTM diagnostic for one exact 20-frame unit. "
+            "This does not change baseline candidates."
+        ),
+    )
+    parser.add_argument(
+        "--lidar-calibration", type=Path,
+        default=PROJECT_ROOT / "calibration/lidar360_frame_resolution.json",
+        help="Credibility metadata used only to decide whether GT oracle audit is allowed.",
+    )
     parser.add_argument(
         "--max-frames-per-unit", type=int, default=200,
         help=(
@@ -645,6 +1011,8 @@ def parse_args() -> argparse.Namespace:
 
 def main() -> None:
     args = parse_args()
+    if args.diagnostic and args.mode != "run":
+        raise ValueError("--diagnostic must be used together with --mode run")
     checkpoint = args.checkpoint or (
         args.source_repo / "point_cloud_processing/tracker/lstm_model.pth"
     )
@@ -673,6 +1041,8 @@ def main() -> None:
     run_full(
         processing_units, args.output_dir, checkpoint, source_audit,
         index_audit, schemas, unit_audit, args.seed,
+        diagnostic=args.diagnostic,
+        lidar_calibration_path=args.lidar_calibration,
     )
 
 

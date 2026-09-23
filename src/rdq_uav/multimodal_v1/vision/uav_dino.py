@@ -16,8 +16,12 @@ def adapt_dino_class_head_to_single_uav(detector: nn.Module, *, prior_prob: floa
         raise TypeError('detector.class_embed must be a non-empty ModuleList')
     in_features=heads[0].in_features
     shared=all(head is heads[0] for head in heads)
+    reference=heads[0]
     def make_head():
-        h=nn.Linear(in_features,1)
+        h=nn.Linear(in_features,1).to(
+            device=reference.weight.device,
+            dtype=reference.weight.dtype,
+        )
         nn.init.trunc_normal_(h.weight,std=.02,a=-.04,b=.04)
         nn.init.constant_(h.bias,math.log(prior_prob/(1-prior_prob)))
         return h

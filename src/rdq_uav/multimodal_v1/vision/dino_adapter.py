@@ -43,7 +43,39 @@ class DINOAdapter(nn.Module):
                 "decoder_features_all_layers":decoder_states,"aux_outputs":self.detector._set_aux_loss(stacked_classes,stacked_boxes),
                 "enc_outputs":{"pred_logits":encoder_logits,"pred_boxes":encoder_reference},"pyramid":pyramid,"multi_level_features":tuple(multi_level_features)}
 
+    @staticmethod
+    def _image_masks(images: Any) -> torch.Tensor:
+        batch_size,_,height,width=images.tensor.shape
+        if batch_size != len(images.image_sizes):
+            raise ValueError("ImageList image_sizes length does not match tensor batch")
+        masks=images.tensor.new_ones(batch_size,height,width)
+        for index,(valid_h,valid_w) in enumerate(images.image_sizes):
+            masks[index,:int(valid_h),:int(valid_w)]=0
+        return masks
+
+    def forward_raw(
+        self,
+        batched_inputs:Sequence[Mapping[str,Any]],
+        pre_stage_transform:PreStageTransform|None=None,
+        *,
+        allow_training_candidate_path:bool=False,
+    )->dict[str,Any]:
+        """Return raw DINO queries for eval or SSOD classification-only training.
+
+        Native ``detector.forward`` remains the owner of supervised/high-quality
+        pseudo-label training because it includes DINO denoising and its official
+        criterion. This seam exists only for candidate extraction and the frozen
+        medium-quality classification-only SSOD branch.
+        """
+        images=self.detector.preprocess_image(list(batched_inputs))
+        image_masks=self._image_masks(images)
+        pyramid=self.swin(images.tensor,pre_stage_transform=pre_stage_transform)
+        output=self.forward_from_pyramid(
+            pyramid,image_masks,
+            allow_training_candidate_path=allow_training_candidate_path,
+        )
+        output["image_sizes"]=tuple(images.image_sizes)
+        return output
+
     def forward(self,batched_inputs:Sequence[Mapping[str,Any]],pre_stage_transform:PreStageTransform|None=None)->dict[str,Any]:
-        images=self.detector.preprocess_image(list(batched_inputs)); batch_size,_,height,width=images.tensor.shape
-        image_masks=images.tensor.new_zeros(batch_size,height,width); pyramid=self.swin(images.tensor,pre_stage_transform=pre_stage_transform)
-        output=self.forward_from_pyramid(pyramid,image_masks); output["image_sizes"]=tuple(images.image_sizes); return output
+        return self.forward_raw(batched_inputs,pre_stage_transform=pre_stage_transform)
