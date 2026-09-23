@@ -31,6 +31,20 @@ class TestP7(unittest.TestCase):
         self.assertEqual(tuple(out.shape),(h.n,128)); self.assertEqual(aux.memory_key_padding_mask.ndim,2)
         out.sum().backward(); self.assertTrue(torch.isfinite(r2.grad).all()); self.assertTrue(torch.isfinite(v2.grad).all())
 
+    def test_decoder_masks_spatial_image_padding_and_preserves_batch_isolation(self):
+        torch.manual_seed(7); dec=FusionTransformerDecoder(dropout=0.).eval()
+        query=torch.randn(2,128); qbatch=torch.tensor([0,1]); v2=torch.randn(2,384,2,3)
+        image_mask=torch.zeros(2,4,6,dtype=torch.bool); image_mask[1,:,3:]=True
+        both,aux=dec(query,qbatch,torch.empty(0,128),torch.empty(0,dtype=torch.long),v2,
+            sample_m_R=torch.tensor([0,0],dtype=torch.bool),sample_m_V=torch.tensor([1,1],dtype=torch.bool),
+            vision_padding_mask=image_mask,return_aux=True)
+        self.assertEqual(aux.memory_key_padding_mask[0].sum().item(),0)
+        self.assertEqual(aux.memory_key_padding_mask[1].sum().item(),2)
+        single,_=dec(query[:1],torch.tensor([0]),torch.empty(0,128),torch.empty(0,dtype=torch.long),v2[:1],
+            sample_m_R=torch.tensor([0],dtype=torch.bool),sample_m_V=torch.tensor([1],dtype=torch.bool),
+            vision_padding_mask=image_mask[:1])
+        self.assertTrue(torch.allclose(both[:1],single,atol=1e-6,rtol=1e-6))
+
 
     def test_missing_required_gt_is_not_negative(self):
         h=make_h(); gate=ReliabilityGate(); go=gate(h)
@@ -39,6 +53,21 @@ class TestP7(unittest.TestCase):
         pred_box=torch.zeros(h.n,4); pred_xyz=h.radar_xyz.clone(); c2=torch.zeros(h.n); c3=torch.zeros(h.n)
         losses=FusionLoss()(fused_score=go.fused_score,pred_box=pred_box,pred_xyz=pred_xyz,c2d_logit=c2,c3d_logit=c3,hypotheses=h,targets=targets,source_image_size_wh=torch.tensor([[1280.,960.],[1280.,960.]]))
         self.assertTrue(torch.isfinite(losses['loss']))
+
+    def test_rv_with_only_3d_gt_keeps_xyz_regression_without_joint_positive(self):
+        h=make_h(); gate=ReliabilityGate(); go=gate(h)
+        targets=FusionTargets(torch.zeros(2,4),torch.tensor([0,0],dtype=torch.bool),
+            torch.tensor([[1.,2.,3.],[4.,5.,6.]]),torch.tensor([1,0],dtype=torch.bool))
+        heads=FusionPredictionHeads(); decoded=torch.randn(h.n,128,requires_grad=True)
+        pred=heads(decoded,h,torch.zeros(h.n,2),torch.tensor([[1280.,960.],[1280.,960.]]))
+        losses=FusionLoss()(fused_score=go.fused_score,pred_box=pred.box_xyxy_px,pred_xyz=pred.xyz,
+            c2d_logit=pred.c2d_logit,c3d_logit=pred.c3d_logit,hypotheses=h,targets=targets,
+            source_image_size_wh=torch.tensor([[1280.,960.],[1280.,960.]]))
+        self.assertGreater(float(losses['loss_3d']),0.)
+        self.assertEqual(int(losses['num_positive']),0)
+        self.assertEqual(int(losses['num_reg3d']),1)
+        losses['loss_3d'].backward()
+        self.assertGreater(float(heads.xyz_head[-1].weight.grad.abs().sum()),0.)
 
     def test_validity_mask_not_presence(self):
         h=make_h(); gate=ReliabilityGate(); q=TypedSharedQuery()(h); go=gate(h)

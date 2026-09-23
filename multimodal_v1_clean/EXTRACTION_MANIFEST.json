@@ -3,12 +3,19 @@
   "source_repository": "/home/jasoncui/projects/rdq-uav-experiment",
   "source_head": "59d2b25f6106f3154b1cf139cf873def567cf035",
   "note": "Snapshot includes current working-tree Multimodal V1 files; large runtime assets are symlinked.",
-  "regular_file_count": 71,
-  "regular_file_bytes": 420430,
+  "regular_file_count": 94,
+  "regular_file_bytes": 425012142,
   "external_links": {
     "checkpoints/dino_swin_t": "../../checkpoints/dino_swin_t",
     "checkpoints/lidar_v2/best_spatial.pt": "../../../outputs/own_multimodal_research/lidar_uav_v2/spatial_only_full_query_seed42/best_spatial.pt",
     "data/mmaud_official_train": "/home/jasoncui/datasets/MMAUD/official/train",
     "third_party/detrex": "../../third_party/detrex"
-  }
+  },
+  "correctness_hardening": [
+    "modality_candidate_filtering",
+    "image_padding_masks",
+    "partial_rv_regression",
+    "no_output_validation_denominator",
+    "optimizer_parameter_identity"
+  ]
 }

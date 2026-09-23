@@ -64,6 +64,36 @@ class CandidateSet:
     def n(self) -> int:
         return int(self.score.shape[0])
 
+    def index_select(self, indices: torch.Tensor) -> 'CandidateSet':
+        """Select candidates without changing their source or tensor contract."""
+        indices = torch.as_tensor(indices, device=self.score.device)
+        if indices.dtype == torch.bool:
+            if indices.shape != (self.n,):
+                raise ValueError(f'boolean candidate mask must be [{self.n}]')
+            indices = torch.nonzero(indices, as_tuple=False).flatten()
+        elif indices.dtype != torch.long or indices.ndim != 1:
+            raise TypeError('candidate indices must be bool [N] or long [K]')
+        return CandidateSet(
+            score=self.score.index_select(0, indices),
+            feature=self.feature.index_select(0, indices),
+            xyz=self.xyz.index_select(0, indices),
+            xyz_valid=self.xyz_valid.index_select(0, indices),
+            box_xyxy_px=self.box_xyxy_px.index_select(0, indices),
+            box_valid=self.box_valid.index_select(0, indices),
+            batch_index=self.batch_index.index_select(0, indices),
+            source=self.source,
+            source_index=self.source_index.index_select(0, indices),
+        )
+
+    def filter_by_sample_mask(self, sample_mask: torch.Tensor) -> 'CandidateSet':
+        """Drop candidates whose source modality is absent for their sample."""
+        sample_mask = torch.as_tensor(sample_mask, device=self.score.device)
+        if sample_mask.dtype != torch.bool or sample_mask.ndim != 1:
+            raise TypeError('sample modality mask must be bool [B]')
+        if self.n and int(self.batch_index.max()) >= len(sample_mask):
+            raise ValueError('candidate batch_index exceeds sample modality mask')
+        return self.index_select(sample_mask[self.batch_index])
+
     @classmethod
     def empty(cls, *, source: Source, device: torch.device | str, dtype: torch.dtype = torch.float32) -> 'CandidateSet':
         return cls(

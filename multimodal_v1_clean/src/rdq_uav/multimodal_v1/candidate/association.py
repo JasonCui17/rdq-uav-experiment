@@ -82,7 +82,7 @@ def associate_candidates(
             cost=1.-cosine
             cost=torch.where(feasible,cost,torch.full_like(cost,1e6))
             from scipy.optimize import linear_sum_assignment
-            rr,cc=linear_sum_assignment(cost.detach().cpu().numpy())
+            rr,cc=linear_sum_assignment(cost.detach().float().cpu().numpy())
             for lr,lv in zip(rr.tolist(),cc.tolist()):
                 if bool(feasible[lr,lv]):
                     ri=int(rids[lr]); vi=int(vids[lv]); matched_r.add(ri); matched_v.add(vi)

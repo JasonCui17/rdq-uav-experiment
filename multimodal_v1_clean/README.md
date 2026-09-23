@@ -24,6 +24,12 @@ verified 2D box are removed from DINO's supervised criterion; they are not
 treated as background negatives. LiDAR supervision and eligible fusion
 supervision remain active.
 
+The current training contract also enforces five boundary conditions: absent
+modalities cannot emit candidates, image padding is masked in DINO and fusion
+memory, RV hypotheses retain independently valid 2D/3D regression targets,
+validation counts no-output samples as failures, and optimizer resume verifies
+the ordered parameter names saved in each checkpoint.
+
 ## Kept structure
 
 - `src/rdq_uav/multimodal_v1/`: P1–P8 multimodal implementation.

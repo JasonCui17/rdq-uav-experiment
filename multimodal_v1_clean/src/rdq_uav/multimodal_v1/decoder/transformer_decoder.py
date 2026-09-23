@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 import torch
+import torch.nn.functional as F
 from torch import nn
 
 
@@ -25,7 +26,8 @@ class FusionTransformerDecoder(nn.Module):
     def forward(self, query: torch.Tensor, query_batch_index: torch.Tensor,
                 radar_r2: torch.Tensor, radar_batch_index: torch.Tensor,
                 vision_v2: torch.Tensor, *, sample_m_R: torch.Tensor|None=None,
-                sample_m_V: torch.Tensor|None=None, return_aux: bool=False):
+                sample_m_V: torch.Tensor|None=None, vision_padding_mask: torch.Tensor|None=None,
+                return_aux: bool=False):
         if query.ndim!=2 or query.shape[1]!=128: raise ValueError('query must be [N,128]')
         if query_batch_index.shape!=(len(query),): raise ValueError('query_batch_index must be [N]')
         if radar_r2.ndim!=2 or radar_r2.shape[1]!=128: raise ValueError('radar_r2 must be [Nr,128]')
@@ -38,6 +40,14 @@ class FusionTransformerDecoder(nn.Module):
         if sample_m_R is None: sample_m_R=torch.ones(B,device=query.device,dtype=torch.bool)
         if sample_m_V is None: sample_m_V=torch.ones(B,device=query.device,dtype=torch.bool)
         if sample_m_R.shape!=(B,) or sample_m_V.shape!=(B,): raise ValueError('sample modality masks must be [B]')
+        if vision_padding_mask is None:
+            vision_mask_flat=torch.zeros((B,vision_v2.shape[-2]*vision_v2.shape[-1]),device=query.device,dtype=torch.bool)
+        else:
+            if vision_padding_mask.dtype!=torch.bool or vision_padding_mask.ndim!=3 or vision_padding_mask.shape[0]!=B:
+                raise ValueError('vision_padding_mask must be bool [B,H,W]')
+            vision_mask_flat=F.interpolate(
+                vision_padding_mask[:,None].float(),size=vision_v2.shape[-2:],mode='nearest'
+            )[:,0].to(torch.bool).flatten(1)
         active=torch.unique(query_batch_index,sorted=True)
         qgroups=[torch.nonzero(query_batch_index==b).flatten() for b in active]
         qmax=max(len(x) for x in qgroups)
@@ -45,18 +55,20 @@ class FusionTransformerDecoder(nn.Module):
         for i,ids in enumerate(qgroups): tgt[i,:len(ids)]=query[ids]; tmask[i,:len(ids)]=False
         vf=self.vision_proj(vision_v2.permute(0,2,3,1).reshape(B,-1,vision_v2.shape[1]))
         rg=self.radar_proj(radar_r2)
-        memories=[]
+        memories=[]; memory_masks=[]
         for b in active.tolist():
-            parts=[]
+            parts=[]; masks=[]
             if bool(sample_m_R[b]):
                 rid=torch.nonzero(radar_batch_index==b).flatten()
-                if len(rid): parts.append(rg[rid])
-            if bool(sample_m_V[b]): parts.append(vf[b])
+                if len(rid):
+                    parts.append(rg[rid]); masks.append(torch.zeros(len(rid),device=query.device,dtype=torch.bool))
+            if bool(sample_m_V[b]):
+                parts.append(vf[b]); masks.append(vision_mask_flat[b])
             if not parts: raise RuntimeError('active hypothesis sample has no decoder memory')
-            memories.append(torch.cat(parts,0))
+            memories.append(torch.cat(parts,0)); memory_masks.append(torch.cat(masks,0))
         mmax=max(len(x) for x in memories)
         memory=query.new_zeros((len(active),mmax,128)); mmask=torch.ones((len(active),mmax),device=query.device,dtype=torch.bool)
-        for i,m in enumerate(memories): memory[i,:len(m)]=m; mmask[i,:len(m)]=False
+        for i,m in enumerate(memories): memory[i,:len(m)]=m; mmask[i,:len(m)]=memory_masks[i]
         decoded=self.decoder(tgt,memory,tgt_key_padding_mask=tmask,memory_key_padding_mask=mmask)
         out=torch.empty_like(query)
         for i,ids in enumerate(qgroups): out[ids]=decoded[i,:len(ids)]
