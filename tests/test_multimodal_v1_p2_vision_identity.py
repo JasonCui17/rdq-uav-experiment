@@ -3,11 +3,12 @@
 from __future__ import annotations
 
 import unittest
+from types import SimpleNamespace
 
 import torch
 from torch import nn
 
-from rdq_uav.multimodal_v1 import COMPONENTS, SwinPyramidAdapter
+from rdq_uav.multimodal_v1 import COMPONENTS, DINOAdapter, SwinPyramidAdapter
 
 
 class PatchEmbed(nn.Module):
@@ -118,6 +119,14 @@ class SwinPyramidAdapterTests(unittest.TestCase):
     def test_registry_builds_shared_adapter(self) -> None:
         built = COMPONENTS.build("swin_pyramid", backbone=self.backbone)
         self.assertIs(built.backbone, self.backbone)
+
+    def test_image_list_padding_mask_uses_each_valid_image_size(self) -> None:
+        images=SimpleNamespace(tensor=torch.zeros(2,3,8,12),image_sizes=[(8,12),(4,6)])
+        mask=DINOAdapter._image_masks(images).to(torch.bool)
+        self.assertFalse(bool(mask[0].any()))
+        self.assertFalse(bool(mask[1,:4,:6].any()))
+        self.assertTrue(bool(mask[1,4:,:].all()))
+        self.assertTrue(bool(mask[1,:,:][...,6:].all()))
 
 
 if __name__ == "__main__":

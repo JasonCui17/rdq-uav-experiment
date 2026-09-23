@@ -4,8 +4,8 @@ experiment:
   seed: 42
   output_dir: outputs/own_multimodal_research/lidar_uav_v2
 data:
-  root: /home/jasoncui/datasets/MMAUD/official/train
-  split_file: outputs/mmuav_paper_reproduction/splits/splits.json
+  root: data/mmaud_official_train
+  split_file: splits/mmaud_splits.json
   train_split: train_sub
   val_split: validation_sub
   test_split: heldout_test_sub

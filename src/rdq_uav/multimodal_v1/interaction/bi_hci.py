@@ -255,7 +255,7 @@ class GeometryBiHCI(nn.Module):
         )
         radar_update = radar_gate_active * radar_delta_active
         radar_delta_full = torch.zeros_like(radar_features).index_add(
-            0, radar_ids, radar_update
+            0, radar_ids, radar_update.to(radar_features.dtype)
         )
         radar_out = radar_features + radar_delta_full
 
@@ -278,7 +278,7 @@ class GeometryBiHCI(nn.Module):
         )
         vision_update = vision_gate_active * vision_delta_native
         vision_delta_full = torch.zeros_like(vision_native_flat).index_add(
-            0, vision_ids, vision_update
+            0, vision_ids, vision_update.to(vision_native_flat.dtype)
         )
         vision_out = (vision_native_flat + vision_delta_full).view_as(vision_tokens)
 
@@ -291,11 +291,11 @@ class GeometryBiHCI(nn.Module):
                 edges.vision_index, minlength=batch_size * vision_count
             ).view(batch_size, vision_count)
             gate_r_full = radar_features.new_zeros(len(radar_features)).index_add(
-                0, radar_ids, radar_gate_active.squeeze(-1)
+                0, radar_ids, radar_gate_active.squeeze(-1).to(radar_features.dtype)
             )
             gate_v_flat = vision_tokens.new_zeros(
                 batch_size * vision_count
-            ).index_add(0, vision_ids, vision_gate_active.squeeze(-1))
+            ).index_add(0, vision_ids, vision_gate_active.squeeze(-1).to(vision_tokens.dtype))
             aux = {
                 "valid_projection_mask": edges.valid_projection_mask,
                 "active_radar_mask": edges.active_radar_mask,

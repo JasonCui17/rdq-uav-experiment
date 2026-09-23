@@ -54,4 +54,28 @@ class TestP6(unittest.TestCase):
         for i in rv.tolist():
             self.assertEqual(int(h.batch_index[i]),0)  # only sample0 can match here
 
+    def test_missing_modalities_are_filtered_before_association(self):
+        base_r=radar(batch=(0,1,2))
+        vf=torch.zeros(3,128);vf[0,0]=1;vf[1,1]=1;vf[2,:2]=1
+        base_v=CandidateSet(torch.tensor([.6,.5,.4]),vf,torch.zeros(3,3),torch.zeros(3,dtype=torch.bool),
+            torch.tensor([[9.,9.,11.,11.],[39.,39.,41.,41.],[19.,19.,21.,21.]]),torch.ones(3,dtype=torch.bool),
+            torch.tensor([0,1,2]),'rgb',torch.tensor([20,21,22]))
+        projected=torch.tensor([[10.,10.],[40.,40.],[20.,20.]])
+        cases=(
+            (torch.tensor([1,1,0],dtype=torch.bool),torch.tensor([1,0,1],dtype=torch.bool),{0:HYP_RV,1:HYP_R,2:HYP_V}),
+            (torch.tensor([1,1,1],dtype=torch.bool),torch.tensor([0,0,0],dtype=torch.bool),{0:HYP_R,1:HYP_R,2:HYP_R}),
+            (torch.tensor([0,0,0],dtype=torch.bool),torch.tensor([1,1,1],dtype=torch.bool),{0:HYP_V,1:HYP_V,2:HYP_V}),
+            (torch.tensor([0,0,0],dtype=torch.bool),torch.tensor([0,0,0],dtype=torch.bool),{}),
+        )
+        for radar_present,vision_present,expected in cases:
+            r=base_r.filter_by_sample_mask(radar_present)
+            v=base_v.filter_by_sample_mask(vision_present)
+            projected_kept=projected[radar_present[base_r.batch_index]]
+            h=associate_candidates(r,v,projected_radar_xy=projected_kept)
+            actual={int(b):int(t) for b,t in zip(h.batch_index.tolist(),h.hypothesis_type.tolist())}
+            self.assertEqual(actual,expected)
+            if h.n:
+                self.assertTrue(bool(radar_present[h.batch_index[h.m_R]].all()))
+                self.assertTrue(bool(vision_present[h.batch_index[h.m_V]].all()))
+
 if __name__=='__main__': unittest.main()

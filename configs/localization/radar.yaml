@@ -1,7 +1,0 @@
-extends: base.yaml
-
-experiment:
-  name: stage4_radar
-
-model:
-  variant: radar

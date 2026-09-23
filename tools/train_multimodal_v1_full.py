@@ -141,6 +141,19 @@ def collate_e5(samples):
     return batch
 
 
+def collate_e5_train(samples):
+    """Remove samples with neither sensor before any model computation."""
+    from rdq_uav.multimodal_v1.training import usable_multimodal_training_samples
+
+    usable, missing = usable_multimodal_training_samples(samples)
+    if not usable:
+        return {"skip_training_batch": True, "both_modalities_missing": missing}
+    batch = collate_e5(usable)
+    batch["skip_training_batch"] = False
+    batch["both_modalities_missing"] = missing
+    return batch
+
+
 class GateSampler(Sampler[int]):
     """Put verified-box samples first for the two-update correctness gate."""
 
@@ -280,6 +293,7 @@ def prepare_batch(batch: dict[str, Any], runtime: Runtime, device: torch.device)
         transforms.append(transform)
         scales.append(transform.scale_xy)
     preprocessed = runtime.dino_detector.preprocess_image(images)
+    image_padding_mask = runtime.model.dino._image_masks(preprocessed).to(torch.bool)
     projection = load_left_projection_context(
         runtime.camera_config, runtime.geometry_calibration,
         image_scale_xy=torch.tensor(scales, dtype=torch.float32), device=device,
@@ -291,10 +305,12 @@ def prepare_batch(batch: dict[str, Any], runtime: Runtime, device: torch.device)
         tensors["gt_box_xyxy_px"], tensors["gt_2d_valid"],
         tensors["target_xyz"], tensors["target_valid"],
     )
-    return tensors, preprocessed.tensor, context, targets, transforms
+    return tensors, preprocessed.tensor, image_padding_mask, context, targets, transforms
 
 
 def optimizer_groups(runtime: Runtime, cfg: dict[str, Any]):
+    from rdq_uav.multimodal_v1.training import ordered_optimizer_groups
+
     rates = cfg["training"]["learning_rates"]
     radar_ids = {id(p) for p in runtime.lidar_detector.parameters()}
     swin_ids = {id(p) for p in runtime.dino_detector.backbone.parameters()}
@@ -306,18 +322,7 @@ def optimizer_groups(runtime: Runtime, cfg: dict[str, Any]):
         ("dino_head", dino_ids, float(rates["dino_head"])),
         ("swin_last_two", swin_ids, float(rates["swin_last_two"])),
     )
-    by_id = {id(parameter): parameter for parameter in runtime.model.parameters()}
-    groups, assigned = [], set()
-    for name, identifiers, lr in definitions:
-        parameters = [by_id[item] for item in identifiers if item in by_id and item not in assigned]
-        assigned.update(id(parameter) for parameter in parameters)
-        if parameters:
-            groups.append({"params": parameters, "lr": lr, "base_lr": lr, "name": name})
-    missing = set(by_id) - assigned
-    if missing:
-        names = [name for name, parameter in runtime.model.named_parameters() if id(parameter) in missing]
-        raise RuntimeError(f"optimizer grouping missed parameters: {names[:20]}")
-    return groups
+    return ordered_optimizer_groups(runtime.model, definitions)
 
 
 def activate_stage(runtime: Runtime, optimizer, cfg: dict[str, Any], epoch: int) -> str:
@@ -355,8 +360,11 @@ def schedule_lr(optimizer, step: int, total: int, cfg: dict[str, Any]) -> float:
 def forward_losses(runtime: Runtime, batch, device, cfg, *, return_aux: bool = True):
     from rdq_uav.multimodal_v1.training import combine_e5_losses, supervised_dino_loss
 
-    lidar, images, context, targets, transforms = prepare_batch(batch, runtime, device)
-    output = runtime.model(lidar, images, context, targets=targets, return_aux=return_aux)
+    lidar, images, image_padding_mask, context, targets, transforms = prepare_batch(batch, runtime, device)
+    output = runtime.model(
+        lidar, images, context, image_padding_mask=image_padding_mask,
+        targets=targets, return_aux=return_aux,
+    )
     if output.aux is None or output.losses is None:
         raise RuntimeError("training forward requires fusion losses and auxiliary backbone outputs")
     radar = runtime.radar_criterion(output.aux["p5"].radar, lidar)
@@ -381,10 +389,13 @@ def percentile(values: list[float], q: float) -> float:
 
 @torch.no_grad()
 def validate(runtime: Runtime, loader, device, cfg, max_samples: int | None = None) -> dict[str, Any]:
+    from rdq_uav.multimodal_v1.training import summarize_validation_outcomes
+
     runtime.model.eval()
     sums = {"loss": 0.0, "loss_R": 0.0, "loss_V": 0.0, "loss_F": 0.0}
-    xyz_errors, box_ious = [], []
-    batches = samples = vision_labels = 0
+    xyz_outcomes: list[float | None] = []
+    box_iou_outcomes: list[float | None] = []
+    batches = samples = vision_labels = both_missing = 0
     for batch in loader:
         if max_samples is not None and samples >= max_samples:
             break
@@ -396,33 +407,30 @@ def validate(runtime: Runtime, loader, device, cfg, max_samples: int | None = No
         batches += 1
         samples += len(batch["sample_id"])
         vision_labels += labeled
+        both_missing += int(output.aux["num_both_modalities_missing"])
         for index in range(len(batch["sample_id"])):
             mask = output.batch_index == index
-            if not bool(mask.any()):
-                continue
-            local = torch.nonzero(mask, as_tuple=False).flatten()
-            top = local[torch.argmax(output.fused_score[local].float())]
+            has_output = bool(mask.any())
+            top = None
+            if has_output:
+                local = torch.nonzero(mask, as_tuple=False).flatten()
+                top = local[torch.argmax(output.fused_score[local].float())]
             if bool(targets.gt_3d_valid[index]):
-                xyz_errors.append(float(torch.linalg.vector_norm(output.xyz[top].float() - targets.gt_xyz[index].float())))
+                xyz_outcomes.append(None if top is None else float(torch.linalg.vector_norm(output.xyz[top].float() - targets.gt_xyz[index].float())))
             if bool(targets.gt_2d_valid[index]):
-                a, b = output.box_xyxy_px[top].float(), targets.gt_box_xyxy_px[index].float()
-                lt, rb = torch.maximum(a[:2], b[:2]), torch.minimum(a[2:], b[2:])
-                inter = torch.prod((rb - lt).clamp_min(0))
-                union = torch.prod((a[2:] - a[:2]).clamp_min(0)) + torch.prod((b[2:] - b[:2]).clamp_min(0)) - inter
-                box_ious.append(float(inter / union) if float(union) > 0 else 0.0)
+                if top is None:
+                    box_iou_outcomes.append(None)
+                else:
+                    a, b = output.box_xyxy_px[top].float(), targets.gt_box_xyxy_px[index].float()
+                    lt, rb = torch.maximum(a[:2], b[:2]), torch.minimum(a[2:], b[2:])
+                    inter = torch.prod((rb - lt).clamp_min(0))
+                    union = torch.prod((a[2:] - a[:2]).clamp_min(0)) + torch.prod((b[2:] - b[:2]).clamp_min(0)) - inter
+                    box_iou_outcomes.append(float(inter / union) if float(union) > 0 else 0.0)
     denominator = max(1, batches)
     result = {key: value / denominator for key, value in sums.items()}
-    result.update(
-        samples=samples, batches=batches, vision_supervised=vision_labels,
-        final_3d_count=len(xyz_errors),
-        final_3d_success_05m=float(np.mean(np.asarray(xyz_errors) <= 0.5)) if xyz_errors else float("nan"),
-        final_3d_success_1m=float(np.mean(np.asarray(xyz_errors) <= 1.0)) if xyz_errors else float("nan"),
-        final_3d_success_2m=float(np.mean(np.asarray(xyz_errors) <= 2.0)) if xyz_errors else float("nan"),
-        final_3d_mean_error=float(np.mean(xyz_errors)) if xyz_errors else float("nan"),
-        final_3d_median_error=percentile(xyz_errors, 50),
-        final_3d_p90_error=percentile(xyz_errors, 90),
-        vision_top1_iou_mean=float(np.mean(box_ious)) if box_ious else float("nan"),
-    )
+    result.update(summarize_validation_outcomes(xyz_outcomes, box_iou_outcomes))
+    result.update(samples=samples, batches=batches, vision_supervised=vision_labels,
+                  both_modalities_missing=both_missing,final_3d_count=len(xyz_outcomes))
     return result
 
 
@@ -451,11 +459,35 @@ def restore_rng(state: dict[str, Any]) -> None:
 
 
 def checkpoint(runtime, optimizer, cfg, epoch, step, best_metrics):
+    from rdq_uav.multimodal_v1.training import optimizer_parameter_names
+
     return {
         "model_state": runtime.model.state_dict(), "optimizer_state": optimizer.state_dict(),
+        "optimizer_param_names": optimizer_parameter_names(optimizer),
         "epoch": epoch, "global_optimizer_step": step, "best_metrics": best_metrics,
         "effective_config": cfg, "initialization": runtime.initialization, "rng_state": rng_state(),
     }
+
+
+def apply_optimizer_update(runtime, optimizer, cfg, pending: int, accumulate: int,
+                           global_step: int, total_updates: int) -> tuple[int, float]:
+    if pending <= 0:
+        raise ValueError("optimizer update requires at least one accumulated micro-batch")
+    if pending != accumulate:
+        correction = accumulate / pending
+        for parameter in runtime.model.parameters():
+            if parameter.grad is not None:
+                parameter.grad.mul_(correction)
+    grad_norm = torch.nn.utils.clip_grad_norm_(
+        [parameter for parameter in runtime.model.parameters() if parameter.requires_grad],
+        float(cfg["training"]["grad_clip_norm"]),
+    )
+    if not bool(torch.isfinite(torch.as_tensor(grad_norm))):
+        raise FloatingPointError("non-finite gradient before optimizer update")
+    global_step += 1
+    factor = schedule_lr(optimizer, global_step, total_updates, cfg)
+    optimizer.step(); optimizer.zero_grad(set_to_none=True)
+    return global_step, factor
 
 
 def main() -> None:
@@ -510,7 +542,7 @@ def main() -> None:
     sampler = GateSampler(train_dataset, seed) if args.max_updates is not None else None
     train_loader = DataLoader(
         train_dataset, batch_size=int(training_cfg["batch_size"]), sampler=sampler,
-        shuffle=sampler is None, num_workers=int(data_cfg["num_workers"]), collate_fn=collate_e5,
+        shuffle=sampler is None, num_workers=int(data_cfg["num_workers"]), collate_fn=collate_e5_train,
         pin_memory=device.type == "cuda", persistent_workers=int(data_cfg["num_workers"]) > 0,
     )
     val_loader = DataLoader(
@@ -526,8 +558,11 @@ def main() -> None:
     total_updates = epochs * updates_per_epoch
     start_epoch, global_step, best_metrics = 1, 0, None
     if resume_path is not None:
+        from rdq_uav.multimodal_v1.training import validate_optimizer_parameter_names
+
         payload = torch.load(resume_path, map_location="cpu")
         runtime.model.load_state_dict(payload["model_state"], strict=True)
+        validate_optimizer_parameter_names(optimizer, payload.get("optimizer_param_names"))
         optimizer.load_state_dict(payload["optimizer_state"])
         start_epoch = int(payload["epoch"]) + 1
         global_step = int(payload["global_optimizer_step"])
@@ -546,22 +581,25 @@ def main() -> None:
     print(f"initialization={runtime.initialization}")
 
     csv_path = output / "training_log.csv"
-    csv_fields = ["epoch", "stage", "optimizer_step", "loss", "loss_R", "loss_V", "loss_F", "loss_cls_R", "loss_reg_R", "vision_supervised", "lr_factor", "seconds"]
+    csv_fields = ["epoch", "stage", "optimizer_step", "loss", "loss_R", "loss_V", "loss_F", "loss_cls_R", "loss_reg_R", "vision_supervised", "both_modalities_missing", "lr_factor", "seconds"]
     if not csv_path.exists():
         with csv_path.open("w", newline="") as handle:
             csv.DictWriter(handle, fieldnames=csv_fields).writeheader()
     log_every = int(cfg["logging"]["log_every_updates"])
     amp_enabled = bool(training_cfg["amp"]) and device.type == "cuda"
     amp_dtype = torch.bfloat16 if training_cfg["amp_dtype"] == "bfloat16" else torch.float16
-    stop = False
+    stop = False; factor = 0.0
     for epoch in range(start_epoch, epochs + 1):
         epoch_start = time.time()
         runtime.model.train()
         stage = activate_stage(runtime, optimizer, cfg, epoch)
         optimizer.zero_grad(set_to_none=True)
         sums = {key: 0.0 for key in ("loss", "loss_R", "loss_V", "loss_F", "loss_cls_R", "loss_reg_R")}
-        batches = vision_count = pending = 0
+        batches = vision_count = both_missing = pending = 0
         for batch_index, batch in enumerate(train_loader, 1):
+            both_missing += int(batch.pop("both_modalities_missing", 0))
+            if bool(batch.pop("skip_training_batch", False)):
+                continue
             with torch.autocast(device_type=device.type, dtype=amp_dtype, enabled=amp_enabled):
                 total, radar, vision, _, labeled, model_output, _ = forward_losses(runtime, batch, device, cfg)
                 scaled = total / accumulate
@@ -575,31 +613,23 @@ def main() -> None:
             }
             for key, value in values.items():
                 sums[key] += float(value.detach().float())
-            boundary = pending == accumulate or batch_index == len(train_loader)
+            boundary = pending == accumulate
             if boundary:
-                if pending != accumulate:
-                    correction = accumulate / pending
-                    for parameter in runtime.model.parameters():
-                        if parameter.grad is not None:
-                            parameter.grad.mul_(correction)
-                grad_norm = torch.nn.utils.clip_grad_norm_(
-                    [parameter for parameter in runtime.model.parameters() if parameter.requires_grad],
-                    float(training_cfg["grad_clip_norm"]),
-                )
-                if not bool(torch.isfinite(torch.as_tensor(grad_norm))):
-                    raise FloatingPointError(f"non-finite gradient at epoch={epoch} batch={batch_index}")
-                global_step += 1
-                factor = schedule_lr(optimizer, global_step, total_updates, cfg)
-                optimizer.step(); optimizer.zero_grad(set_to_none=True); pending = 0
+                global_step,factor=apply_optimizer_update(runtime,optimizer,cfg,pending,accumulate,global_step,total_updates);pending=0
                 if global_step % log_every == 0 or args.max_updates is not None:
                     print(f"epoch={epoch} stage={stage} update={global_step} loss={float(total):.5f} R={float(radar['loss']):.5f} V={float(vision):.5f} F={float(model_output.losses['loss']):.5f}")
                 if args.max_updates is not None and global_step >= args.max_updates:
                     stop = True
                     break
+        if pending and not stop:
+            global_step,factor=apply_optimizer_update(runtime,optimizer,cfg,pending,accumulate,global_step,total_updates);pending=0
+            if args.max_updates is not None and global_step >= args.max_updates:
+                stop=True
         row = {
             "epoch": epoch, "stage": stage, "optimizer_step": global_step,
             **{key: value / max(1, batches) for key, value in sums.items()},
             "vision_supervised": vision_count, "lr_factor": factor if global_step else 0.0,
+            "both_modalities_missing": both_missing,
             "seconds": time.time() - epoch_start,
         }
         with csv_path.open("a", newline="") as handle:

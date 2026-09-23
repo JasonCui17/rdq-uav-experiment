@@ -102,17 +102,21 @@ class FullMultimodalV1(nn.Module):
         self.decoder=FusionTransformerDecoder(); self.heads=FusionPredictionHeads(xyz_mean=xyz_mean,xyz_std=xyz_std)
         self.fusion_loss=fusion_loss or FusionLoss()
 
-    def forward(self,lidar_batch:Mapping[str,Any],images:torch.Tensor,context:InteractionContext,*,targets:FusionTargets|None=None,return_aux:bool=False)->FusionOutput:
+    def forward(self,lidar_batch:Mapping[str,Any],images:torch.Tensor,context:InteractionContext,*,
+                image_padding_mask:torch.Tensor|None=None,targets:FusionTargets|None=None,return_aux:bool=False)->FusionOutput:
         p5=self.backbone(lidar_batch,images,context,return_aux=return_aux)
-        image_masks=images.new_zeros(images.shape[0],images.shape[-2],images.shape[-1])
-        dino_output=self.dino.forward_from_pyramid(p5.vision,image_masks,allow_training_candidate_path=True)
-        rset=self.radar_candidates(p5.radar)
-        vset=self.rgb_candidates(dino_output,context.projection.image_size_wh)
+        if image_padding_mask is None:
+            image_padding_mask=torch.zeros(images.shape[0],images.shape[-2],images.shape[-1],device=images.device,dtype=torch.bool)
+        if image_padding_mask.dtype!=torch.bool or image_padding_mask.shape!=(images.shape[0],images.shape[-2],images.shape[-1]):
+            raise ValueError('image_padding_mask must be bool [B,H,W] matching images')
+        dino_output=self.dino.forward_from_pyramid(p5.vision,image_padding_mask,allow_training_candidate_path=True)
+        rset=self.radar_candidates(p5.radar).filter_by_sample_mask(context.m_R)
+        vset=self.rgb_candidates(dino_output,context.projection.image_size_wh).filter_by_sample_mask(context.m_V)
         hypotheses=associate_candidates(rset,vset,geometry_gate_px=self.geometry_gate_px,projection=context.projection)
         gate=self.reliability_gate(hypotheses); query=self.shared_query(hypotheses)
         level2=p5.radar["layouts"].levels[2]
         decoded,decoder_aux=self.decoder(query,hypotheses.batch_index,p5.radar_stages[2],level2.batch_index,p5.vision.features[2],
-            sample_m_R=context.m_R,sample_m_V=context.m_V,return_aux=return_aux)
+            sample_m_R=context.m_R,sample_m_V=context.m_V,vision_padding_mask=image_padding_mask,return_aux=return_aux)
         projected=query.new_zeros((hypotheses.n,2))
         rid=torch.nonzero(hypotheses.m_R).flatten()
         if len(rid):
@@ -128,7 +132,8 @@ class FullMultimodalV1(nn.Module):
         if return_aux:
             aux={"p5":p5,"dino":dino_output,"radar_candidates":rset,"rgb_candidates":vset,
                  "hypotheses_pre_postprocess":hypotheses,"decoder":decoder_aux,
-                 "joint_score":gate.joint_score,"joint_logit":gate.joint_logit}
+                 "joint_score":gate.joint_score,"joint_logit":gate.joint_logit,
+                 "num_both_modalities_missing":int((~context.m_R & ~context.m_V).sum().item())}
         fused_score=gate.fused_score; box=pred.box_xyxy_px; xyz=pred.xyz
         c2d=torch.sigmoid(pred.c2d_logit); c3d=torch.sigmoid(pred.c3d_logit); weights=gate.weights; out_h=hypotheses
         if not self.training and hypotheses.n:

@@ -1,0 +1,23 @@
+{
+  "name": "Multimodal V1.1 clean extraction",
+  "source_repository": "/home/jasoncui/projects/rdq-uav-experiment",
+  "source_head": "59d2b25f6106f3154b1cf139cf873def567cf035",
+  "note": "Snapshot includes the Multimodal V1 files at the branch root; large runtime assets are supplied locally.",
+  "tracked_regular_file_count": 76,
+  "tracked_regular_file_bytes": 446884,
+  "runtime_assets": {
+    "checkpoints/dino_swin_t": "DINO-Swin-T checkpoint directory",
+    "checkpoints/lidar_v2/best_spatial.pt": "LiDAR V2 spatial checkpoint",
+    "data/mmaud_official_train": "MMAUD official training dataset"
+  },
+  "git_submodules": {
+    "third_party/detrex": "IDEA-Research/detrex e244e6c3da3e84566728c52c21fb061d23ce0e2f"
+  },
+  "correctness_hardening": [
+    "modality_candidate_filtering",
+    "image_padding_masks",
+    "partial_rv_regression",
+    "no_output_validation_denominator",
+    "optimizer_parameter_identity"
+  ]
+}

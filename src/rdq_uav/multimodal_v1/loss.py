@@ -56,7 +56,10 @@ class FusionLoss:
         n=hypotheses.n; zero=fused_score.sum()*0
         B=int(source_image_size_wh.shape[0]); targets.validate(B)
         if n==0:
-            return {k:zero for k in ('loss','loss_cls','loss_2d','loss_3d','loss_valid','loss_c2d','loss_c3d')}
+            result={k:zero for k in ('loss','loss_cls','loss_2d','loss_3d','loss_valid','loss_c2d','loss_c3d')}
+            result.update(num_positive=zero.to(torch.long),num_reg2d=zero.to(torch.long),
+                          num_reg3d=zero.to(torch.long),num_ignore=zero.to(torch.long))
+            return result
         b=hypotheses.batch_index; gt2=targets.gt_box_xyxy_px[b]; gt3=targets.gt_xyz[b]; v2=targets.gt_2d_valid[b]; v3=targets.gt_3d_valid[b]
         evidence_iou=torch.zeros(n,device=fused_score.device,dtype=fused_score.dtype)
         if bool(hypotheses.vision_box_valid.any()):
@@ -65,6 +68,9 @@ class FusionLoss:
         if bool(hypotheses.radar_xyz_valid.any()):
             m=hypotheses.radar_xyz_valid & v3; evidence_err[m]=torch.linalg.vector_norm(hypotheses.radar_xyz[m]-gt3[m],dim=1)
         rv=hypotheses.hypothesis_type==HYP_RV; rr=hypotheses.hypothesis_type==HYP_R; vv=hypotheses.hypothesis_type==HYP_V
+        # Classification keeps the strict hypothesis-quality contract.  The
+        # two regression dimensions use their own reliable evidence so a
+        # missing annotation in one dimension cannot discard the other.
         positive=(rv & v2 & v3 & (evidence_iou>=.5)&(evidence_err<=1.)) | (rr & v3 & (evidence_err<=1.)) | (vv & v2 & (evidence_iou>=.5))
         ignore=(rv & (((v3)&(evidence_err>1.)&(evidence_err<=2.)) | ((v2)&(evidence_iou>=.3)&(evidence_iou<.5)))) | (rr&v3&(evidence_err>1.)&(evidence_err<=2.)) | (vv&v2&(evidence_iou>=.3)&(evidence_iou<.5))
         supervisable=(rv & v2 & v3) | (rr & v3) | (vv & v2)
@@ -74,7 +80,8 @@ class FusionLoss:
             ce=-(y*torch.log(p)+(1-y)*torch.log1p(-p)); pt=y*p+(1-y)*(1-p); alpha=y*self.alpha+(1-y)*(1-self.alpha)
             lcls=(alpha*(1-pt).pow(self.gamma)*ce).mean()
         else: lcls=zero
-        reg2=positive & v2; reg3=positive & v3
+        reg2=(rv|vv) & v2 & (evidence_iou>=.5)
+        reg3=(rv|rr) & v3 & (evidence_err<=1.)
         if bool(reg2.any()):
             wh=source_image_size_wh[b[reg2]].to(pred_box.dtype)
             l1=F.l1_loss(_xyxy_to_norm_cxcywh(pred_box[reg2],wh),_xyxy_to_norm_cxcywh(gt2[reg2],wh))
@@ -91,4 +98,5 @@ class FusionLoss:
         lvalid=lc2+lc3
         total=self.lambda_cls*lcls+self.lambda_2d*l2+self.lambda_3d*l3+self.lambda_valid*lvalid
         return {'loss':total,'loss_cls':lcls,'loss_2d':l2,'loss_3d':l3,'loss_valid':lvalid,'loss_c2d':lc2,'loss_c3d':lc3,
-                'num_positive':positive.sum().to(torch.long),'num_ignore':ignore.sum().to(torch.long)}
+                'num_positive':positive.sum().to(torch.long),'num_reg2d':reg2.sum().to(torch.long),
+                'num_reg3d':reg3.sum().to(torch.long),'num_ignore':ignore.sum().to(torch.long)}

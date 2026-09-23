@@ -23,10 +23,20 @@ class DINOAdapter(nn.Module):
         if self.detector.training and not allow_training_candidate_path:
             raise RuntimeError("P2 identity path is inference-only. FullMultimodalV1 may explicitly enable the differentiable candidate path; detector-native DINO training remains the SSOD/P8 responsibility.")
         multi_level_features=self.detector.neck(pyramid.dino_features)
-        masks=[F.interpolate(image_masks[None],size=feature.shape[-2:]).to(torch.bool).squeeze(0) for feature in multi_level_features]
+        if image_masks.ndim != 3 or image_masks.shape[0] != multi_level_features[0].shape[0]:
+            raise ValueError('image_masks must be [B,H,W]')
+        image_masks = image_masks.to(torch.bool)
+        masks=[F.interpolate(image_masks[:,None].float(),size=feature.shape[-2:],mode='nearest')[:,0].to(torch.bool) for feature in multi_level_features]
         positions=[self.detector.position_embedding(mask) for mask in masks]
-        decoder_states,initial_reference,intermediate_references,encoder_state,encoder_reference=self.detector.transformer(
-            multi_level_features,masks,positions,(None,None),attn_masks=[None,None])
+        # detrex CUDA deformable attention does not support BF16.
+        # Keep the rest of E5 under AMP; run this transformer in FP32.
+        with torch.autocast(device_type=multi_level_features[0].device.type, enabled=False):
+            decoder_states,initial_reference,intermediate_references,encoder_state,encoder_reference=self.detector.transformer(
+                [feature.float() for feature in multi_level_features],
+                masks,
+                [position.float() for position in positions],
+                (None,None),
+                attn_masks=[None,None])
         decoder_states[0]+=self.detector.label_enc.weight[0,0]*0.0
         classes=[]; boxes=[]
         for level in range(decoder_states.shape[0]):
@@ -41,7 +51,8 @@ class DINOAdapter(nn.Module):
         encoder_logits=self.detector.transformer.decoder.class_embed[-1](encoder_state)
         return {"pred_logits":stacked_classes[-1],"pred_boxes":stacked_boxes[-1],"decoder_query_features":decoder_states[-1],
                 "decoder_features_all_layers":decoder_states,"aux_outputs":self.detector._set_aux_loss(stacked_classes,stacked_boxes),
-                "enc_outputs":{"pred_logits":encoder_logits,"pred_boxes":encoder_reference},"pyramid":pyramid,"multi_level_features":tuple(multi_level_features)}
+                "enc_outputs":{"pred_logits":encoder_logits,"pred_boxes":encoder_reference},"pyramid":pyramid,
+                "multi_level_features":tuple(multi_level_features),"multi_level_masks":tuple(masks)}
 
     @staticmethod
     def _image_masks(images: Any) -> torch.Tensor:

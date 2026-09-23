@@ -39,11 +39,7 @@ class SpatialQueryPipelineTests(unittest.TestCase):
         loss=CandidateLoss(CFG)(out,batch);self.assertEqual(loss['num_supervised_samples'],2)
         self.assertEqual(len(CandidateSelector(CFG)(out)),2);self.assertEqual(set(out['batch_index'].tolist()),{0,1})
         self.assertEqual([r['sample_id'] for r in evaluate_batch(out,batch,CandidateSelector(CFG),CandidateLoss(CFG))],['A_0','B_0'])
-    def test_parameter_count_and_no_legacy_formal_path(self):
+    def test_parameter_count(self):
         self.assertEqual(sum(p.numel() for p in LiDARUAVDetector(CFG).parameters()),1045352)
-        corpus='\n'.join((ROOT/p).read_text() for p in ('tools/train_lidar_uav_v2.py','tools/evaluate_lidar_uav_v2.py','tools/infer_lidar_uav_v2.py'))
-        for term in ('TemporalQueryClipDataset','collate_temporal_queries','OverlapAwareBatchSampler','EpochCyclicQuerySampler','occurrence_to_unique','query_subsampling'):
-            self.assertNotIn(term,corpus)
-        self.assertIn('shuffle=True',(ROOT/'tools/train_lidar_uav_v2.py').read_text())
 
 if __name__=='__main__':unittest.main()

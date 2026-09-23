@@ -5,9 +5,17 @@ from __future__ import annotations
 from collections.abc import Mapping, Sequence
 from typing import Any
 
+import numpy as np
+
 import torch
 
 from .vision.ssod import source_xyxy_to_normalized_cxcywh, weighted_loss_sum
+
+
+def usable_multimodal_training_samples(samples: Sequence[Mapping[str, Any]]) -> tuple[list[Mapping[str, Any]], int]:
+    """Return samples with at least one sensor and the skipped sample count."""
+    usable = [sample for sample in samples if bool(sample["m_R"]) or bool(sample["m_V"])]
+    return usable, len(samples) - len(usable)
 
 
 def load_lidar_checkpoint_strict(detector: torch.nn.Module, checkpoint: str) -> dict[str, Any]:
@@ -104,6 +112,101 @@ def combine_e5_losses(
     lambda_f: float,
 ) -> torch.Tensor:
     return lambda_r * radar_loss + lambda_v * vision_loss + lambda_f * fusion_loss
+
+
+def ordered_optimizer_groups(
+    model: torch.nn.Module,
+    definitions: Sequence[tuple[str, set[int], float]],
+) -> list[dict[str, Any]]:
+    """Build groups in stable ``named_parameters`` order with shared dedup."""
+
+    named = list(model.named_parameters())
+    assigned: set[int] = set()
+    groups: list[dict[str, Any]] = []
+    for group_name, identifiers, learning_rate in definitions:
+        selected = [
+            (name, parameter)
+            for name, parameter in named
+            if id(parameter) in identifiers and id(parameter) not in assigned
+        ]
+        assigned.update(id(parameter) for _, parameter in selected)
+        if selected:
+            groups.append(
+                {
+                    "params": [parameter for _, parameter in selected],
+                    "param_names": [name for name, _ in selected],
+                    "lr": float(learning_rate),
+                    "base_lr": float(learning_rate),
+                    "name": group_name,
+                }
+            )
+    missing = [name for name, parameter in named if id(parameter) not in assigned]
+    if missing:
+        raise RuntimeError(f"optimizer grouping missed parameters: {missing[:20]}")
+    return groups
+
+
+def optimizer_parameter_names(optimizer: torch.optim.Optimizer) -> list[dict[str, Any]]:
+    result = []
+    for group in optimizer.param_groups:
+        names = group.get("param_names")
+        if names is None or len(names) != len(group["params"]):
+            raise ValueError("optimizer group is missing aligned param_names")
+        result.append({"name": str(group.get("name", "")), "param_names": list(names)})
+    return result
+
+
+def validate_optimizer_parameter_names(
+    optimizer: torch.optim.Optimizer, saved: Sequence[Mapping[str, Any]] | None,
+) -> None:
+    current = optimizer_parameter_names(optimizer)
+    if saved is None:
+        raise ValueError("checkpoint lacks optimizer_param_names; refusing unsafe optimizer restore")
+    normalized = [
+        {"name": str(group.get("name", "")), "param_names": list(group["param_names"])}
+        for group in saved
+    ]
+    if current != normalized:
+        raise ValueError("checkpoint optimizer parameter identity/order does not match current model")
+
+
+def summarize_validation_outcomes(
+    xyz_outcomes: Sequence[float | None], box_iou_outcomes: Sequence[float | None],
+) -> dict[str, float | int]:
+    """Summarize GT-aligned outcomes; ``None`` means no model output."""
+
+    n_gt3d = len(xyz_outcomes)
+    if n_gt3d == 0:
+        raise ValueError("validation contains no valid 3D GT")
+    xyz = [float(value) for value in xyz_outcomes if value is not None]
+    n_output = len(xyz)
+    result: dict[str, float | int] = {
+        "n_gt3d": n_gt3d,
+        "n_output_3d": n_output,
+        "n_no_output_3d": n_gt3d - n_output,
+        "output_coverage_3d": n_output / n_gt3d,
+        "n_success_05m": sum(value <= .5 for value in xyz),
+        "n_success_1m": sum(value <= 1. for value in xyz),
+        "n_success_2m": sum(value <= 2. for value in xyz),
+        "final_3d_success_05m": sum(value <= .5 for value in xyz) / n_gt3d,
+        "final_3d_success_1m": sum(value <= 1. for value in xyz) / n_gt3d,
+        "final_3d_success_2m": sum(value <= 2. for value in xyz) / n_gt3d,
+        "final_3d_mean_error": float(np.mean(xyz)) if xyz else float("nan"),
+        "final_3d_median_error": float(np.median(xyz)) if xyz else float("nan"),
+        "final_3d_p90_error": float(np.percentile(xyz, 90)) if xyz else float("nan"),
+    }
+    boxes = [float(value) for value in box_iou_outcomes if value is not None]
+    n_gt2d = len(box_iou_outcomes)
+    result.update(
+        n_gt2d=n_gt2d,
+        n_output_2d=len(boxes),
+        n_no_output_2d=n_gt2d-len(boxes),
+        output_coverage_2d=(len(boxes)/n_gt2d if n_gt2d else float("nan")),
+        # Missing output is IoU zero for the unconditional validation mean.
+        vision_top1_iou_mean=(sum(boxes)/n_gt2d if n_gt2d else float("nan")),
+        vision_top1_iou_mean_given_output=(float(np.mean(boxes)) if boxes else float("nan")),
+    )
+    return result
 
 
 def stage_for_epoch(stages: Sequence[Mapping[str, Any]], epoch: int) -> str:
