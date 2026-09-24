@@ -25,7 +25,21 @@ import torch
 from torch.utils.data import DataLoader, Dataset, Sampler
 import yaml
 
+try:
+    from tqdm.auto import tqdm
+except ImportError:
+    tqdm = None
+
 ROOT = Path(__file__).resolve().parents[1]
+for import_root in (ROOT, ROOT / "src"):
+    if str(import_root) not in sys.path:
+        sys.path.insert(0, str(import_root))
+
+from rdq_uav.runtime_paths import (
+    apply_runtime_path_overrides,
+    ensure_detrex_config_link,
+    resolve_project_path,
+)
 DEFAULT_CONFIG = ROOT / "configs/multimodal_v1/e5_full_v1.yaml"
 
 
@@ -44,8 +58,7 @@ def parse_args() -> argparse.Namespace:
 
 
 def resolve(value: str | Path) -> Path:
-    path = Path(value)
-    return path if path.is_absolute() else ROOT / path
+    return resolve_project_path(value, ROOT)
 
 
 def atomic_torch_save(payload: dict[str, Any], path: Path) -> None:
@@ -64,7 +77,8 @@ def resize_wh(source_wh: tuple[int, int], short_edge: int, max_size: int) -> tup
 
 
 def load_left_rgb(path: str | Path, source_wh: tuple[int, int]) -> Image.Image:
-    image = Image.open(path).convert("RGB")
+    with Image.open(path) as handle:
+        image = handle.convert("RGB")
     width, height = source_wh
     if image.width < width or image.height < height:
         raise ValueError(f"image {image.size} smaller than calibrated {source_wh}: {path}")
@@ -76,13 +90,73 @@ def image_tensor(image: Image.Image, device: torch.device) -> torch.Tensor:
     return torch.from_numpy(array).permute(2, 0, 1).contiguous().to(device)
 
 
+def prepare_e5_image(
+    path: str | Path | None,
+    source_wh: tuple[int, int],
+    short_edge: int,
+    max_size: int,
+) -> dict[str, Any]:
+    """Decode and resize one image in a DataLoader worker.
+
+    Keeping the tensor uint8 until the batched host-to-device copy cuts image
+    transfer volume by 4x. Conversion to FP32 happens once on the GPU before
+    the unchanged DINO normalizer.
+    """
+
+    source = Image.new("RGB", source_wh) if path is None else load_left_rgb(path, source_wh)
+    view_wh = resize_wh(source.size, short_edge, max_size)
+    view = source.resize(view_wh, Image.Resampling.BILINEAR)
+    array = np.asarray(view, dtype=np.uint8).copy()
+    return {
+        "image_uint8": torch.from_numpy(array).permute(2, 0, 1).contiguous(),
+        "image_source_wh": torch.tensor(source.size, dtype=torch.long),
+        "image_view_wh": torch.tensor(view_wh, dtype=torch.long),
+        "image_scale_xy": torch.tensor(
+            (view_wh[0] / source.size[0], view_wh[1] / source.size[1]),
+            dtype=torch.float32,
+        ),
+    }
+
+
+def expand_projection_context(base: Any, image_scale_xy: torch.Tensor):
+    """Expand immutable calibration tensors without reparsing YAML/JSON."""
+
+    from rdq_uav.multimodal_v1.contracts import ProjectionContext
+
+    if image_scale_xy.ndim != 2 or image_scale_xy.shape[1] != 2:
+        raise ValueError("image_scale_xy must be [B,2]")
+    batch_size = len(image_scale_xy)
+    return ProjectionContext(
+        rotation_camera_from_radar=base.rotation_camera_from_radar.expand(batch_size, -1, -1),
+        translation_camera_from_radar_m=base.translation_camera_from_radar_m.expand(batch_size, -1),
+        intrinsics=base.intrinsics.expand(batch_size, -1),
+        distortion=base.distortion.expand(batch_size, -1),
+        image_size_wh=base.image_size_wh.expand(batch_size, -1),
+        image_scale_xy=image_scale_xy,
+    )
+
+
 class E5QueryDataset(Dataset):
     """One causal LiDAR query + nearest RGB image + optional verified 2D GT."""
 
-    def __init__(self, lidar_dataset, image_index, manifest, sequence_ids, calibration_handle):
+    def __init__(
+        self,
+        lidar_dataset,
+        image_index,
+        manifest,
+        sequence_ids,
+        calibration_handle,
+        *,
+        camera_wh: tuple[int, int],
+        short_edge: int,
+        max_size: int,
+    ):
         self.lidar_dataset = lidar_dataset
         self.image_index = image_index
         self.calibration_handle = str(calibration_handle)
+        self.camera_wh = tuple(map(int, camera_wh))
+        self.short_edge = int(short_edge)
+        self.max_size = int(max_size)
         allowed = set(sequence_ids)
         self.box_by_image: dict[tuple[str, str], tuple[float, float, float, float]] = {}
         for record in manifest:
@@ -120,6 +194,11 @@ class E5QueryDataset(Dataset):
             gt_box_xyxy_px=torch.zeros(4) if box is None else torch.tensor(box, dtype=torch.float32),
             gt_2d_valid=box is not None,
         )
+        query.update(
+            prepare_e5_image(
+                query["left_image_path"], self.camera_wh, self.short_edge, self.max_size,
+            )
+        )
         return query
 
     @property
@@ -138,6 +217,11 @@ def collate_e5(samples):
     batch = collate_multimodal_queries(samples)
     batch["gt_box_xyxy_px"] = torch.stack([item["gt_box_xyxy_px"] for item in samples])
     batch["gt_2d_valid"] = torch.tensor([item["gt_2d_valid"] for item in samples], dtype=torch.bool)
+    shapes = {tuple(item["image_uint8"].shape) for item in samples}
+    if len(shapes) != 1:
+        raise ValueError(f"E5 image views must share one shape per batch, got {sorted(shapes)}")
+    for key in ("image_uint8", "image_source_wh", "image_view_wh", "image_scale_xy"):
+        batch[key] = torch.stack([item[key] for item in samples])
     return batch
 
 
@@ -199,6 +283,7 @@ class Runtime:
     camera_wh: tuple[int, int]
     camera_config: Path
     geometry_calibration: Path
+    projection_base: Any
     short_edge: int
     max_size: int
     initialization: dict[str, Any]
@@ -207,6 +292,7 @@ class Runtime:
 def build_runtime(cfg: dict[str, Any], train_lidar, device: torch.device) -> Runtime:
     init = cfg["initialization"]
     detrex = resolve(init["dino_root"])
+    ensure_detrex_config_link(detrex)
     for path in (ROOT / "src", detrex / "detectron2", detrex):
         if str(path) not in sys.path:
             sys.path.insert(0, str(path))
@@ -264,10 +350,18 @@ def build_runtime(cfg: dict[str, Any], train_lidar, device: torch.device) -> Run
     camera_path = resolve(data_cfg["camera_config"])
     camera_cfg = yaml.safe_load(camera_path.read_text())
     camera_wh = tuple(map(int, camera_cfg["cameras"]["left"]["resolution"]))
+    from rdq_uav.multimodal_v1 import load_left_projection_context
+
+    projection_base = load_left_projection_context(
+        camera_path,
+        resolve(data_cfg["geometry_calibration"]),
+        image_scale_xy=torch.ones((1, 2), dtype=torch.float32, device=device),
+        device=device,
+    )
     return Runtime(
         model, lidar_detector, dino_detector, CandidateLoss(lidar_cfg),
         (hci, model.rgb_candidates, model.reliability_gate, model.shared_query, model.decoder, model.heads),
-        camera_wh, camera_path, resolve(data_cfg["geometry_calibration"]),
+        camera_wh, camera_path, resolve(data_cfg["geometry_calibration"]), projection_base,
         int(data_cfg["dino_short_edge"]), int(data_cfg["dino_max_size"]),
         {
             "lidar_checkpoint": str(resolve(init["lidar_checkpoint"])),
@@ -278,26 +372,29 @@ def build_runtime(cfg: dict[str, Any], train_lidar, device: torch.device) -> Run
 
 
 def prepare_batch(batch: dict[str, Any], runtime: Runtime, device: torch.device):
-    from rdq_uav.multimodal_v1 import load_left_projection_context, make_interaction_context
+    from rdq_uav.multimodal_v1 import make_interaction_context
     from rdq_uav.multimodal_v1.loss import FusionTargets
     from rdq_uav.multimodal_v1.vision.ssod import ViewTransform
 
-    tensors = {key: (value.to(device, non_blocking=True) if torch.is_tensor(value) else value) for key, value in batch.items()}
-    images, transforms, scales = [], [], []
-    for path in batch["left_image_path"]:
-        source = Image.new("RGB", runtime.camera_wh) if path is None else load_left_rgb(path, runtime.camera_wh)
-        view_wh = resize_wh(source.size, runtime.short_edge, runtime.max_size)
-        view = source.resize(view_wh, Image.Resampling.BILINEAR)
-        transform = ViewTransform(source.size, view_wh, False)
-        images.append({"image": image_tensor(view, device), "height": view.height, "width": view.width})
-        transforms.append(transform)
-        scales.append(transform.scale_xy)
+    cpu_metadata = {"image_uint8", "image_source_wh", "image_view_wh"}
+    tensors = {
+        key: (value.to(device, non_blocking=True) if torch.is_tensor(value) and key not in cpu_metadata else value)
+        for key, value in batch.items()
+    }
+    image_batch = batch["image_uint8"].to(
+        device=device, dtype=torch.float32, non_blocking=True,
+    )
+    source_sizes = batch["image_source_wh"]
+    view_sizes = batch["image_view_wh"]
+    images, transforms = [], []
+    for index in range(len(image_batch)):
+        source_wh = tuple(map(int, source_sizes[index].tolist()))
+        view_wh = tuple(map(int, view_sizes[index].tolist()))
+        transforms.append(ViewTransform(source_wh, view_wh, False))
+        images.append({"image": image_batch[index], "height": view_wh[1], "width": view_wh[0]})
     preprocessed = runtime.dino_detector.preprocess_image(images)
     image_padding_mask = runtime.model.dino._image_masks(preprocessed).to(torch.bool)
-    projection = load_left_projection_context(
-        runtime.camera_config, runtime.geometry_calibration,
-        image_scale_xy=torch.tensor(scales, dtype=torch.float32), device=device,
-    )
+    projection = expand_projection_context(runtime.projection_base, tensors["image_scale_xy"])
     context = make_interaction_context(
         batch["calibration_handle"], tensors["m_R"], tensors["m_V"], projection,
     )
@@ -363,7 +460,7 @@ def forward_losses(runtime: Runtime, batch, device, cfg, *, return_aux: bool = T
     lidar, images, image_padding_mask, context, targets, transforms = prepare_batch(batch, runtime, device)
     output = runtime.model(
         lidar, images, context, image_padding_mask=image_padding_mask,
-        targets=targets, return_aux=return_aux,
+        targets=targets, return_aux=return_aux, return_diagnostics=False,
     )
     if output.aux is None or output.losses is None:
         raise RuntimeError("training forward requires fusion losses and auxiliary backbone outputs")
@@ -458,7 +555,7 @@ def restore_rng(state: dict[str, Any]) -> None:
         torch.cuda.set_rng_state_all(state["cuda"])
 
 
-def checkpoint(runtime, optimizer, cfg, epoch, step, best_metrics):
+def checkpoint(runtime, optimizer, cfg, epoch, step, best_metrics, loader_generators):
     from rdq_uav.multimodal_v1.training import optimizer_parameter_names
 
     return {
@@ -466,6 +563,9 @@ def checkpoint(runtime, optimizer, cfg, epoch, step, best_metrics):
         "optimizer_param_names": optimizer_parameter_names(optimizer),
         "epoch": epoch, "global_optimizer_step": step, "best_metrics": best_metrics,
         "effective_config": cfg, "initialization": runtime.initialization, "rng_state": rng_state(),
+        "data_loader_rng_state": {
+            name: generator.get_state() for name, generator in loader_generators.items()
+        },
     }
 
 
@@ -492,7 +592,7 @@ def apply_optimizer_update(runtime, optimizer, cfg, pending: int, accumulate: in
 
 def main() -> None:
     args = parse_args()
-    cfg = yaml.safe_load(args.config.read_text())
+    cfg = apply_runtime_path_overrides(yaml.safe_load(resolve(args.config).read_text()))
     if args.epochs is not None:
         cfg["training"]["epochs"] = args.epochs
     if args.num_workers is not None:
@@ -532,23 +632,51 @@ def main() -> None:
     manifest = load_label_manifest(resolve(data_cfg["annotation_manifest"]), require_boxes=False)
     train_sequences = {str(record["sequence_id"]) for record in train_lidar.records}
     val_sequences = {str(record["sequence_id"]) for record in val_lidar.records}
-    train_dataset = E5QueryDataset(train_lidar, image_index, manifest, train_sequences, data_cfg["geometry_calibration"])
-    val_dataset = E5QueryDataset(val_lidar, image_index, manifest, val_sequences, data_cfg["geometry_calibration"])
+    camera_cfg = yaml.safe_load(resolve(data_cfg["camera_config"]).read_text())
+    camera_wh = tuple(map(int, camera_cfg["cameras"]["left"]["resolution"]))
+    dataset_image_args = {
+        "camera_wh": camera_wh,
+        "short_edge": int(data_cfg["dino_short_edge"]),
+        "max_size": int(data_cfg["dino_max_size"]),
+    }
+    train_dataset = E5QueryDataset(
+        train_lidar, image_index, manifest, train_sequences, data_cfg["geometry_calibration"],
+        **dataset_image_args,
+    )
+    val_dataset = E5QueryDataset(
+        val_lidar, image_index, manifest, val_sequences, data_cfg["geometry_calibration"],
+        **dataset_image_args,
+    )
     if args.train_limit is not None:
         train_dataset.indices = train_dataset.indices[:args.train_limit]; train_dataset.matches = train_dataset.matches[:args.train_limit]
     if args.val_limit is not None:
         val_dataset.indices = val_dataset.indices[:args.val_limit]; val_dataset.matches = val_dataset.matches[:args.val_limit]
     training_cfg = cfg["training"]
     sampler = GateSampler(train_dataset, seed) if args.max_updates is not None else None
+    workers = int(data_cfg["num_workers"])
+    train_loader_generator = torch.Generator().manual_seed(seed)
+    val_loader_generator = torch.Generator().manual_seed(seed + 1)
+    loader_generators = {
+        "train": train_loader_generator,
+        "validation": val_loader_generator,
+    }
+    loader_options = {
+        "num_workers": workers,
+        "pin_memory": device.type == "cuda",
+        # Recreate workers each epoch so uninterrupted and resumed runs consume
+        # loader RNG in the same order. Startup is negligible beside an E5 epoch.
+        "persistent_workers": False,
+    }
+    if workers > 0:
+        loader_options["prefetch_factor"] = int(data_cfg.get("prefetch_factor", 2))
     train_loader = DataLoader(
         train_dataset, batch_size=int(training_cfg["batch_size"]), sampler=sampler,
-        shuffle=sampler is None, num_workers=int(data_cfg["num_workers"]), collate_fn=collate_e5_train,
-        pin_memory=device.type == "cuda", persistent_workers=int(data_cfg["num_workers"]) > 0,
+        shuffle=sampler is None, collate_fn=collate_e5_train,
+        generator=train_loader_generator, **loader_options,
     )
     val_loader = DataLoader(
         val_dataset, batch_size=int(training_cfg["batch_size"]), shuffle=False,
-        num_workers=int(data_cfg["num_workers"]), collate_fn=collate_e5,
-        pin_memory=device.type == "cuda", persistent_workers=int(data_cfg["num_workers"]) > 0,
+        collate_fn=collate_e5, generator=val_loader_generator, **loader_options,
     )
     runtime = build_runtime(cfg, train_lidar, device)
     optimizer = torch.optim.AdamW(optimizer_groups(runtime, cfg), weight_decay=float(training_cfg["weight_decay"]))
@@ -569,6 +697,12 @@ def main() -> None:
         best_metrics = payload.get("best_metrics")
         if payload.get("rng_state") is not None:
             restore_rng(payload["rng_state"])
+        saved_loader_rng = payload.get("data_loader_rng_state")
+        if saved_loader_rng is not None:
+            for name, generator in loader_generators.items():
+                if name not in saved_loader_rng:
+                    raise ValueError(f"checkpoint lacks {name!r} DataLoader RNG state")
+                generator.set_state(saved_loader_rng[name])
 
     cfg["runtime"] = {
         "device": str(device), "train_queries": len(train_dataset), "val_queries": len(val_dataset),
@@ -589,14 +723,46 @@ def main() -> None:
     amp_enabled = bool(training_cfg["amp"]) and device.type == "cuda"
     amp_dtype = torch.bfloat16 if training_cfg["amp_dtype"] == "bfloat16" else torch.float16
     stop = False; factor = 0.0
+
+    # Dynamic progress goes directly to the terminal, while print() remains
+    # available to tee for clean persistent logs.
+    progress_stream = None
+    if tqdm is not None:
+        if sys.stderr.isatty():
+            progress_stream = sys.stderr
+        else:
+            try:
+                progress_stream = open("/dev/tty", "w", buffering=1)
+            except OSError:
+                progress_stream = None
+    show_progress = progress_stream is not None
+
     for epoch in range(start_epoch, epochs + 1):
         epoch_start = time.time()
         runtime.model.train()
         stage = activate_stage(runtime, optimizer, cfg, epoch)
         optimizer.zero_grad(set_to_none=True)
-        sums = {key: 0.0 for key in ("loss", "loss_R", "loss_V", "loss_F", "loss_cls_R", "loss_reg_R")}
+        if device.type == "cuda":
+            torch.cuda.reset_peak_memory_stats(device)
+        metric_keys = ("loss", "loss_R", "loss_V", "loss_F", "loss_cls_R", "loss_reg_R")
+        # Old logging summed one FP32 batch scalar at a time in Python double.
+        # Device-side FP64 accumulation preserves that precision without a CUDA
+        # synchronization for every metric on every micro-batch.
+        metric_sums = torch.zeros(len(metric_keys), dtype=torch.float64, device=device)
         batches = vision_count = both_missing = pending = 0
-        for batch_index, batch in enumerate(train_loader, 1):
+
+        train_batches = tqdm(
+            train_loader,
+            total=len(train_loader),
+            desc=f"Epoch {epoch}/{epochs} [{stage}]",
+            unit="batch",
+            dynamic_ncols=True,
+            mininterval=0.5,
+            file=progress_stream,
+            disable=not show_progress,
+        ) if tqdm is not None else train_loader
+
+        for batch_index, batch in enumerate(train_batches, 1):
             both_missing += int(batch.pop("both_modalities_missing", 0))
             if bool(batch.pop("skip_training_batch", False)):
                 continue
@@ -607,34 +773,70 @@ def main() -> None:
                 raise FloatingPointError(f"non-finite E5 loss at epoch={epoch} batch={batch_index}")
             scaled.backward()
             pending += 1; batches += 1; vision_count += labeled
-            values = {
-                "loss": total, "loss_R": radar["loss"], "loss_V": vision,
-                "loss_F": model_output.losses["loss"], "loss_cls_R": radar["loss_cls"], "loss_reg_R": radar["loss_reg"],
-            }
-            for key, value in values.items():
-                sums[key] += float(value.detach().float())
+            current_metrics = torch.stack((
+                total, radar["loss"], vision, model_output.losses["loss"],
+                radar["loss_cls"], radar["loss_reg"],
+            )).detach().float()
+            metric_sums.add_(current_metrics.double())
+
+            report_now = pending == accumulate and (
+                (global_step + 1) % log_every == 0 or args.max_updates is not None
+            )
+            if show_progress and report_now:
+                averages = (metric_sums / batches).cpu().tolist()
+                lr_now = max(float(group["lr"]) for group in optimizer.param_groups)
+                gpu_mem = (
+                    torch.cuda.max_memory_reserved(device) / (1024 ** 3)
+                    if device.type == "cuda" else 0.0
+                )
+                train_batches.set_postfix(
+                    step=f"{global_step + 1}/{total_updates}",
+                    mem=f"{gpu_mem:.1f}G",
+                    lr=f"{lr_now:.2e}",
+                    loss=f"{averages[0]:.4f}",
+                    R=f"{averages[1]:.4f}",
+                    V=f"{averages[2]:.4f}",
+                    F=f"{averages[3]:.4f}",
+                    refresh=False,
+                )
+
             boundary = pending == accumulate
             if boundary:
                 global_step,factor=apply_optimizer_update(runtime,optimizer,cfg,pending,accumulate,global_step,total_updates);pending=0
-                if global_step % log_every == 0 or args.max_updates is not None:
-                    print(f"epoch={epoch} stage={stage} update={global_step} loss={float(total):.5f} R={float(radar['loss']):.5f} V={float(vision):.5f} F={float(model_output.losses['loss']):.5f}")
+                if (global_step % log_every == 0 or args.max_updates is not None) and not show_progress:
+                    latest = current_metrics.cpu().tolist()
+                    print(f"epoch={epoch} stage={stage} update={global_step} loss={latest[0]:.5f} R={latest[1]:.5f} V={latest[2]:.5f} F={latest[3]:.5f}")
                 if args.max_updates is not None and global_step >= args.max_updates:
                     stop = True
                     break
+
+        if show_progress:
+            train_batches.close()
+
         if pending and not stop:
             global_step,factor=apply_optimizer_update(runtime,optimizer,cfg,pending,accumulate,global_step,total_updates);pending=0
             if args.max_updates is not None and global_step >= args.max_updates:
                 stop=True
+        sum_values = metric_sums.cpu().tolist()
         row = {
             "epoch": epoch, "stage": stage, "optimizer_step": global_step,
-            **{key: value / max(1, batches) for key, value in sums.items()},
+            **{key: value / max(1, batches) for key, value in zip(metric_keys, sum_values)},
             "vision_supervised": vision_count, "lr_factor": factor if global_step else 0.0,
             "both_modalities_missing": both_missing,
             "seconds": time.time() - epoch_start,
         }
         with csv_path.open("a", newline="") as handle:
             csv.DictWriter(handle, fieldnames=csv_fields).writerow(row)
-        atomic_torch_save(checkpoint(runtime, optimizer, cfg, epoch, global_step, best_metrics), output / cfg["checkpoint"]["last"])
+
+        print(
+            f"epoch={epoch}/{epochs} stage={stage} "
+            f"loss={row['loss']:.5f} R={row['loss_R']:.5f} "
+            f"V={row['loss_V']:.5f} F={row['loss_F']:.5f} "
+            f"updates={global_step}/{total_updates} "
+            f"time={row['seconds'] / 60:.1f}min"
+        )
+
+        atomic_torch_save(checkpoint(runtime, optimizer, cfg, epoch, global_step, best_metrics, loader_generators), output / cfg["checkpoint"]["last"])
         if stop:
             report = {"status": "PASS", "mode": "max_updates_gate", "optimizer_updates": global_step, "epoch_partial": epoch, "losses": row}
             (output / "max_updates_report.json").write_text(json.dumps(report, indent=2, allow_nan=True))
@@ -645,11 +847,17 @@ def main() -> None:
             metrics.update(epoch=epoch, global_optimizer_step=global_step)
             with (output / "validation_metrics.jsonl").open("a") as handle:
                 handle.write(json.dumps(metrics, allow_nan=True) + "\n")
-            if better(metrics, best_metrics):
+            improved = better(metrics, best_metrics)
+            if improved:
                 best_metrics = metrics
-                atomic_torch_save(checkpoint(runtime, optimizer, cfg, epoch, global_step, best_metrics), output / cfg["checkpoint"]["best"])
-            atomic_torch_save(checkpoint(runtime, optimizer, cfg, epoch, global_step, best_metrics), output / cfg["checkpoint"]["last"])
-            print(f"validation epoch={epoch} success@1m={metrics['final_3d_success_1m']:.4f} median={metrics['final_3d_median_error']:.4f}")
+                atomic_torch_save(checkpoint(runtime, optimizer, cfg, epoch, global_step, best_metrics, loader_generators), output / cfg["checkpoint"]["best"])
+            atomic_torch_save(checkpoint(runtime, optimizer, cfg, epoch, global_step, best_metrics, loader_generators), output / cfg["checkpoint"]["last"])
+            print(
+                f"validation epoch={epoch}/{epochs} "
+                f"success@1m={metrics['final_3d_success_1m']:.4f} "
+                f"median={metrics['final_3d_median_error']:.4f} "
+                f"best={'YES' if improved else 'no'}"
+            )
     summary = {"status": "COMPLETE", "epochs": epochs, "optimizer_updates": global_step, "best": best_metrics}
     (output / "run_summary.json").write_text(json.dumps(summary, indent=2, allow_nan=True))
     print(json.dumps(summary, indent=2, allow_nan=True))

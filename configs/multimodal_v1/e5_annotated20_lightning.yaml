@@ -1,24 +1,24 @@
 experiment:
-  name: multimodal_v1_e5_full
+  name: e5_annotated20_lightning
+  variant: E5
   seed: 42
-  output_dir: outputs/own_multimodal_research/multimodal_v1/e5_full_v1_seed42
-
+  output_dir: outputs/own_multimodal_research/multimodal_v1/e5_annotated20_lightning_seed42
 data:
   root: data/mmaud_official_train
-  split_file: splits/mmaud_splits.json
+  split_file: splits/mmaud_annotated20.json
   train_split: train_sub
   val_split: validation_sub
   max_events: 20
   max_image_gap_s: 0.04
-  annotation_manifest: manifests/multimodal_v1/vision_manual161_train.jsonl
+  annotation_manifest: manifests/multimodal_v1/vision_annotated20.jsonl
   camera_config: configs/calibration/mmaud_v1_omni.yaml
   geometry_calibration: calibration/official_left_p4_current_geometry.json
   dino_short_edge: 800
   dino_max_size: 1333
-  # Decode/resize RGB and assemble latest-20 LiDAR queries off the GPU thread.
+  # Keep decode/resize and latest-20 assembly off the Lightning/GPU thread.
+  # Two workers are the conservative WSL2 setting for a 32 GB host.
   num_workers: 2
   prefetch_factor: 2
-
 initialization:
   lidar_config: configs/lidar_uav_v2.yaml
   lidar_checkpoint: checkpoints/lidar_v2/best_spatial.pt
@@ -26,7 +26,6 @@ initialization:
   dino_config: third_party/detrex/projects/dino/configs/dino-swin/dino_swin_tiny_224_4scale_12ep.py
   dino_checkpoint: checkpoints/dino_swin_t/dino_swin_tiny_224_22kto1k_finetune_4scale_12ep.pth
   p6_config: configs/multimodal_v1/p6_candidates.yaml
-
 loss:
   lambda_R: 1.0
   lambda_V: 1.0
@@ -37,38 +36,44 @@ loss:
   lambda_valid: 0.25
   focal_alpha: 0.25
   focal_gamma: 2.0
-
 training:
   epochs: 12
   batch_size: 1
   accumulate: 4
-  amp: true
-  amp_dtype: bfloat16
   grad_clip_norm: 1.0
   weight_decay: 0.0001
   warmup_fraction: 0.05
   final_lr_ratio: 0.01
   modality_dropout: 0.0
   stages:
-    - {name: T1, start_epoch: 1, end_epoch: 1}
-    - {name: T2, start_epoch: 2, end_epoch: 8}
-    - {name: T3, start_epoch: 9, end_epoch: 12}
+  - {name: T1, start_epoch: 1, end_epoch: 1}
+  - {name: T2, start_epoch: 2, end_epoch: 8}
+  - {name: T3, start_epoch: 9, end_epoch: 12}
   learning_rates:
     new_modules: 0.0001
     radar: 0.00002
     dino_head: 0.00001
     swin_last_two: 0.000001
-
 validation:
   every_epochs: 1
   precision: fp32
   max_samples: null
-
-checkpoint:
-  last: last.pt
-  best: best.pt
-  primary_metric: final_3d_success_1m
-  tie_breaker: final_3d_median_error
-
 logging:
   log_every_updates: 20
+lightning:
+  accelerator: gpu
+  devices: 1
+  precision: 16-mixed
+  # The default 65536 scale skipped the first six real E5 optimizer attempts.
+  # 1024 is the stable scale reached by that gate and preserves LR warmup.
+  amp_initial_scale: 1024
+  # Rolling last.ckpt about every 15-20 minutes on the RTX 3070.
+  checkpoint_every_updates: 250
+  deterministic: warn
+  num_sanity_val_steps: 1
+  early_stopping:
+    enabled: true
+    # Equal to the full schedule, so this records the contract without silently
+    # shortening the currently frozen 12-epoch E5 experiment.
+    patience: 12
+    min_delta: 0.0

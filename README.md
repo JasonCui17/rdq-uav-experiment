@@ -1,126 +1,114 @@
-# Multimodal V1.1 — clean training project
+# MMAUD GT-guided YOLO annotation web tool
 
-This branch is the compact, runnable extraction of the final Multimodal V1.1
-E5 model from the original `rdq-uav-experiment` workspace. Historical
-audits, intermediate experiments, generated outputs, patches and unrelated
-models are intentionally excluded.
+For the **left** MMAUD camera (`1280 × 960`), in WSL. It uses the frozen
+`calibration/official_left_p4_current_geometry.json` and
+`configs/calibration/mmaud_v1_omni.yaml` from the repository. The web server
+runs on Python's standard `http.server`, without requiring Flask/FastAPI.
 
-## Final data flow
+## Install into existing repo
 
-```text
-causal Avia + Mid360 history
-  -> frozen LiDAR V2 spatial pyramid (SBE-Lite / VQSA / EOOE)
-RGB left image
-  -> DINO Swin-T visual pyramid
-three pre-stage geometry HCI blocks
-  -> LiDAR and RGB candidate sets
-  -> geometry association and reliability gate
-  -> typed shared queries and fusion decoder
-  -> fused 2D box + 3D XYZ candidates
+Place these paths at the **existing repository root**:
+
+```
+tools/gt_bbox_annotation_server.py
+tools/annotation_web/index.html
+tests/test_gt_bbox_annotation_server.py   # optional regression tests
 ```
 
-Training uses the frozen V1.1 objective `L_R + L_V + L_F`. Samples without a
-verified 2D box are removed from DINO's supervised criterion; they are not
-treated as background negatives. LiDAR supervision and eligible fusion
-supervision remain active.
-
-The current training contract also enforces five boundary conditions: absent
-modalities cannot emit candidates, image padding is masked in DINO and fusion
-memory, RV hypotheses retain independently valid 2D/3D regression targets,
-validation counts no-output samples as failures, and optimizer resume verifies
-the ordered parameter names saved in each checkpoint.
-
-## Kept structure
-
-- `src/rdq_uav/multimodal_v1/`: P1–P8 multimodal implementation.
-- `src/rdq_uav/lidar_v2/`: exact LiDAR spatial backbone dependency.
-- `src/rdq_uav/multimodal/merged_lidar.py`: causal Avia/Mid360 event loader.
-- `tools/train_multimodal_v1_full.py`: full E5 trainer and two-update gate.
-- `configs/`: final E5, candidate, LiDAR and camera configuration.
-- `calibration/`: geometry calibration consumed by projection/HCI.
-- `manifests/`: verified 2D supervision records.
-- `splits/`: reproducible train/validation/test sequence split.
-- `tests/`: focused P1–P8 and LiDAR geometry regression tests.
-
-## External assets
-
-The detrex source is pinned as a Git submodule under `third_party/detrex` at
-upstream commit `e244e6c3da3e84566728c52c21fb061d23ce0e2f`. Initialize it after
-cloning with `git submodule update --init --recursive`. Large runtime assets
-are not committed and must be placed at:
-
-- `checkpoints/dino_swin_t/`
-- `checkpoints/lidar_v2/best_spatial.pt`
-- `data/mmaud_official_train/`
-
-Run the checker before training:
+If using the ZIP bundle, from the root:
 
 ```bash
-cd /path/to/rdq-uav-experiment
-python tools/check_assets.py
+unzip -o /path/to/gt_bbox_annotator.zip
+conda activate rdq
+python tools/gt_bbox_annotation_server.py --host 127.0.0.1 --port 8765
 ```
 
-The asset paths may be real files/directories or local symbolic links. Dataset
-and checkpoints are runtime assets and are not part of Git.
+Open `http://localhost:8765` in the Windows browser. If the Windows browser
+cannot access WSL loopback, use WSL networking / port-forward configuration;
+avoid exposing this write-enabled tool to public networks.
 
-## Environment
+## Supported on-disk structure
 
-The verified environment is Python 3.10 with PyTorch 2.1.1 + CUDA 11.8. The
-pinned detrex/detectron2 source is used directly. To install this clean package
-into the existing environment:
-
-```bash
-python -m pip install -e . --no-deps --no-build-isolation
 ```
+data/mmaud_official_train/
+  seq0001/
+    Image/                # numeric timestamp filenames (PNG/JPG), e.g. 1706255497.138053.png
+    ground_truth/         # timestamp.npy, XYZ meters, shape [3]
+    2d_detect/            # timestamp.txt, YOLO normalized relative to the LEFT 1280x960 image
+```
+
+If a PNG contains both fisheye cameras concatenated at `2560×960`, the tool
+**only displays and annotates its left `1280×960` crop**. Existing 1280×960
+left-crop images are supported. Other resolutions are rejected instead of
+silently remapping old labels.
+
+The GT matching convention is `gt_time = image_time + time_offset_s`, read from
+the calibration JSON (current offset 0). Nearest GT time must be within 0.08s
+by default (`--max-gt-gap-s` to override); the default projection-to-box
+inconsistency threshold is 32px (`--discrepancy-px` to override). These are
+**annotation-tool thresholds** and are not formal calibration acceptance criteria.
+
+## Workflow
+
+1. Choose a sequence. Existing YOLO `.txt` files are treated as confirmed and
+   never modified on initial loading. If the label file does not exist, the
+   tool generates a **non-persisted** candidate box using projected GT shift
+   relative to the nearest preceding confirmed positive frame. Before the
+   first eligible reference frame, a later confirmed frame may backfill.
+2. Review each frame. Arrow keys move the active box by 1px; Ctrl+arrows move
+   it by 5px; Shift+arrows change width/height by 1px. A/D switch frames;
+   Enter confirms and goes next. Drag the rectangle to move, drag its corners
+   to resize; drag empty space to draw a new box. Zoom window allows the same
+   interactions and mouse wheel controls zoom.
+3. Confirmed frames write YOLO labels immediately. A newly confirmed frame
+   re-generates only later *unconfirmed* candidates; existing labels and
+   earlier drafts stay unchanged. Use the explicit recompute button if needed.
+4. Bulk delete saves blank YOLO labels for the specified range. This is an
+   **explicit human action**, not automated detection of target absence. Blank
+   labels stop propagation until a subsequent positive reference is available.
+   A review-state JSON distinguishes confirmed negatives from uncertain
+   frames. The browser also remembers the last visited sequence and frame. Uncertain frames are excluded from output and do not create blanks.
+5. A confirmed bbox more than 32px away from its projected GT point (distance
+   to rectangle, not center) is shown as inconsistent and cannot be an anchor
+   unless you explicitly review and force-enable it.
+
+YOLO output: `2d_detect/<image_stem>.txt` with one row per bbox,
+`class cx cy w h` (normalized). Existing multi-box labels are preserved and
+editable; only **one-box confirmed frames** can be used as automatic reference
+anchors, because this version assumes one UAV track per sequence.
+
+Metadata: `2d_detect/.gt_bbox_review_state.json`. The first time any existing
+label is edited, the original is copied to `2d_detect/_annotation_backup/`.
+Do not run two copies of the server against the same sequence or modify `.txt`
+files externally while the application is open. Reload the sequence after any
+out-of-band label edits.
+
+**E5 integration:** `tools/train_multimodal_v1_full.py` currently consumes
+`manifests/multimodal_v1/vision_manual161_train.jsonl`, not newly written
+YOLO `.txt` files. Generating new labels does not automatically add them to
+training; a separate manifest export step is required once you approve the
+annotations. Do not mix validation/test labels into the training manifest.
 
 ## Tests
 
 ```bash
-PYTHONPATH=src python -m pytest -q tests
+PYTHONPATH=src python -m unittest discover -s tests -p 'test_gt_bbox_annotation_server.py' -v
 ```
 
-## Required two-update gate
+## Important limitations
 
-```bash
-PYTHONPATH=src PYTHONUNBUFFERED=1 \
-python tools/train_multimodal_v1_full.py \
-  --config configs/multimodal_v1/e5_full_v1.yaml \
-  --output outputs/e5_gate2 \
-  --device cuda:0 \
-  --max-updates 2
-```
+- This is a **GT-guided box translation**, not an image recognizer or tracker.
+  Generated proposals are unverified. Visibility, orientation, and scale may
+  change; the reviewer must adjust box size and delete false proposals.
+- For an unmapped or invalid GT, no proposal is generated. You can still draw
+  and save a box manually; without a valid projection it is not an anchor.
+- Browser server is local, unauthenticated, and grants write access to
+  `2d_detect`; do not bind `--host 0.0.0.0` on shared networks.
 
-The gate output must report `status=PASS` and `optimizer_updates=2`.
+## Multimodal training portability
 
-## Full E5 training
-
-Start the full run from the audited initial checkpoints, using a different
-output directory from the gate:
-
-```bash
-PYTHONPATH=src PYTHONUNBUFFERED=1 \
-python tools/train_multimodal_v1_full.py \
-  --config configs/multimodal_v1/e5_full_v1.yaml \
-  --output outputs/e5_full_v1_seed42 \
-  --device cuda:0
-```
-
-Resume an interrupted completed-epoch checkpoint with:
-
-```bash
-PYTHONPATH=src PYTHONUNBUFFERED=1 \
-python tools/train_multimodal_v1_full.py \
-  --config configs/multimodal_v1/e5_full_v1.yaml \
-  --output outputs/e5_full_v1_seed42 \
-  --device cuda:0 \
-  --resume auto
-```
-
-The trainer writes effective configs, `training_log.csv`, validation JSONL,
-`last.pt`, `best.pt`, and `run_summary.json` under the selected output path.
-
-## Scope
-
-This extraction is a snapshot, not a second source of truth. Changes made here
-do not automatically propagate to the parent workspace. No historical outputs
-or earlier architecture drafts are included.
+Training and evaluation configs use repository-relative paths. Datasets and
+large checkpoints can live anywhere on a new server through explicit
+`RDQ_*` environment variables. See
+[`docs/PORTABLE_PATHS.md`](docs/PORTABLE_PATHS.md) and run
+`python tools/check_assets.py` before starting an experiment.

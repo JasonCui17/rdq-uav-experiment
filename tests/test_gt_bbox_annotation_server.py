@@ -126,62 +126,6 @@ class AnnotationTests(unittest.TestCase):
         self.assertFalse((self.seq/'2d_detect'/'4.000.txt').exists())
         self.assertFalse((self.seq/'2d_detect'/'5.000.txt').exists())
 
-    def test_propagation_stops_at_next_confirmed_frame(self):
-        # 原测试数据包含第0～5帧，额外构造第6、7帧。
-        for i in (6, 7):
-            Image.new("RGB", (200, 100)).save(
-                self.seq / "Image" / f"{i:.3f}.png"
-            )
-            np.save(
-                self.seq / "ground_truth" / f"{i:.3f}.npy",
-                np.array([i * .04, 0., 1.]),
-            )
-
-        # 第5帧也是已有人工确认框。
-        (self.seq / "2d_detect" / "5.000.txt").write_text(
-            "0 0.800 0.500 0.100 0.100\n"
-        )
-
-        s = mod.SequenceStore(
-            self.root, "seq0001", self.cal,
-            max_gt_gap_s=.05, discrepancy_px=32
-        )
-
-        before = {
-            name: json.dumps(s.by_name[name].boxes)
-            for name in (
-                "0.000.png", "1.000.png",
-                "4.000.png", "5.000.png",
-                "6.000.png", "7.000.png",
-            )
-        }
-
-        # 确认第3帧：只允许更新第4帧。
-        s.save(
-            "3.000.png",
-            [{"class_id": 0, "box": [40, 40, 50, 50]}],
-        )
-
-        self.assertEqual(
-            s.by_name["4.000.png"].candidate_anchor,
-            "3.000.png",
-        )
-        self.assertNotEqual(
-            json.dumps(s.by_name["4.000.png"].boxes),
-            before["4.000.png"],
-        )
-
-        # 第3帧之前和第5帧及之后，全部不变。
-        for name in (
-            "0.000.png", "1.000.png",
-            "5.000.png", "6.000.png", "7.000.png",
-        ):
-            self.assertEqual(
-                json.dumps(s.by_name[name].boxes),
-                before[name],
-                name,
-            )
-
     def test_calibration_file_equivalent_projection(self):
         camera=self.root/'camera.yaml';geometry=self.root/'geometry.json'
         camera.write_text('cameras:\n  left:\n    model: omni\n    distortion_model: radtan\n    intrinsics: [0, 100, 100, 50, 50]\n    distortion_coeffs: [0, 0, 0, 0]\n    resolution: [100, 100]\n')

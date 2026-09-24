@@ -103,8 +103,13 @@ class FullMultimodalV1(nn.Module):
         self.fusion_loss=fusion_loss or FusionLoss()
 
     def forward(self,lidar_batch:Mapping[str,Any],images:torch.Tensor,context:InteractionContext,*,
-                image_padding_mask:torch.Tensor|None=None,targets:FusionTargets|None=None,return_aux:bool=False)->FusionOutput:
-        p5=self.backbone(lidar_batch,images,context,return_aux=return_aux)
+                image_padding_mask:torch.Tensor|None=None,targets:FusionTargets|None=None,return_aux:bool=False,
+                return_diagnostics:bool|None=None)->FusionOutput:
+        # Training needs the reusable P5/DINO outputs for L_R and L_V, but not
+        # HCI edge maps or decoder masks. Preserve legacy return_aux behavior
+        # unless the caller explicitly disables those diagnostic allocations.
+        diagnostics=return_aux if return_diagnostics is None else bool(return_diagnostics)
+        p5=self.backbone(lidar_batch,images,context,return_aux=diagnostics)
         if image_padding_mask is None:
             image_padding_mask=torch.zeros(images.shape[0],images.shape[-2],images.shape[-1],device=images.device,dtype=torch.bool)
         if image_padding_mask.dtype!=torch.bool or image_padding_mask.shape!=(images.shape[0],images.shape[-2],images.shape[-1]):
@@ -116,7 +121,7 @@ class FullMultimodalV1(nn.Module):
         gate=self.reliability_gate(hypotheses); query=self.shared_query(hypotheses)
         level2=p5.radar["layouts"].levels[2]
         decoded,decoder_aux=self.decoder(query,hypotheses.batch_index,p5.radar_stages[2],level2.batch_index,p5.vision.features[2],
-            sample_m_R=context.m_R,sample_m_V=context.m_V,vision_padding_mask=image_padding_mask,return_aux=return_aux)
+            sample_m_R=context.m_R,sample_m_V=context.m_V,vision_padding_mask=image_padding_mask,return_aux=diagnostics)
         projected=query.new_zeros((hypotheses.n,2))
         rid=torch.nonzero(hypotheses.m_R).flatten()
         if len(rid):

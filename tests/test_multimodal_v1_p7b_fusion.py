@@ -31,6 +31,14 @@ class TestP7(unittest.TestCase):
         self.assertEqual(tuple(out.shape),(h.n,128)); self.assertEqual(aux.memory_key_padding_mask.ndim,2)
         out.sum().backward(); self.assertTrue(torch.isfinite(r2.grad).all()); self.assertTrue(torch.isfinite(v2.grad).all())
 
+    def test_disabling_decoder_diagnostics_preserves_output(self):
+        torch.manual_seed(11); h=make_h(); q=TypedSharedQuery()(h); dec=FusionTransformerDecoder(dropout=0.).eval()
+        r2=torch.randn(3,128); rb=torch.tensor([0,0,1]); v2=torch.randn(2,384,2,3)
+        with torch.no_grad():
+            diagnostic,aux=dec(q,h.batch_index,r2,rb,v2,return_aux=True)
+            lean,no_aux=dec(q,h.batch_index,r2,rb,v2,return_aux=False)
+        self.assertTrue(torch.equal(diagnostic,lean)); self.assertIsNotNone(aux); self.assertIsNone(no_aux)
+
     def test_decoder_masks_spatial_image_padding_and_preserves_batch_isolation(self):
         torch.manual_seed(7); dec=FusionTransformerDecoder(dropout=0.).eval()
         query=torch.randn(2,128); qbatch=torch.tensor([0,1]); v2=torch.randn(2,384,2,3)

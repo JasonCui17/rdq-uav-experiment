@@ -5,6 +5,15 @@ __pycache__/
 outputs/*
 !outputs/.gitkeep
 
+# Local experiment/runtime artifacts.
+.nextflow/
+runs/
+weights/
+mmaud_drone_4090/
+gt_bbox_annotator.zip
+yolo11s.pt
+tools/*.bak_progress
+
 # Runtime assets are intentionally supplied locally and never committed.
 checkpoints/*
 !checkpoints/README.md

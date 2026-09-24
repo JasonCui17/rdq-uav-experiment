@@ -1,0 +1,6 @@
+.conda_cache/
+.nextflow.log*
+bin/__pycache__/
+results/
+tests/.stub_*.log
+work/

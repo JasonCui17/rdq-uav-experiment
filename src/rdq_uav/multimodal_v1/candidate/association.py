@@ -74,13 +74,21 @@ def associate_candidates(
         rids=torch.nonzero(radar.batch_index==b).flatten(); vids=torch.nonzero(vision.batch_index==b).flatten()
         matched_r=set(); matched_v=set()
         if len(rids) and len(vids):
-            d=point_to_box_distance(projected_radar_xy[rids],vision.box_xyxy_px[vids])
-            feasible=(d<=geometry_gate_px) & valid[rids,None]
-            rf=torch.nn.functional.normalize(radar.feature[rids].float(),dim=1)
-            vf=torch.nn.functional.normalize(vision.feature[vids].float(),dim=1)
-            cosine=rf@vf.T
-            cost=1.-cosine
-            cost=torch.where(feasible,cost,torch.full_like(cost,1e6))
+            # Candidate association is a discrete, non-neural assignment step.
+            # Keep its geometry/cosine cost in FP32 under AMP: the 1e6
+            # infeasible sentinel exceeds FP16's finite range (65504), and
+            # Hungarian ranking benefits from full precision. The selected
+            # differentiable cosine values are cast back by ``_append``.
+            with torch.autocast(device_type=radar.feature.device.type, enabled=False):
+                d=point_to_box_distance(
+                    projected_radar_xy[rids].float(),vision.box_xyxy_px[vids].float()
+                )
+                feasible=(d<=geometry_gate_px) & valid[rids,None]
+                rf=torch.nn.functional.normalize(radar.feature[rids].float(),dim=1)
+                vf=torch.nn.functional.normalize(vision.feature[vids].float(),dim=1)
+                cosine=rf@vf.T
+                cost=1.-cosine
+                cost=torch.where(feasible,cost,torch.full_like(cost,1e6))
             from scipy.optimize import linear_sum_assignment
             rr,cc=linear_sum_assignment(cost.detach().float().cpu().numpy())
             for lr,lv in zip(rr.tolist(),cc.tolist()):

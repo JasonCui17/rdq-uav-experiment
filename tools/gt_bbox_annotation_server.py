@@ -280,85 +280,6 @@ class SequenceStore:
             f.boxes=[{'class_id':anchor.boxes[0]['class_id'],'box':box}]
             f.status='draft';f.source='gt_shift';f.candidate_anchor=anchor.name
 
-    def _propagate_segment(self, start_index: int):
-        """
-        只更新当前确认帧之后、下一张确认帧之前的未确认候选。
-
-        例：第10帧和第99帧已确认
-        -> 仅更新第11～98帧。
-        """
-        anchor = self.frames[start_index]
-
-        # 找到下一个已确认帧，作为右边界。
-        stop_index = next(
-            (
-                i for i in range(start_index + 1, len(self.frames))
-                if self.frames[i].status
-                in {"confirmed", "confirmed_negative"}
-            ),
-            len(self.frames),
-        )
-
-        usable = self._usable_anchor(anchor)
-
-        for i in range(start_index + 1, stop_index):
-            f = self.frames[i]
-
-            # 人工明确标记为无法确认的帧不动。
-            if f.status == "uncertain":
-                continue
-
-            # 只清除旧传播产生的警告，不清除 GT 原始异常。
-            if f.warning == "Propagated bbox is fully outside image":
-                f.warning = None
-
-            # 当前帧没有有效投影。
-            if f.projection is None:
-                f.boxes = []
-                f.status = "invalid"
-                f.source = "none"
-                f.candidate_anchor = None
-                continue
-
-            # 参考帧无效或被确认无框时，
-            # 清除本区间内的旧候选，避免继续显示过时的框。
-            if not usable:
-                f.boxes = []
-                f.status = "unlabeled"
-                f.source = "none"
-                f.candidate_anchor = None
-                continue
-
-            du = f.projection[0] - anchor.projection[0]
-            dv = f.projection[1] - anchor.projection[1]
-
-            W, H = self.cal["wh"]
-            x1, y1, x2, y2 = anchor.boxes[0]["box"]
-
-            box = [
-                max(0.0, min(float(W), x1 + du)),
-                max(0.0, min(float(H), y1 + dv)),
-                max(0.0, min(float(W), x2 + du)),
-                max(0.0, min(float(H), y2 + dv)),
-            ]
-
-            # 保留越界裁剪规则，完全越界则标记异常。
-            if box[2] - box[0] <= 0.001 or box[3] - box[1] <= 0.001:
-                f.boxes = []
-                f.status = "invalid"
-                f.source = "none"
-                f.candidate_anchor = None
-                f.warning = "Propagated bbox is fully outside image"
-                continue
-
-            f.boxes = [{
-                "class_id": anchor.boxes[0]["class_id"],
-                "box": box,
-            }]
-            f.status = "draft"
-            f.source = "gt_shift"
-            f.candidate_anchor = anchor.name
-
     def _serial(self,f,i):
         discrepancy=None
         if f.projection is not None and f.boxes:
@@ -401,7 +322,7 @@ class SequenceStore:
                 f.source='manual_review';f.force_anchor=bool(force_anchor) if canonical else False
                 f.candidate_anchor=None
                 self._save_label(f)
-            self._propagate_segment(i)
+            self._regenerate(initial=False,after_index=i)
             return self.snapshot()
 
 
@@ -469,9 +390,7 @@ class SequenceStore:
 
             # 重新生成尚未确认的候选框；不改变已经确认的标签。
             if confirmed:
-                for name in confirmed:
-                    i = self.frames.index(self.by_name[name])
-                    self._propagate_segment(i)
+                self._regenerate(initial=True)
 
             result = self.snapshot()
             result["bulk_result"] = {
@@ -484,15 +403,9 @@ class SequenceStore:
 
     def recompute(self,after=None):
         with self.lock:
-            if after is None:
-                # 用户明确点击“全段重新生成”时，
-                # 仍允许重建整个 Sequence 的未确认候选。
-                self._regenerate(initial=True)
+            if after is None:self._regenerate(initial=True)
             else:
-                # “从当前帧重新向后生成”
-                # 只处理当前帧到下一确认帧之间。
-                f=self._get(after)
-                self._propagate_segment(self.frames.index(f))
+                f=self._get(after);self._regenerate(initial=False,after_index=self.frames.index(f))
             return self.snapshot()
 
 

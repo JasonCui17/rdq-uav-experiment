@@ -32,6 +32,17 @@ class TestP6(unittest.TestCase):
         self.assertEqual(int((h.hypothesis_type==HYP_R).sum()),3)
         self.assertEqual(int((h.hypothesis_type==HYP_V).sum()),3)
 
+    def test_half_precision_candidates_use_fp32_hungarian_cost(self):
+        r,v=radar(),vision()
+        r=CandidateSet(r.score.half(),r.feature.half(),r.xyz.half(),r.xyz_valid,
+            r.box_xyxy_px.half(),r.box_valid,r.batch_index,r.source,r.source_index)
+        v=CandidateSet(v.score.half(),v.feature.half(),v.xyz.half(),v.xyz_valid,
+            v.box_xyxy_px.half(),v.box_valid,v.batch_index,v.source,v.source_index)
+        projected=torch.tensor([[100.,100.],[120.,120.],[140.,140.]],dtype=torch.float16)
+        h=associate_candidates(r,v,projected_radar_xy=projected)
+        self.assertTrue(bool(torch.isfinite(h.association_info.float()).all()))
+        self.assertEqual(int((h.hypothesis_type==HYP_RV).sum()),0)
+
     def test_score_not_in_matching_cost(self):
         r=radar(); p=torch.tensor([[10.,10.],[40.,40.],[20.,20.]])
         a=associate_candidates(r,vision(),projected_radar_xy=p)

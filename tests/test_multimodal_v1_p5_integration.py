@@ -179,6 +179,16 @@ class P5IntegrationTests(unittest.TestCase):
         for feature in output.vision.features:
             self.assertTrue(torch.isfinite(feature).all())
 
+    def test_disabling_diagnostics_preserves_backbone_outputs(self):
+        with torch.no_grad():
+            diagnostic = self.model(self.batch, self.images, context(True), return_aux=True)
+            lean = self.model(self.batch, self.images, context(True), return_aux=False)
+        for field in ("logits", "residual_xyz", "pred_xyz", "fine_features"):
+            self.assertTrue(torch.equal(diagnostic.radar[field], lean.radar[field]))
+        for expected, actual in zip(diagnostic.vision.features, lean.vision.features):
+            self.assertTrue(torch.equal(expected, actual))
+        self.assertTrue(all(value is None for value in lean.hci_aux))
+
     def test_padded_visual_cells_are_not_used(self):
         # Calibrated image is only 28px wide but the Swin input is 32px wide.
         # A projection near the valid right edge may not expand into padded cells.

@@ -4,6 +4,7 @@ from typing import Any
 
 import torch
 from torch import nn
+from torchvision.ops import nms
 
 from .candidate_set import CandidateSet
 
@@ -11,21 +12,16 @@ from .candidate_set import CandidateSet
 def _nms_xyxy(boxes: torch.Tensor, scores: torch.Tensor, iou_threshold: float) -> torch.Tensor:
     if len(boxes) == 0:
         return torch.empty(0, dtype=torch.long, device=boxes.device)
-    x1,y1,x2,y2 = boxes.unbind(1)
-    areas = (x2-x1).clamp_min(0) * (y2-y1).clamp_min(0)
+    # Preserve the original stable descending-score/source-index order while
+    # using torchvision's fused CPU/CUDA NMS. Rank values are deliberately
+    # synthetic: NMS only needs their order, and this also makes equal-score
+    # behavior deterministic across CPU and GPU.
     order = torch.argsort(scores, descending=True, stable=True)
-    keep=[]
-    while len(order):
-        i=order[0]; keep.append(i)
-        if len(order)==1: break
-        rest=order[1:]
-        xx1=torch.maximum(x1[i],x1[rest]); yy1=torch.maximum(y1[i],y1[rest])
-        xx2=torch.minimum(x2[i],x2[rest]); yy2=torch.minimum(y2[i],y2[rest])
-        inter=(xx2-xx1).clamp_min(0)*(yy2-yy1).clamp_min(0)
-        union=areas[i]+areas[rest]-inter
-        iou=torch.where(union>0,inter/union,torch.zeros_like(union))
-        order=rest[iou<=iou_threshold]
-    return torch.stack(keep)
+    priority = torch.arange(
+        len(order), 0, -1, device=boxes.device, dtype=torch.float32
+    )
+    kept_in_order = nms(boxes[order].float(), priority, float(iou_threshold))
+    return order[kept_in_order]
 
 
 def _cxcywh_norm_to_source_xyxy(

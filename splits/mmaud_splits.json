@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "seed": 42,
-  "source_root": "/home/jasoncui/datasets/MMAUD/official/train",
+  "source_root": "data/mmaud_official_train",
   "allocation": "sequence_level_random_approximately_70_15_15",
   "num_sequences": 102,
   "train_sub": [

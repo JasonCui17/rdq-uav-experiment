@@ -18,9 +18,20 @@ class CandidateSelector:
             ids=torch.nonzero(o["batch_index"]==b).flatten()
             rank_logits=o["logits"][ids].float()
             order=ids[self._order(rank_logits,o["source_token_id"][ids])]
-            raw=order[:self.raw_topk]; pool=order[:self.pre]; kept=[]
-            for idx in pool:
-                if not kept or torch.all(torch.linalg.vector_norm(o["pred_xyz"][torch.stack(kept)]-o["pred_xyz"][idx],dim=1)>self.radius): kept.append(idx)
-                if len(kept)>=self.final: break
-            final=torch.stack(kept) if kept else pool[:0]; results.append({"raw":self._gather(o,raw),"nms":self._gather(o,final)})
+            raw=order[:self.raw_topk]; pool=order[:self.pre]
+            # Compute the exact legacy radius predicate in one device region,
+            # then transfer only the <=100 x <=100 boolean matrix once. The
+            # greedy stable-order loop remains identical, without one host
+            # synchronization and kernel sequence per candidate.
+            if len(pool):
+                xyz=o["pred_xyz"][pool]
+                suppressed=(torch.linalg.vector_norm(xyz[:,None]-xyz[None,:],dim=2)<=self.radius).cpu()
+                kept_local=[]
+                for local_idx in range(len(pool)):
+                    if not kept_local or not bool(suppressed[local_idx,kept_local].any()):
+                        kept_local.append(local_idx)
+                    if len(kept_local)>=self.final: break
+                final=pool[torch.tensor(kept_local,device=pool.device,dtype=torch.long)]
+            else: final=pool
+            results.append({"raw":self._gather(o,raw),"nms":self._gather(o,final)})
         return results
