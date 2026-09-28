@@ -1,0 +1,219 @@
+{
+  "config": "/home/jasoncui/projects/rdq-uav-experiment/outputs/own_multimodal_research/multimodal_v1/e5_annotated20_4090_seed42/effective_config.yaml",
+  "validation_queries": 32,
+  "precision": "fp32",
+  "best": {
+    "checkpoint": "best",
+    "checkpoint_path": "/home/jasoncui/projects/rdq-uav-experiment/outputs/own_multimodal_research/multimodal_v1/e5_annotated20_4090_seed42/checkpoints/best.ckpt",
+    "checkpoint_epoch": 0,
+    "checkpoint_global_step": 2000,
+    "queries": 32,
+    "fusion": {
+      "n_gt": 32,
+      "n_output": 32,
+      "coverage": 1.0,
+      "success_05m": 0.0,
+      "success_1m": 0.71875,
+      "success_2m": 0.96875,
+      "mean_error_m": 1.9737602714449167,
+      "median_error_m": 0.806623637676239,
+      "p90_error_m": 1.2215706110000613
+    },
+    "radar_top1_pre_fusion": {
+      "n_gt": 32,
+      "n_output": 31,
+      "coverage": 0.96875,
+      "success_05m": 0.0,
+      "success_1m": 0.75,
+      "success_2m": 0.9375,
+      "mean_error_m": 2.2688496631960713,
+      "median_error_m": 0.8092143535614014,
+      "p90_error_m": 1.145229697227478
+    },
+    "radar_oracle_pre_fusion": {
+      "n_gt": 32,
+      "n_output": 31,
+      "coverage": 0.96875,
+      "success_05m": 0.0,
+      "success_1m": 0.75,
+      "success_2m": 0.96875,
+      "mean_error_m": 0.852443770054848,
+      "median_error_m": 0.8092143535614014,
+      "p90_error_m": 1.145229697227478
+    },
+    "fusion_top_type_counts": {
+      "V": 1,
+      "R": 25,
+      "RV": 6
+    },
+    "fusion_top_type_metrics": {
+      "R": {
+        "count": 25,
+        "fraction": 0.78125,
+        "n_gt": 25,
+        "n_output": 25,
+        "coverage": 1.0,
+        "success_05m": 0.0,
+        "success_1m": 0.68,
+        "success_2m": 1.0,
+        "mean_error_m": 0.8874073004722596,
+        "median_error_m": 0.8284671902656555,
+        "p90_error_m": 1.2055352926254272
+      },
+      "RV": {
+        "count": 6,
+        "fraction": 0.1875,
+        "n_gt": 6,
+        "n_output": 6,
+        "coverage": 1.0,
+        "success_05m": 0.0,
+        "success_1m": 1.0,
+        "success_2m": 1.0,
+        "mean_error_m": 0.7067939241727194,
+        "median_error_m": 0.7595362067222595,
+        "p90_error_m": 0.8137365579605103
+      },
+      "V": {
+        "count": 1,
+        "fraction": 0.03125,
+        "n_gt": 1,
+        "n_output": 1,
+        "coverage": 1.0,
+        "success_05m": 0.0,
+        "success_1m": 0.0,
+        "success_2m": 0.0,
+        "mean_error_m": 36.73438262939453,
+        "median_error_m": 36.73438262939453,
+        "p90_error_m": 36.73438262939453
+      }
+    },
+    "failure_diagnostics": {
+      "radar_top1_hit_1m_but_fusion_failed_1m": 1,
+      "radar_candidate_exists_within_1m_but_fusion_failed_1m": 1,
+      "selected_hypothesis_radar_prior_within_1m_but_refined_xyz_failed_1m": 1
+    },
+    "score_diagnostics": {
+      "R": {
+        "best_fused_score_mean": 0.642535749822855
+      },
+      "RV": {
+        "best_fused_score_mean": 0.42998342712720233
+      },
+      "V": {
+        "best_fused_score_mean": 0.06597727513872087
+      }
+    }
+  },
+  "last": {
+    "checkpoint": "last",
+    "checkpoint_path": "/home/jasoncui/projects/rdq-uav-experiment/outputs/own_multimodal_research/multimodal_v1/e5_annotated20_4090_seed42/checkpoints/last.ckpt",
+    "checkpoint_epoch": 11,
+    "checkpoint_global_step": 24000,
+    "queries": 32,
+    "fusion": {
+      "n_gt": 32,
+      "n_output": 32,
+      "coverage": 1.0,
+      "success_05m": 0.0,
+      "success_1m": 0.34375,
+      "success_2m": 0.375,
+      "mean_error_m": 24.342582875862718,
+      "median_error_m": 36.99027061462402,
+      "p90_error_m": 37.875281524658206
+    },
+    "radar_top1_pre_fusion": {
+      "n_gt": 32,
+      "n_output": 31,
+      "coverage": 0.96875,
+      "success_05m": 0.0,
+      "success_1m": 0.71875,
+      "success_2m": 0.78125,
+      "mean_error_m": 9.633044704314202,
+      "median_error_m": 0.9410173892974854,
+      "p90_error_m": 45.299705505371094
+    },
+    "radar_oracle_pre_fusion": {
+      "n_gt": 32,
+      "n_output": 31,
+      "coverage": 0.96875,
+      "success_05m": 0.0,
+      "success_1m": 0.71875,
+      "success_2m": 0.96875,
+      "mean_error_m": 0.9406873487657116,
+      "median_error_m": 0.9410173892974854,
+      "p90_error_m": 1.139431357383728
+    },
+    "fusion_top_type_counts": {
+      "V": 18,
+      "RV": 11,
+      "R": 3
+    },
+    "fusion_top_type_metrics": {
+      "R": {
+        "count": 3,
+        "fraction": 0.09375,
+        "n_gt": 3,
+        "n_output": 3,
+        "coverage": 1.0,
+        "success_05m": 0.0,
+        "success_1m": 0.3333333333333333,
+        "success_2m": 0.3333333333333333,
+        "mean_error_m": 32.157878359158836,
+        "median_error_m": 47.878578186035156,
+        "p90_error_m": 47.91313018798828
+      },
+      "RV": {
+        "count": 11,
+        "fraction": 0.34375,
+        "n_gt": 11,
+        "n_output": 11,
+        "coverage": 1.0,
+        "success_05m": 0.0,
+        "success_1m": 0.9090909090909091,
+        "success_2m": 1.0,
+        "mean_error_m": 0.885944664478302,
+        "median_error_m": 0.9045117497444153,
+        "p90_error_m": 0.9731398224830627
+      },
+      "V": {
+        "count": 18,
+        "fraction": 0.5625,
+        "n_gt": 18,
+        "n_output": 18,
+        "coverage": 1.0,
+        "success_05m": 0.0,
+        "success_1m": 0.0,
+        "success_2m": 0.0,
+        "mean_error_m": 37.37464586893717,
+        "median_error_m": 37.396610260009766,
+        "p90_error_m": 37.81421127319336
+      }
+    },
+    "failure_diagnostics": {
+      "radar_top1_hit_1m_but_fusion_failed_1m": 13,
+      "radar_candidate_exists_within_1m_but_fusion_failed_1m": 13,
+      "selected_hypothesis_radar_prior_within_1m_but_refined_xyz_failed_1m": 0
+    },
+    "score_diagnostics": {
+      "R": {
+        "best_fused_score_mean": 0.19817311695266154
+      },
+      "RV": {
+        "best_fused_score_mean": 0.4018438449429889
+      },
+      "V": {
+        "best_fused_score_mean": 0.46746131201507524
+      }
+    }
+  },
+  "paired": {
+    "n_queries": 32,
+    "best_success_last_failure_1m": 13,
+    "among_collapsed_last_top_type": {
+      "V": 13
+    },
+    "among_collapsed_last_radar_top1_still_within_1m": 13,
+    "among_collapsed_last_has_some_radar_candidate_within_1m": 13,
+    "among_collapsed_last_selected_radar_prior_within_1m_but_refined_output_failed": 0
+  }
+}
