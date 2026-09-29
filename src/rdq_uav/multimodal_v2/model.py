@@ -46,7 +46,10 @@ class MultimodalV2(nn.Module):
         vision_raw, visual = self.vision(images, image_padding_mask, batch["image_source_wh"])
         radar = self._filter_modality(radar, context.m_R)
         visual = self._filter_modality(visual, context.m_V)
-        projected, _ = project_omni_radtan(radar.xyz_m.float(), radar.batch_index, context.projection)
+        projected, projection_valid = project_omni_radtan(
+            radar.xyz_m.float(), radar.batch_index, context.projection
+        )
+        radar = radar.with_projection(projected, projection_valid)
         if self.interaction_enabled:
             radar_evidence, vision_evidence = self.interaction(
                 radar, visual, vision_raw["pyramid"].features[:2], image_padding_mask,
@@ -59,7 +62,8 @@ class MultimodalV2(nn.Module):
                 radar_evidence.gate_weight, projected,
             )
         return self.scoring(
-            radar, visual, radar_evidence, vision_evidence, projected,
+            radar, visual, radar_evidence, vision_evidence,
+            num_samples=int(batch["num_samples"]),
             enable_vision_scoring=self.vision_scoring_enabled,
             diagnostics={
                 "lidar_raw": lidar_raw,

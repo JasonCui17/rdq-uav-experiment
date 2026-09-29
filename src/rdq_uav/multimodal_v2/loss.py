@@ -1,4 +1,4 @@
-"""Masked ranking supervision for unchanged multimodal candidates."""
+"""Task-separated, label-masked candidate ranking losses."""
 
 from __future__ import annotations
 
@@ -20,64 +20,142 @@ class MultimodalTargets:
 
 
 def box_iou_aligned(boxes: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
-    lt = torch.maximum(boxes[:, :2], target[:2]); rb = torch.minimum(boxes[:, 2:], target[2:])
-    intersection = (rb - lt).clamp_min(0).prod(1)
-    area_a = (boxes[:, 2:] - boxes[:, :2]).clamp_min(0).prod(1)
-    area_b = (target[2:] - target[:2]).clamp_min(0).prod()
-    return intersection / (area_a + area_b - intersection).clamp_min(1e-8)
+    top_left = torch.maximum(boxes[:, :2], target[:2])
+    bottom_right = torch.minimum(boxes[:, 2:], target[2:])
+    intersection = (bottom_right - top_left).clamp_min(0).prod(1)
+    area = (boxes[:, 2:] - boxes[:, :2]).clamp_min(0).prod(1)
+    target_area = (target[2:] - target[:2]).clamp_min(0).prod()
+    return intersection / (area + target_area - intersection).clamp_min(1e-8)
 
 
 class CandidateRankingLoss(nn.Module):
-    """Per-query focal ranking loss with independent 3D and 2D masks."""
+    """Focal ranking loss normalized independently for every labeled query."""
 
-    def __init__(self, focal_alpha: float = 0.25, focal_gamma: float = 2.0,
-                 xyz_positive_m: float = 1.0, xyz_ignore_m: float = 2.0,
-                 box_positive_iou: float = 0.5, box_ignore_iou: float = 0.3,
-                 lambda_3d: float = 1.0, lambda_2d: float = 1.0) -> None:
+    def __init__(
+        self,
+        focal_alpha: float = 0.25,
+        focal_gamma: float = 2.0,
+        xyz_positive_m: float = 1.0,
+        xyz_ignore_m: float = 2.0,
+        box_positive_iou: float = 0.5,
+        box_ignore_iou: float = 0.3,
+        lambda_3d: float = 1.0,
+        lambda_2d: float = 1.0,
+        negative_only_weight: float = 0.25,
+    ) -> None:
         super().__init__()
-        self.alpha, self.gamma = float(focal_alpha), float(focal_gamma)
-        self.xyz_positive_m, self.xyz_ignore_m = float(xyz_positive_m), float(xyz_ignore_m)
-        self.box_positive_iou, self.box_ignore_iou = float(box_positive_iou), float(box_ignore_iou)
-        self.lambda_3d, self.lambda_2d = float(lambda_3d), float(lambda_2d)
+        self.alpha = float(focal_alpha)
+        self.gamma = float(focal_gamma)
+        self.xyz_positive_m = float(xyz_positive_m)
+        self.xyz_ignore_m = float(xyz_ignore_m)
+        self.box_positive_iou = float(box_positive_iou)
+        self.box_ignore_iou = float(box_ignore_iou)
+        self.lambda_3d = float(lambda_3d)
+        self.lambda_2d = float(lambda_2d)
+        self.negative_only_weight = float(negative_only_weight)
 
-    def _focal(self, score: torch.Tensor, positive: torch.Tensor, valid: torch.Tensor) -> torch.Tensor:
-        score = score[valid].float().clamp(1e-6, 1 - 1e-6)
-        target = positive[valid].float()
-        if not len(score):
-            return score.sum()
-        ce = F.binary_cross_entropy(score, target, reduction="none")
-        pt = torch.where(target.bool(), score, 1 - score)
-        alpha = torch.where(target.bool(), self.alpha, 1 - self.alpha)
-        return (alpha * (1 - pt).pow(self.gamma) * ce).sum() / positive.sum().clamp_min(1)
+    def _terms(self, score: torch.Tensor, positive: torch.Tensor) -> torch.Tensor:
+        score = score.float().clamp(1e-6, 1 - 1e-6)
+        target = positive.float()
+        cross_entropy = F.binary_cross_entropy(score, target, reduction="none")
+        probability = torch.where(positive, score, 1 - score)
+        alpha = torch.where(positive, self.alpha, 1 - self.alpha)
+        return alpha * (1 - probability).pow(self.gamma) * cross_entropy
 
-    def forward(self, output: MultimodalOutput, targets: MultimodalTargets) -> dict[str, torch.Tensor | int]:
-        zero = output.score_after.sum() * 0
-        losses_3d, losses_2d = [], []
-        positive_3d = positive_2d = supervised_3d = supervised_2d = 0
-        for batch in range(len(targets.has_xyz)):
-            rows = output.batch_index == batch
-            if bool(targets.has_xyz[batch]):
-                candidates = rows & output.has_xyz
-                distance = torch.linalg.vector_norm(output.xyz_m[candidates].float() - targets.xyz_m[batch].float(), dim=1)
-                positive = distance <= self.xyz_positive_m
-                if bool(positive.any()):
-                    valid = positive | (distance > self.xyz_ignore_m)
-                    losses_3d.append(self._focal(output.score_after[candidates], positive, valid))
-                    positive_3d += int(positive.sum()); supervised_3d += 1
-            if bool(targets.has_box[batch]):
-                candidates = rows & output.has_box
-                if bool(candidates.any()):
-                    iou = box_iou_aligned(output.box_xyxy_px[candidates].float(), targets.box_xyxy_px[batch].float())
+    def _query_loss(
+        self,
+        score: torch.Tensor,
+        positive: torch.Tensor,
+        negative: torch.Tensor,
+    ) -> tuple[torch.Tensor | None, str]:
+        if bool(positive.any()):
+            valid = positive | negative
+            return self._terms(score[valid], positive[valid]).sum() / positive.sum(), "positive"
+        if bool(negative.any()):
+            loss = self._terms(score[negative], positive[negative]).sum() / negative.sum()
+            return self.negative_only_weight * loss, "negative_only"
+        return None, "ignored_only"
+
+    def forward(
+        self, output: MultimodalOutput, targets: MultimodalTargets
+    ) -> dict[str, torch.Tensor | int | bool]:
+        zero = (output.score_3d_after.sum() + output.score_2d_after.sum()) * 0
+        losses_3d: list[torch.Tensor] = []
+        losses_2d: list[torch.Tensor] = []
+        stats = {
+            "n_gt3d": 0,
+            "n_with_3d_candidate": 0,
+            "n_with_positive_3d": 0,
+            "n_negative_only_3d": 0,
+            "n_no_3d_candidate": 0,
+            "n_3d_loss_queries": 0,
+            "n_gt2d": 0,
+            "n_with_2d_candidate": 0,
+            "n_with_positive_2d": 0,
+            "n_negative_only_2d": 0,
+            "n_no_2d_candidate": 0,
+            "n_2d_loss_queries": 0,
+        }
+
+        for batch_idx in range(len(targets.has_xyz)):
+            sample_rows = output.batch_index == batch_idx
+            if bool(targets.has_xyz[batch_idx]):
+                stats["n_gt3d"] += 1
+                candidates = sample_rows & output.has_xyz
+                if not bool(candidates.any()):
+                    stats["n_no_3d_candidate"] += 1
+                else:
+                    stats["n_with_3d_candidate"] += 1
+                    distance = torch.linalg.vector_norm(
+                        output.xyz_m[candidates].float() - targets.xyz_m[batch_idx].float(),
+                        dim=1,
+                    )
+                    positive = distance <= self.xyz_positive_m
+                    negative = distance > self.xyz_ignore_m
+                    query_loss, kind = self._query_loss(
+                        output.score_3d_after[candidates], positive, negative
+                    )
+                    if kind == "positive":
+                        stats["n_with_positive_3d"] += 1
+                    elif kind == "negative_only":
+                        stats["n_negative_only_3d"] += 1
+                    if query_loss is not None and self.lambda_3d > 0:
+                        losses_3d.append(query_loss)
+                        stats["n_3d_loss_queries"] += 1
+
+            if bool(targets.has_box[batch_idx]):
+                stats["n_gt2d"] += 1
+                candidates = sample_rows & output.has_box
+                if not bool(candidates.any()):
+                    stats["n_no_2d_candidate"] += 1
+                else:
+                    stats["n_with_2d_candidate"] += 1
+                    iou = box_iou_aligned(
+                        output.box_xyxy_px[candidates].float(),
+                        targets.box_xyxy_px[batch_idx].float(),
+                    )
                     positive = iou >= self.box_positive_iou
-                    if bool(positive.any()):
-                        valid = positive | (iou < self.box_ignore_iou)
-                        losses_2d.append(self._focal(output.score_after[candidates], positive, valid))
-                        positive_2d += int(positive.sum()); supervised_2d += 1
+                    negative = iou <= self.box_ignore_iou
+                    query_loss, kind = self._query_loss(
+                        output.score_2d_after[candidates], positive, negative
+                    )
+                    if kind == "positive":
+                        stats["n_with_positive_2d"] += 1
+                    elif kind == "negative_only":
+                        stats["n_negative_only_2d"] += 1
+                    if query_loss is not None and self.lambda_2d > 0:
+                        losses_2d.append(query_loss)
+                        stats["n_2d_loss_queries"] += 1
+
         loss_3d = torch.stack(losses_3d).mean() if losses_3d else zero
         loss_2d = torch.stack(losses_2d).mean() if losses_2d else zero
         return {
             "loss": self.lambda_3d * loss_3d + self.lambda_2d * loss_2d,
-            "loss_rank_3d": loss_3d, "loss_rank_2d": loss_2d,
-            "num_supervised_3d": supervised_3d, "num_supervised_2d": supervised_2d,
-            "num_positive_3d": positive_3d, "num_positive_2d": positive_2d,
+            "loss_rank_3d": loss_3d,
+            "loss_rank_2d": loss_2d,
+            "has_trainable_loss": bool(
+                (self.lambda_3d > 0 and losses_3d)
+                or (self.lambda_2d > 0 and losses_2d)
+            ),
+            **stats,
         }

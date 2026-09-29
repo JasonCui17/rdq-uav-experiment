@@ -26,6 +26,8 @@ class LiDARCandidateModel(nn.Module):
         candidates = CandidateBatch(
             old.feature, old.score, old.xyz, old.xyz_valid, old.box_xyxy_px,
             old.box_valid, old.batch_index, old.source_index, "R",
+            old.xyz.new_zeros((old.n, 2)),
+            torch.zeros(old.n, dtype=torch.bool, device=old.xyz.device),
         )
         return raw, candidates
 

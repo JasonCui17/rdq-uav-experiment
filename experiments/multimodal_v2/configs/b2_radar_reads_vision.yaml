@@ -45,6 +45,7 @@ loss:
   box_ignore_iou: 0.3
   lambda_rank_3d: 1.0
   lambda_rank_2d: 0.0
+  negative_only_weight: 0.25
 training:
   epochs: 12
   batch_size: 1

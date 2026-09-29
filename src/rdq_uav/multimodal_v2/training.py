@@ -111,6 +111,7 @@ def build_runtime(config: Mapping[str, Any], root: Path, device: torch.device) -
         xyz_positive_m=float(loss_cfg["xyz_positive_m"]), xyz_ignore_m=float(loss_cfg["xyz_ignore_m"]),
         box_positive_iou=float(loss_cfg["box_positive_iou"]), box_ignore_iou=float(loss_cfg["box_ignore_iou"]),
         lambda_3d=float(loss_cfg["lambda_rank_3d"]), lambda_2d=float(loss_cfg["lambda_rank_2d"]),
+        negative_only_weight=float(loss_cfg.get("negative_only_weight", 0.25)),
     )
     data_cfg = config["data"]
     camera_path = _resolve(root, data_cfg["camera_config"])
@@ -220,9 +221,8 @@ def validation_rows(output: Any, targets: Any, sample_ids: list[str],
     for batch in range(len(targets.has_xyz)):
         if not bool(targets.has_xyz[batch]):
             continue
-        ids = torch.nonzero(output.has_xyz & (output.batch_index == batch), as_tuple=False).flatten()
+        ids = output.top3d_indices(len(targets.has_xyz))[batch]
         if len(ids):
-            ids = ids[torch.argsort(output.score_after[ids].float(), descending=True, stable=True)]
             distances = torch.linalg.vector_norm(output.xyz_m[ids].float() - targets.xyz_m[batch].float(), dim=1).cpu().tolist()
             top = float(distances[0])
         else:
@@ -304,15 +304,32 @@ if L is not None:
 
         def training_step(self, batch, batch_idx):
             if not bool(batch["m_R"].any() | batch["m_V"].any()):
-                self.log("train/both_modalities_missing", float(len(batch["m_R"])), on_epoch=True)
-                return None
+                self.log("train/both_modalities_missing", float(len(batch["m_R"])),
+                         on_step=False, on_epoch=True, reduce_fx="sum")
             values = forward_step(self.runtime, batch, self.device, compute_frozen_losses=True)
             loss = values["loss"]
+            batch_size = len(batch["m_R"])
+            statistic_names = (
+                "n_gt3d", "n_with_3d_candidate", "n_with_positive_3d",
+                "n_negative_only_3d", "n_no_3d_candidate", "n_3d_loss_queries",
+                "n_gt2d", "n_with_2d_candidate", "n_with_positive_2d",
+                "n_negative_only_2d", "n_no_2d_candidate", "n_2d_loss_queries",
+            )
+            self.log_dict(
+                {f"train/{name}": float(values[name]) for name in statistic_names},
+                on_step=False, on_epoch=True, batch_size=batch_size, reduce_fx="sum",
+            )
+            if not values["has_trainable_loss"]:
+                # A batch can legitimately contain only missing GT or no
+                # task-valid candidates. Lightning accepts None as an explicit
+                # skipped optimization batch; it must not abort the epoch.
+                self.log("train/skipped_no_loss_batch", 1.0, on_step=False,
+                         on_epoch=True, batch_size=batch_size, reduce_fx="sum")
+                return None
             if not loss.requires_grad:
-                raise RuntimeError("B2/B3 ranking loss has no trainable path")
+                raise RuntimeError("reported trainable V2 loss has no gradient path")
             if not bool(torch.isfinite(loss.float())):
                 raise FloatingPointError(f"non-finite V2 loss at batch {batch_idx}")
-            batch_size = len(batch["m_R"])
             self.log_dict({
                 "train/loss": loss, "train/rank_3d": values["loss_rank_3d"],
                 "train/rank_2d": values["loss_rank_2d"],
@@ -325,6 +342,20 @@ if L is not None:
                 self.log("mem_GiB", torch.cuda.max_memory_reserved() / 1024 ** 3,
                          prog_bar=True, logger=False)
             return loss
+
+        def on_after_backward(self) -> None:
+            finite = True
+            nonzero = False
+            for parameter in self.network.parameters():
+                if not parameter.requires_grad or parameter.grad is None:
+                    continue
+                gradient = parameter.grad.detach().float()
+                finite = finite and bool(torch.isfinite(gradient).all())
+                nonzero = nonzero or bool(torch.count_nonzero(gradient))
+            if not finite:
+                raise FloatingPointError("non-finite gradient in Multimodal V2 trainable path")
+            self.log("train/has_nonzero_gradient", float(nonzero), on_step=True,
+                     on_epoch=False, logger=True)
 
         def on_validation_epoch_start(self) -> None:
             self._val_rows.clear()

@@ -7,7 +7,7 @@
 | `P5MultimodalBackbone` / three pre-stage HCI blocks | Removed from V2 execution |
 | `LiDARV2PyramidAdapter` + `RadarCandidateBuilder` | Independent `LiDARCandidateModel` |
 | shared `SwinPyramidAdapter` + `DINOAdapter` + RGB builder | Independent `VisionCandidateModel` |
-| global candidate association + ReliabilityGate | Geometry association + evidence-gated bounded score correction |
+| global candidate association + ReliabilityGate | Deterministic 16px geometry match + independent evidence-gated 3D/2D corrections |
 | `TypedSharedQuery`, Fusion Decoder | Removed |
 | `FusionPredictionHeads.xyz` | Removed; LiDAR XYZ is copied exactly |
 | V-only absolute XYZ | Forbidden by `has_xyz=False` contract |
@@ -22,6 +22,18 @@ data.prepare_model_batch
   -> MultimodalOutput
   -> CandidateRankingLoss / FP32 evaluation
 ```
+
+`CandidateScoring` does not compare raw cross-encoder feature cosine
+similarity. It sorts feasible pairs by `(d_box + 0.01*d_center_normalized,
+radar_source_index, vision_source_index)` and greedily accepts a one-to-one
+match. Query diagnostics record candidate counts, feasible pairs, R/RV/V
+counts, invalid projections, conflicts, and accepted RV geometry. Geometric
+feasibility is not called association correctness without independent 2D GT.
+
+The output owns two disjoint score streams. `score_3d_*` starts from and can
+only correct `radar_score`; `score_2d_*` starts from and can only correct
+`vision_score`. V-only rows cannot enter 3D ranking, R-only rows cannot enter
+2D output, and B2 never changes LiDAR XYZ.
 
 ## Established E5 result (not a V2 result)
 
@@ -39,10 +51,14 @@ full 4,800-query diagnostic command.
 
 ## Current validation boundary
 
-- CPU contract tests: implemented and run.
+- CPU contract tests: 16 passed after the task-separated contract update.
 - Dataset audit: 8,000 train / 4,800 validation queries, 20 train sequences.
-- Strict CPU construction of LiDAR, DINO, and E5 visual weights: run.
-- Constructed parameters: 49,383,561 total; B2 exposes 137,218 trainable parameters.
+- Strict CPU construction of LiDAR, DINO, and E5 visual weights was established
+  for the initial V2 implementation. It was not rerun after this revision
+  because the user requested code changes only.
+- The single-owner DINO state contract and strict in-memory roundtrip are CPU
+  tested. Real-weight strict construction remains part of the manual gate.
 - Real GPU B0/B1 identity: implemented, not run in the current CUDA-blocked environment.
-- Formal B2 training/evaluation: intentionally not run; the user executes it manually.
+- B2 two-update and formal B2 training/evaluation: intentionally not run; the
+  user executes them manually.
 - B3: deferred because only five validation queries have valid independent 2D GT.

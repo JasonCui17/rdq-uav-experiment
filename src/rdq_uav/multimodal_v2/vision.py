@@ -17,7 +17,6 @@ class VisionCandidateModel(nn.Module):
     def __init__(self, detector: nn.Module, *, pre_topk: int = 100,
                  final_topk: int = 50, nms_iou: float = 0.7) -> None:
         super().__init__()
-        self.detector = detector
         self.dino = DINOAdapter(detector)
         self.builder = RGBCandidateBuilder(
             query_dim=256, feature_dim=128, pre_topk=pre_topk,
@@ -34,8 +33,15 @@ class VisionCandidateModel(nn.Module):
         candidates = CandidateBatch(
             old.feature, old.score, old.xyz, old.xyz_valid, old.box_xyxy_px,
             old.box_valid, old.batch_index, old.source_index, "V",
+            old.box_xyxy_px.new_zeros((old.n, 2)),
+            torch.zeros(old.n, dtype=torch.bool, device=old.box_xyxy_px.device),
         )
         return raw, candidates
+
+    @property
+    def detector(self) -> nn.Module:
+        """Non-registering access to the single detector owned by DINOAdapter."""
+        return self.dino.detector
 
     def load_e5_weights(self, checkpoint: str) -> dict[str, Any]:
         """Load only DINO and RGB projection from an audited E5 checkpoint."""

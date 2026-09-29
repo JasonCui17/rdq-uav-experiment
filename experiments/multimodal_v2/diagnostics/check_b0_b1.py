@@ -36,12 +36,17 @@ def main():
         reports.append({
           "sample_id":batch["sample_id"][0],"radar_xyz_max_diff":maxdiff(b0.radar_candidates.xyz_m,b1.radar_candidates.xyz_m),
           "radar_score_max_diff":maxdiff(b0.radar_candidates.score,b1.radar_candidates.score),
-          "final_xyz_max_diff":maxdiff(b0.xyz_m,b1.xyz_m),"final_score_max_diff":maxdiff(b0.score_after,b1.score_after),
+          "final_xyz_max_diff":maxdiff(b0.xyz_m,b1.xyz_m),"final_box_max_diff":maxdiff(b0.box_xyxy_px,b1.box_xyxy_px),
+          "score_3d_max_diff":maxdiff(b0.score_3d_after,b1.score_3d_after),
+          "score_2d_max_diff":maxdiff(b0.score_2d_after,b1.score_2d_after),
           "source_index_equal":bool(torch.equal(b0.radar_source_index,b1.radar_source_index)),
-          "b1_nonzero_score_deltas":int(torch.count_nonzero(b1.score_delta_logit)),
+          "top3d_equal":bool(torch.equal(b0.top3d_indices(1)[0],b1.top3d_indices(1)[0])),
+          "top2d_equal":bool(torch.equal(b0.top2d_indices(1)[0],b1.top2d_indices(1)[0])),
+          "b1_nonzero_3d_deltas":int(torch.count_nonzero(b1.delta_3d)),
+          "b1_nonzero_2d_deltas":int(torch.count_nonzero(b1.delta_2d)),
           "b1_valid_evidence":int(b1.diagnostics["radar_evidence"].valid.sum()),
         })
-    passed=all(r["radar_xyz_max_diff"]==0 and r["radar_score_max_diff"]==0 and r["final_xyz_max_diff"]==0 and r["final_score_max_diff"]==0 and r["source_index_equal"] and r["b1_nonzero_score_deltas"]==0 for r in reports)
+    passed=all(r["radar_xyz_max_diff"]==0 and r["radar_score_max_diff"]==0 and r["final_xyz_max_diff"]==0 and r["final_box_max_diff"]==0 and r["score_3d_max_diff"]==0 and r["score_2d_max_diff"]==0 and r["source_index_equal"] and r["top3d_equal"] and r["top2d_equal"] and r["b1_nonzero_3d_deltas"]==0 and r["b1_nonzero_2d_deltas"]==0 for r in reports)
     report={"status":"PASS" if passed else "FAIL","optimizer_steps":0,"samples":reports}
     args.output.mkdir(parents=True,exist_ok=True);(args.output/"b0_b1_identity.json").write_text(json.dumps(report,indent=2));print(json.dumps(report,indent=2))
     if not passed:raise SystemExit(1)

@@ -27,6 +27,8 @@ class CandidateBatch:
     batch_index: torch.Tensor
     source_index: torch.Tensor
     source: CandidateSource
+    projected_xy_px: torch.Tensor
+    projection_valid: torch.Tensor
 
     def __post_init__(self) -> None:
         n = int(self.score.shape[0])
@@ -34,6 +36,7 @@ class CandidateBatch:
             "feature": (n, 128), "score": (n,), "xyz_m": (n, 3),
             "has_xyz": (n,), "box_xyxy_px": (n, 4), "has_box": (n,),
             "batch_index": (n,), "source_index": (n,),
+            "projected_xy_px": (n, 2), "projection_valid": (n,),
         }
         for name, shape in shapes.items():
             value = getattr(self, name)
@@ -43,12 +46,21 @@ class CandidateBatch:
             raise TypeError("has_xyz and has_box must be bool")
         if self.batch_index.dtype != torch.long or self.source_index.dtype != torch.long:
             raise TypeError("candidate indices must be torch.long")
+        if self.projection_valid.dtype != torch.bool:
+            raise TypeError("projection_valid must be bool")
         if self.source == "R":
             if n and (not bool(self.has_xyz.all()) or bool(self.has_box.any())):
                 raise ValueError("R candidates require XYZ and cannot claim a 2D box")
         elif self.source == "V":
             if n and (bool(self.has_xyz.any()) or not bool(self.has_box.all())):
                 raise ValueError("V candidates require a 2D box and cannot claim XYZ")
+            boxes = self.box_xyxy_px.float()
+            if n and (
+                not bool(torch.isfinite(boxes).all())
+                or bool((boxes[:, 2] <= boxes[:, 0]).any())
+                or bool((boxes[:, 3] <= boxes[:, 1]).any())
+            ):
+                raise ValueError("V candidate boxes must be finite, non-degenerate xyxy")
         else:
             raise ValueError(f"unknown candidate source {self.source!r}")
         for name in ("feature", "score"):
@@ -73,7 +85,14 @@ class CandidateBatch:
             xyz_m=self.xyz_m[index], has_xyz=self.has_xyz[index],
             box_xyxy_px=self.box_xyxy_px[index], has_box=self.has_box[index],
             batch_index=self.batch_index[index], source_index=self.source_index[index],
+            projected_xy_px=self.projected_xy_px[index],
+            projection_valid=self.projection_valid[index],
         )
+
+    def with_projection(self, xy_px: torch.Tensor, valid: torch.Tensor) -> "CandidateBatch":
+        if self.source != "R":
+            raise ValueError("only R candidates can carry calibrated XYZ projection")
+        return replace(self, projected_xy_px=xy_px, projection_valid=valid)
 
     @classmethod
     def empty(cls, source: CandidateSource, device: torch.device | str,
@@ -87,6 +106,8 @@ class CandidateBatch:
             torch.empty(0, device=device, dtype=torch.bool),
             torch.empty(0, device=device, dtype=torch.long),
             torch.empty(0, device=device, dtype=torch.long), source,
+            torch.empty((0, 2), device=device, dtype=dtype),
+            torch.empty(0, device=device, dtype=torch.bool),
         )
 
 
@@ -115,9 +136,12 @@ class CrossModalEvidence:
 
 @dataclass(frozen=True)
 class MultimodalOutput:
-    score_before: torch.Tensor
-    score_after: torch.Tensor
-    score_delta_logit: torch.Tensor
+    score_3d_before: torch.Tensor
+    score_3d_after: torch.Tensor
+    delta_3d: torch.Tensor
+    score_2d_before: torch.Tensor
+    score_2d_after: torch.Tensor
+    delta_2d: torch.Tensor
     xyz_m: torch.Tensor
     has_xyz: torch.Tensor
     box_xyxy_px: torch.Tensor
@@ -126,20 +150,31 @@ class MultimodalOutput:
     hypothesis_type: torch.Tensor  # 0=RV, 1=R, 2=V
     radar_source_index: torch.Tensor
     vision_source_index: torch.Tensor
-    attention_token_count: torch.Tensor
-    evidence_gate_weight: torch.Tensor
+    evidence_valid_3d: torch.Tensor
+    gate_3d: torch.Tensor
+    token_count_3d: torch.Tensor
+    evidence_valid_2d: torch.Tensor
+    gate_2d: torch.Tensor
+    token_count_2d: torch.Tensor
+    association_valid: torch.Tensor
+    association_d_box_px: torch.Tensor
+    association_d_center_normalized: torch.Tensor
     radar_candidates: CandidateBatch
     vision_candidates: CandidateBatch
     diagnostics: Mapping[str, Any]
 
     def __post_init__(self) -> None:
-        n = int(self.score_after.numel())
+        n = int(self.score_3d_after.numel())
         shapes = {
-            "score_before": (n,), "score_delta_logit": (n,),
+            "score_3d_before": (n,), "score_3d_after": (n,), "delta_3d": (n,),
+            "score_2d_before": (n,), "score_2d_after": (n,), "delta_2d": (n,),
             "xyz_m": (n, 3), "has_xyz": (n,), "box_xyxy_px": (n, 4),
             "has_box": (n,), "batch_index": (n,), "hypothesis_type": (n,),
             "radar_source_index": (n,), "vision_source_index": (n,),
-            "attention_token_count": (n,), "evidence_gate_weight": (n,),
+            "evidence_valid_3d": (n,), "gate_3d": (n,), "token_count_3d": (n,),
+            "evidence_valid_2d": (n,), "gate_2d": (n,), "token_count_2d": (n,),
+            "association_valid": (n,), "association_d_box_px": (n,),
+            "association_d_center_normalized": (n,),
         }
         for name, shape in shapes.items():
             if tuple(getattr(self, name).shape) != shape:
@@ -148,14 +183,50 @@ class MultimodalOutput:
             v_only = self.hypothesis_type == 2
             if bool(self.has_xyz[v_only].any()):
                 raise ValueError("V-only hypotheses may not expose absolute XYZ")
+            r_only = self.hypothesis_type == 1
+            if bool(self.has_box[r_only].any()):
+                raise ValueError("R-only hypotheses may not expose a 2D box")
+            if bool((self.score_3d_before[~self.has_xyz] != 0).any()):
+                raise ValueError("invalid 3D score slots must be zero")
+            if bool((self.score_2d_before[~self.has_box] != 0).any()):
+                raise ValueError("invalid 2D score slots must be zero")
 
-    def top3d_indices(self, num_samples: int) -> list[torch.Tensor]:
+    @staticmethod
+    def _rank_task(
+        indices: torch.Tensor, score: torch.Tensor, source_index: torch.Tensor
+    ) -> torch.Tensor:
+        # Establish the explicit source-id tie order first, then rely on the
+        # stable score sort. Association row construction cannot change ties.
+        indices = indices[
+            torch.argsort(source_index[indices], descending=False, stable=True)
+        ]
+        return indices[
+            torch.argsort(score[indices].float(), descending=True, stable=True)
+        ]
+
+    def top3d_indices(
+        self, num_samples: int, *, before_interaction: bool = False
+    ) -> list[torch.Tensor]:
+        scores = self.score_3d_before if before_interaction else self.score_3d_after
         result = []
         for batch_idx in range(num_samples):
             valid = self.has_xyz & (self.batch_index == batch_idx)
             indices = torch.nonzero(valid, as_tuple=False).flatten()
             if len(indices):
-                indices = indices[torch.argsort(self.score_after[indices].float(), descending=True, stable=True)]
+                indices = self._rank_task(indices, scores, self.radar_source_index)
+            result.append(indices)
+        return result
+
+    def top2d_indices(
+        self, num_samples: int, *, before_interaction: bool = False
+    ) -> list[torch.Tensor]:
+        scores = self.score_2d_before if before_interaction else self.score_2d_after
+        result = []
+        for batch_idx in range(num_samples):
+            valid = self.has_box & (self.batch_index == batch_idx)
+            indices = torch.nonzero(valid, as_tuple=False).flatten()
+            if len(indices):
+                indices = self._rank_task(indices, scores, self.vision_source_index)
             result.append(indices)
         return result
 

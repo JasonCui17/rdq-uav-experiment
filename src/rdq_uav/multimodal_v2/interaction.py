@@ -42,7 +42,10 @@ class _EvidenceAttention(nn.Module):
         )
         value = self.norm(value[:, 0])
         gate = torch.sigmoid(self.gate(torch.cat((query, value), dim=1)))[:, 0]
-        return value * gate[:, None], gate
+        # Evidence and gate remain separate. CandidateScoring applies the gate
+        # exactly once to the bounded logit correction required by the model
+        # contract.
+        return value, gate
 
 
 class CandidateCrossAttention(nn.Module):
@@ -134,13 +137,16 @@ class CandidateCrossAttention(nn.Module):
             center = (box[:2] + box[2:]) * 0.5
             # A candidate is only evidence if its calibrated projection lies in
             # the box or a bounded margin. It is never promoted directly to GT.
-            inside = (
-                (points[:, 0] >= box[0] - self.box_margin_px)
-                & (points[:, 0] <= box[2] + self.box_margin_px)
-                & (points[:, 1] >= box[1] - self.box_margin_px)
-                & (points[:, 1] <= box[3] + self.box_margin_px)
+            dx = torch.maximum(
+                torch.maximum(box[0] - points[:, 0], points[:, 0] - box[2]),
+                torch.zeros_like(points[:, 0]),
             )
-            ids = ids[inside]; points = points[inside]
+            dy = torch.maximum(
+                torch.maximum(box[1] - points[:, 1], points[:, 1] - box[3]),
+                torch.zeros_like(points[:, 1]),
+            )
+            near_box = torch.sqrt(dx.square() + dy.square()) <= self.box_margin_px
+            ids = ids[near_box]; points = points[near_box]
             if not len(ids):
                 continue
             distance = torch.linalg.vector_norm(points - center, dim=1)

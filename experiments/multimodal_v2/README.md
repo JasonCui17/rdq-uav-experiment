@@ -14,7 +14,7 @@ git submodule update --init --recursive
 
 ## Scientific boundary
 
-The first experiment is B2:
+The first trainable experiment is B2:
 
 ```text
 LiDAR V2 candidates (XYZ is immutable) ─┐
@@ -23,8 +23,48 @@ Swin-DINO candidates (2D box only) ─────┘
 ```
 
 The old three-stage pre-Swin HCI, Fusion Decoder, and absolute XYZ prediction
-head are absent. A V-only hypothesis has `has_xyz=False` and is excluded from
-3D ranking. Missing 2D labels are masked, never converted to negatives.
+head are absent. Association is a deterministic, rejectable one-to-one greedy
+match over calibrated image geometry: pairs farther than 16 source pixels from
+the box are rejected and ties use the original R/V source indices.
+
+The output is intentionally two-task:
+
+- R has immutable LiDAR `xyz_m`, `has_xyz=True`, `has_box=False`, and only a
+  `score_3d_*` value.
+- V has the DINO box, `has_box=True`, `has_xyz=False`, and only a
+  `score_2d_*` value.
+- RV carries the LiDAR XYZ and DINO box while retaining independent 3D and 2D
+  before/after scores.
+
+`top3d_indices()` sees only R/RV and `top2d_indices()` sees only V/RV. Zero
+storage never establishes validity. Missing 2D labels are masked, never
+converted to negatives.
+
+## B2 and B3 boundary
+
+B2 freezes LiDAR V2, Swin-DINO, both candidate builders, V-query radar
+attention, and the 2D score head. It trains only the R-query visual attention,
+the V0/V1 feature projections, and the zero-initialized 3D score head. A
+projected R candidate reads a 3x3 feature-cell neighborhood from both V0 and V1
+even when it is not associated with a DINO box. Invalid projection, padding,
+or missing RGB produces an exact base-score identity.
+
+B3 is implemented as a dormant interface: every V/RV box can read at most 16
+R candidates within 16 pixels of the box, but its attention and 2D score head
+remain frozen and disabled in the B2 config.
+
+## Reused audited components
+
+- LiDAR V2 and `CandidateSelector` preserve the independent spatial checkpoint,
+  candidate XYZ, feature, score, and source-token identity.
+- V1 `SwinPyramidAdapter`, `DINOAdapter`, and `RGBCandidateBuilder` preserve the
+  audited DINO execution, SSOD weights, padding masks, and object-query
+  candidate semantics.
+- V1 calibrated projection and data alignment are reused to avoid a second
+  coordinate or timestamp implementation.
+
+V2 owns association, bidirectional candidate evidence, task-separated scoring,
+and ranking loss. It does not call V1 candidate association.
 
 ## Assets
 
@@ -57,7 +97,8 @@ PYTHONPATH=src python experiments/multimodal_v2/diagnostics/check_b0_b1.py \
   --output outputs/own_multimodal_research/multimodal_v2/b0_b1_gate
 ```
 
-`status` must be `PASS`; all XYZ and score max differences must be zero.
+`status` must be `PASS`; XYZ, boxes, both task scores, and both task orderings
+must be exactly equal.
 
 Run the independent E0 baseline on all 4,800 validation queries:
 
@@ -127,6 +168,16 @@ PYTHONPATH=src python experiments/multimodal_v2/evaluate.py \
   --device cuda:0 --output outputs/own_multimodal_research/multimodal_v2/b2_seed42/evaluation
 ```
 
+B2 loss uses positive candidates at <=1m, ignores (1m,2m], and treats >2m as
+negative. Queries with negatives but no positive contribute a separately
+normalized focal loss at weight 0.25; no-candidate and missing-GT queries are
+reported and skipped. Batches without a trainable loss return `None` through
+Lightning rather than aborting the epoch.
+
 B3 remains disabled until an independently labeled 2D validation set is
 large enough to support AP50, AP50:95, and small-object recall claims. The
 current five valid validation boxes are exploratory only.
+
+There is no trained checkpoint from the earlier V2 implementation. New V2
+checkpoints use one canonical DINO prefix, `vision.dino.detector.*`; E5 source
+checkpoints are still imported by the explicit compatibility loader.
