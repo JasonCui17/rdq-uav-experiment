@@ -237,27 +237,31 @@ class CandidateScoring(nn.Module):
             geometry_gate_px=self.geometry_gate_px,
         )
         n = len(association.batch_index)
-        device = radar.feature.device if radar.n else vision.feature.device
-        dtype = radar.feature.dtype if radar.n else vision.feature.dtype
+        index_device = association.batch_index.device
         has_radar = association.radar_index >= 0
         has_vision = association.vision_index >= 0
 
-        radar_feature = torch.zeros((n, 128), device=device, dtype=dtype)
-        vision_feature = torch.zeros_like(radar_feature)
-        xyz = torch.zeros((n, 3), device=device, dtype=dtype)
-        box = torch.zeros((n, 4), device=device, dtype=dtype)
-        base_3d = torch.zeros(n, device=device, dtype=dtype)
-        base_2d = torch.zeros_like(base_3d)
-        radar_source = torch.full((n,), -1, device=device, dtype=torch.long)
+        # R and V can legitimately arrive with different dtypes under AMP
+        # (LiDAR FP16 candidates and FP32 DINO object-query features). Keep
+        # every buffer in the dtype of the value it stores.
+        radar_feature = radar.feature.new_zeros((n, 128))
+        vision_feature = vision.feature.new_zeros((n, 128))
+        xyz = radar.xyz_m.new_zeros((n, 3))
+        box = vision.box_xyxy_px.new_zeros((n, 4))
+        base_3d = radar.score.new_zeros(n)
+        base_2d = vision.score.new_zeros(n)
+        radar_source = torch.full(
+            (n,), -1, device=index_device, dtype=torch.long
+        )
         vision_source = torch.full_like(radar_source, -1)
-        evidence_3d = torch.zeros_like(radar_feature)
-        valid_3d = torch.zeros(n, device=device, dtype=torch.bool)
-        gate_3d = torch.zeros_like(base_3d)
-        count_3d = torch.zeros(n, device=device, dtype=torch.long)
-        evidence_2d = torch.zeros_like(radar_feature)
-        valid_2d = torch.zeros_like(valid_3d)
-        gate_2d = torch.zeros_like(base_3d)
-        count_2d = torch.zeros_like(count_3d)
+        evidence_3d = radar_evidence.feature.new_zeros((n, 128))
+        evidence_2d = vision_evidence.feature.new_zeros((n, 128))
+        valid_3d = radar_evidence.valid.new_zeros(n)
+        valid_2d = vision_evidence.valid.new_zeros(n)
+        gate_3d = radar_evidence.gate_weight.new_zeros(n)
+        gate_2d = vision_evidence.gate_weight.new_zeros(n)
+        count_3d = radar_evidence.token_count.new_zeros(n)
+        count_2d = vision_evidence.token_count.new_zeros(n)
 
         if bool(has_radar.any()):
             rows = torch.nonzero(has_radar, as_tuple=False).flatten()

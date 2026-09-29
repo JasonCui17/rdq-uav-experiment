@@ -20,31 +20,39 @@ from rdq_uav.multimodal_v2.vision import VisionCandidateModel
 
 
 def candidate(source: str, *, score=(0.8,), batch=None, projected=None,
-              projection_valid=None, boxes=None, xyz=None, source_ids=None):
+              projection_valid=None, boxes=None, xyz=None, source_ids=None,
+              feature_dtype=torch.float32, device="cpu"):
     n = len(score)
     batch = [0] * n if batch is None else batch
     source_ids = list(range(n)) if source_ids is None else source_ids
     is_r = source == "R"
-    xyz_value = torch.tensor([[0.0, 0.0, 2.0]] * n) if xyz is None else torch.tensor(xyz, dtype=torch.float32)
-    box_value = torch.tensor([[45.0, 45.0, 55.0, 55.0]] * n) if boxes is None else torch.tensor(boxes, dtype=torch.float32)
-    projected_value = torch.tensor([[50.0, 50.0]] * n) if projected is None else torch.tensor(projected, dtype=torch.float32)
+    xyz_value = torch.tensor([[0.0, 0.0, 2.0]] * n, device=device) if xyz is None else torch.tensor(xyz, dtype=torch.float32, device=device)
+    box_value = torch.tensor([[45.0, 45.0, 55.0, 55.0]] * n, device=device) if boxes is None else torch.tensor(boxes, dtype=torch.float32, device=device)
+    projected_value = torch.tensor([[50.0, 50.0]] * n, device=device) if projected is None else torch.tensor(projected, dtype=torch.float32, device=device)
     projection_valid = ([True] * n if is_r else [False] * n) if projection_valid is None else projection_valid
     return CandidateBatch(
-        torch.randn(n, 128), torch.tensor(score, dtype=torch.float32),
-        xyz_value if is_r else torch.zeros(n, 3), torch.full((n,), is_r),
-        box_value if not is_r else torch.zeros(n, 4), torch.full((n,), not is_r),
-        torch.tensor(batch, dtype=torch.long), torch.tensor(source_ids, dtype=torch.long), source,
-        projected_value if is_r else torch.zeros(n, 2),
-        torch.tensor(projection_valid, dtype=torch.bool),
+        torch.randn(n, 128, dtype=feature_dtype, device=device),
+        torch.tensor(score, dtype=feature_dtype, device=device),
+        xyz_value if is_r else xyz_value.new_zeros((n, 3)),
+        torch.full((n,), is_r, dtype=torch.bool, device=device),
+        box_value if not is_r else box_value.new_zeros((n, 4)),
+        torch.full((n,), not is_r, dtype=torch.bool, device=device),
+        torch.tensor(batch, dtype=torch.long, device=device),
+        torch.tensor(source_ids, dtype=torch.long, device=device), source,
+        projected_value if is_r else projected_value.new_zeros((n, 2)),
+        torch.tensor(projection_valid, dtype=torch.bool, device=device),
     )
 
 
-def evidence(n: int, *, valid=True, tokens=3, gate=1.0):
+def evidence(n: int, *, valid=True, tokens=3, gate=1.0,
+             dtype=torch.float32, device="cpu"):
     return CrossModalEvidence(
-        torch.randn(n, 128) if valid else torch.zeros(n, 128),
-        torch.full((n,), valid, dtype=torch.bool),
-        torch.full((n,), tokens if valid else 0, dtype=torch.long),
-        torch.full((n,), gate if valid else 0.0), torch.full((n, 2), 50.0),
+        torch.randn(n, 128, dtype=dtype, device=device) if valid
+        else torch.zeros(n, 128, dtype=dtype, device=device),
+        torch.full((n,), valid, dtype=torch.bool, device=device),
+        torch.full((n,), tokens if valid else 0, dtype=torch.long, device=device),
+        torch.full((n,), gate if valid else 0.0, dtype=dtype, device=device),
+        torch.full((n, 2), 50.0, dtype=torch.float32, device=device),
     )
 
 
@@ -96,6 +104,82 @@ def test_both_evidence_paths_reach_their_own_score_head():
     assert not torch.equal(output.score_2d_after[rv], output.score_2d_before[rv])
     assert torch.count_nonzero(output.delta_3d[rv]) == 1
     assert torch.count_nonzero(output.delta_2d[rv]) == 1
+
+
+class _MixedDtypeProbe(nn.Module):
+    """Small scorer used to isolate CandidateScoring buffer assignment."""
+
+    def __init__(self):
+        super().__init__()
+        self.radar = nn.Parameter(torch.tensor(0.01))
+        self.vision = nn.Parameter(torch.tensor(0.01))
+
+    def forward(self, base, own, evidence_value, valid, gate, *, source):
+        parameter = self.radar if source == "R" else self.vision
+        delta = ((own.float().mean(1) + evidence_value.float().mean(1))
+                 * parameter * valid.float() * gate.float())
+        return (base.float() + delta).to(base.dtype), delta.to(base.dtype)
+
+
+def test_mixed_candidate_buffers_preserve_source_dtypes_on_cpu():
+    radar = candidate(
+        "R", score=(0.7, 0.6), projected=((50, 50), (5, 5)),
+        feature_dtype=torch.float16,
+    )
+    vision = candidate(
+        "V", score=(0.8, 0.5),
+        boxes=((45, 45, 55, 55), (80, 80, 90, 90)),
+        feature_dtype=torch.float32,
+    )
+    scoring = CandidateScoring()
+    scoring.score_head = _MixedDtypeProbe()
+    output = scoring(
+        radar, vision, evidence(2, dtype=torch.float16),
+        evidence(2, dtype=torch.float32), num_samples=1,
+        enable_vision_scoring=True,
+    )
+    assert set(output.hypothesis_type.tolist()) == {0, 1, 2}
+    assert output.score_3d_after.dtype == torch.float16
+    assert output.score_2d_after.dtype == torch.float32
+    loss = output.score_3d_after.float().sum() + output.score_2d_after.sum()
+    loss.backward()
+    assert torch.isfinite(scoring.score_head.radar.grad)
+    assert torch.isfinite(scoring.score_head.vision.grad)
+    assert scoring.score_head.radar.grad != 0
+    assert scoring.score_head.vision.grad != 0
+
+
+@pytest.mark.skipif(not torch.cuda.is_available(), reason="requires CUDA FP16 autocast")
+def test_mixed_source_dtypes_run_under_cuda_autocast_and_backpropagate():
+    device = torch.device("cuda")
+    radar = candidate(
+        "R", score=(0.7, 0.6), projected=((50, 50), (5, 5)),
+        feature_dtype=torch.float16, device=device,
+    )
+    vision = candidate(
+        "V", score=(0.8, 0.5),
+        boxes=((45, 45, 55, 55), (80, 80, 90, 90)),
+        feature_dtype=torch.float32, device=device,
+    )
+    radar_evidence = evidence(2, dtype=torch.float16, device=device)
+    vision_evidence = evidence(2, dtype=torch.float32, device=device)
+    scoring = CandidateScoring().to(device)
+    with torch.autocast(device_type="cuda", dtype=torch.float16):
+        output = scoring(
+            radar, vision, radar_evidence, vision_evidence,
+            num_samples=1, enable_vision_scoring=True,
+        )
+        loss = output.score_3d_after.float().sum() + output.score_2d_after.float().sum()
+    assert set(output.hypothesis_type.cpu().tolist()) == {0, 1, 2}
+    assert output.score_3d_after.dtype == torch.float16
+    assert output.score_2d_after.dtype == torch.float32
+    assert torch.isfinite(loss)
+    loss.backward()
+    for head in (scoring.score_head.radar, scoring.score_head.vision):
+        gradient = head[-1].weight.grad
+        assert gradient is not None
+        assert torch.isfinite(gradient.float()).all()
+        assert torch.count_nonzero(gradient) > 0
 
 
 def test_invalid_evidence_is_exact_identity_even_with_trained_heads():
