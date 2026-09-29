@@ -1,0 +1,70 @@
+experiment:
+  name: multimodal_v2_b2
+  stage: B2
+  seed: 42
+  output_dir: outputs/own_multimodal_research/multimodal_v2/b2_seed42
+data:
+  root: data/mmaud_official_train
+  split_file: splits/mmaud_annotated20.json
+  train_split: train_sub
+  val_split: validation_sub
+  max_events: 20
+  max_image_gap_s: 0.04
+  annotation_manifest: manifests/multimodal_v1/vision_annotated20.jsonl
+  camera_config: configs/calibration/mmaud_v1_omni.yaml
+  geometry_calibration: calibration/official_left_p4_current_geometry.json
+  dino_short_edge: 800
+  dino_max_size: 1333
+  num_workers: 2
+  prefetch_factor: 2
+initialization:
+  lidar_config: configs/lidar_uav_v2.yaml
+  lidar_checkpoint: checkpoints/lidar_v2/best_spatial.pt
+  dino_root: third_party/detrex
+  dino_config: third_party/detrex/projects/dino/configs/dino-swin/dino_swin_tiny_224_4scale_12ep.py
+  dino_checkpoint: checkpoints/dino_swin_t/dino_swin_tiny_224_22kto1k_finetune_4scale_12ep.pth
+  # Copy the audited E5 best checkpoint here or override it on the command line.
+  # Only its DINO and RGB candidate projection are loaded; its HCI/fusion/radar
+  # weights are not part of Multimodal V2.
+  e5_visual_checkpoint: checkpoints/multimodal_v1/e5_last.ckpt
+  p6_config: configs/multimodal_v1/p6_candidates.yaml
+model:
+  interaction_enabled: true
+  vision_reads_radar: false
+  vision_scoring_enabled: false
+  visual_radius_cells: 1
+  lidar_neighbors: 16
+  box_margin_px: 16.0
+  max_abs_delta_logit: 2.0
+loss:
+  focal_alpha: 0.25
+  focal_gamma: 2.0
+  xyz_positive_m: 1.0
+  xyz_ignore_m: 2.0
+  box_positive_iou: 0.5
+  box_ignore_iou: 0.3
+  lambda_rank_3d: 1.0
+  lambda_rank_2d: 0.0
+training:
+  epochs: 12
+  batch_size: 1
+  accumulate: 4
+  learning_rate: 0.0001
+  final_lr_ratio: 0.01
+  warmup_fraction: 0.05
+  weight_decay: 0.0001
+  betas: [0.9, 0.999]
+  eps: 1.0e-8
+  grad_clip_norm: 1.0
+validation:
+  every_epochs: 1
+  precision: fp32
+logging:
+  every_updates: 20
+lightning:
+  accelerator: gpu
+  devices: 1
+  precision: 16-mixed
+  checkpoint_every_updates: 250
+  num_sanity_val_steps: 1
+  deterministic: warn
