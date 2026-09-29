@@ -51,9 +51,10 @@ full 4,800-query diagnostic command.
 
 ## Current validation boundary
 
-- CPU contract tests: 17 passed after the task-separated and mixed-dtype
-  contract updates. The dedicated CUDA FP16 autocast test is present but was
-  skipped because CUDA is unavailable in the current environment.
+- CPU contract tests: 18 passed after the task-separated, mixed-dtype, and
+  autocast-safe focal-loss updates. The dedicated CUDA FP16 autocast test is
+  present but was skipped because CUDA is unavailable in the current
+  environment.
 - Dataset audit: 8,000 train / 4,800 validation queries, 20 train sequences.
 - Strict CPU construction of LiDAR, DINO, and E5 visual weights was established
   for the initial V2 implementation. It was not rerun after this revision

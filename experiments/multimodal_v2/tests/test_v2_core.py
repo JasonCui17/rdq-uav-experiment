@@ -285,6 +285,21 @@ def test_loss_positive_negative_only_no_candidate_and_no_gt_statistics():
     assert torch.isfinite(positive["loss"]) and torch.isfinite(far["loss"])
 
 
+def test_focal_probability_loss_is_autocast_safe_and_has_finite_gradient():
+    criterion = CandidateRankingLoss()
+    scores = torch.tensor([0.8, 0.15, 0.6], dtype=torch.float32, requires_grad=True)
+    labels = torch.tensor([True, False, False])
+    with torch.autocast(device_type="cpu", dtype=torch.bfloat16):
+        terms = criterion._terms(scores, labels)
+        loss = terms.sum()
+    assert loss.dtype == torch.float32
+    assert torch.isfinite(loss)
+    loss.backward()
+    assert scores.grad is not None
+    assert torch.isfinite(scores.grad).all()
+    assert torch.count_nonzero(scores.grad) == scores.numel()
+
+
 def test_2d_loss_uses_only_valid_box_gt_and_2d_scores():
     radar = candidate("R")
     vision = candidate("V", boxes=((45.0, 45.0, 55.0, 55.0),))

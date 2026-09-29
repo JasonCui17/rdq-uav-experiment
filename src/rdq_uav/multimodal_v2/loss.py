@@ -57,7 +57,14 @@ class CandidateRankingLoss(nn.Module):
     def _terms(self, score: torch.Tensor, positive: torch.Tensor) -> torch.Tensor:
         score = score.float().clamp(1e-6, 1 - 1e-6)
         target = positive.float()
-        cross_entropy = F.binary_cross_entropy(score, target, reduction="none")
+        # Lightning's FP16 autocast rejects probability-form BCE. Convert the
+        # already-produced probability to its equivalent logit and use the
+        # autocast-safe logits formulation; sigmoid(logit(score)) preserves
+        # the same focal probability and the original loss semantics.
+        logits = torch.logit(score)
+        cross_entropy = F.binary_cross_entropy_with_logits(
+            logits, target, reduction="none"
+        )
         probability = torch.where(positive, score, 1 - score)
         alpha = torch.where(positive, self.alpha, 1 - self.alpha)
         return alpha * (1 - probability).pow(self.gamma) * cross_entropy
