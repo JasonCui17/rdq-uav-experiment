@@ -10,7 +10,7 @@ ROOT = Path(__file__).resolve().parents[3]
 sys.path.insert(0, str(ROOT/'src'))
 import yaml
 from rdq_uav.runtime_paths import apply_runtime_path_overrides, resolve_project_path
-from rdq_uav.multimodal_v2.data import MultimodalV2Dataset, collate_multimodal_v2, load_label_manifest
+from rdq_uav.multimodal_v2.data import MultimodalV2Dataset, collate_multimodal_v2
 
 
 def main():
@@ -31,12 +31,12 @@ def main():
     if float(geometry.get('time_offset_s', 0.0)) != 0:
         raise ValueError('raw image-time contract requires zero time_offset_s')
     camera = yaml.safe_load(resolve(data['camera_config']).read_text())
-    manifest = load_label_manifest(resolve(data['annotation_manifest']), require_boxes=False)
-    ds = MultimodalV2Dataset(root, [args.sequence], manifest,
+    ds = MultimodalV2Dataset(root, [args.sequence],
                             camera_wh=tuple(camera['cameras']['left']['resolution']),
                             short_edge=int(data['dino_short_edge']), max_size=int(data['dino_max_size']),
                             radar_history_s=float(data.get('radar_history_s', 1.0)),
-                            max_image_gap_s=float(data.get('max_image_gap_s', 1.0)))
+                            max_image_gap_s=float(data.get('max_image_gap_s', 1.0)),
+                            label_directory=str(data.get('label_directory', '2d_detect')))
     if args.samples < 3 or args.start_index < 0 or args.start_index+args.samples > len(ds):
         raise ValueError(f'smoke requires at least 3 available queries; dataset has {len(ds)}')
     samples = [ds[i] for i in range(args.start_index, args.start_index+args.samples)]

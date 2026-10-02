@@ -75,37 +75,41 @@ class ViewTransform:
         return torch.stack((x1 / sx, y1 / sy, x2 / sx, y2 / sy), dim=-1)
 
 
-@dataclass(frozen=True)
-class ImageLabelRecord:
-    sequence_id: str
-    image_path: str
-    box_xyxy_px: tuple[float, ...] | None
-    gt_2d_valid: bool
+def load_yolo_box(path: Path, source_wh: tuple[int, int]) -> torch.Tensor | None:
+    """Directory labels are trusted supervision, normalized to the left source crop.
 
-
-def load_label_manifest(path: str | Path, *, require_boxes: bool = True) -> list[ImageLabelRecord]:
-    """Read image supervision only; query UID/3D GT do not define 2D identity."""
-    records = []
-    with Path(path).open(encoding="utf-8") as handle:
-        for line_number, line in enumerate(handle, 1):
-            if not line.strip():
-                continue
-            item = json.loads(line)
-            valid = bool(item.get("gt_2d_valid", False))
-            raw = item.get("box_xyxy_px")
-            box = None if raw is None else tuple(map(float, raw))
-            if box is not None and (len(box) != 4 or not np.isfinite(box).all()
-                                    or box[2] <= box[0] or box[3] <= box[1]):
-                raise ValueError(f"invalid box at manifest line {line_number}")
-            if valid and box is None:
-                raise ValueError(f"valid label has no box at manifest line {line_number}")
-            if require_boxes and not valid:
-                raise ValueError(f"missing verified box at manifest line {line_number}")
-            seq, image_path = str(item["sequence_id"]), str(item["image_path"])
-            if not seq or not image_path:
-                raise ValueError(f"empty image label identity at line {line_number}")
-            records.append(ImageLabelRecord(seq, image_path, box, valid))
-    return records
+    This matches gt_bbox_annotator's calibration-sized left-view convention,
+    including when the released PNG contains side-by-side camera images.
+    Missing/empty files have no box supervision, never an implicit negative.
+    The current single-target contract cannot represent multiple rows.
+    """
+    if not path.exists():
+        return None
+    rows = [row.strip() for row in path.read_text(encoding="utf-8-sig").splitlines() if row.strip()]
+    if not rows:
+        return None
+    if len(rows) != 1:
+        raise ValueError(f"single-UAV target requires one YOLO box, found {len(rows)}: {path}")
+    fields = rows[0].split()
+    if len(fields) != 5:
+        raise ValueError(f"YOLO label must have 5 columns: {path}")
+    try:
+        class_id = int(fields[0])
+        cx, cy, width, height = map(float, fields[1:])
+    except ValueError as exc:
+        raise ValueError(f"malformed YOLO label: {path}") from exc
+    if class_id < 0 or not np.isfinite([cx, cy, width, height]).all() or not (
+        0 <= cx <= 1 and 0 <= cy <= 1 and 0 < width <= 1 and 0 < height <= 1
+    ):
+        raise ValueError(f"invalid normalized YOLO label: {path}")
+    w, h = source_wh
+    box = np.asarray([(cx-width/2)*w, (cy-height/2)*h,
+                      (cx+width/2)*w, (cy+height/2)*h], dtype=np.float64)
+    # Same rounding tolerance as the project's annotation writer/reader.
+    if box[0] < -1e-3 or box[1] < -1e-3 or box[2] > w+1e-3 or box[3] > h+1e-3:
+        raise ValueError(f"YOLO box outside left source image: {path}")
+    box = np.clip(box, [0, 0, 0, 0], [w, h, w, h])
+    return torch.tensor(box, dtype=torch.float32)
 
 
 SENSORS = ((0, "Avia", "livox_avia"), (1, "Mid360", "lidar_360"))
@@ -241,11 +245,14 @@ class MultimodalV2Dataset(Dataset):
     events whose released XYZ rows are all invalid. Cached validity is one bool
     per event; complete clouds are not retained or capped.
     """
-    def __init__(self, root: str | Path, sequence_ids: Sequence[str], manifest: Sequence[Any], *,
+    def __init__(self, root: str | Path, sequence_ids: Sequence[str], *,
                  camera_wh: tuple[int, int], short_edge: int, max_size: int,
                  radar_history_s: float = 1.0, max_image_gap_s: float = 1.0,
-                 filter_empty: bool = False) -> None:
+                 filter_empty: bool = False, label_directory: str = "2d_detect") -> None:
         self.root = Path(root)
+        if not label_directory or Path(label_directory).is_absolute() or ".." in Path(label_directory).parts:
+            raise ValueError("label_directory must be a sequence-local relative directory")
+        self.label_directory = label_directory
         self.camera_wh = tuple(map(int, camera_wh))
         self.short_edge, self.max_size = int(short_edge), int(max_size)
         self.radar_history_s = float(radar_history_s)
@@ -258,17 +265,6 @@ class MultimodalV2Dataset(Dataset):
         self.image_index_by_sequence = self.image_index.image_index_by_sequence
         self.radar_events_by_sequence = {}
         self.radar_times_by_sequence = {}
-        self.box_by_image = {}
-        for record in manifest:
-            if record.sequence_id not in sequence_ids or not record.gt_2d_valid or record.box_xyxy_px is None:
-                continue
-            key = (record.sequence_id, Path(record.image_path).name)
-            box = tuple(map(float, record.box_xyxy_px))
-            if len(box) != 4 or not np.isfinite(box).all() or box[2] <= box[0] or box[3] <= box[1]:
-                raise ValueError(f"invalid box for {key}")
-            if key in self.box_by_image and self.box_by_image[key] != box:
-                raise ValueError(f"conflicting boxes for {key}")
-            self.box_by_image[key] = box
         records = []
         seen_times = set()
         for seq in sequence_ids:
@@ -337,7 +333,8 @@ class MultimodalV2Dataset(Dataset):
             return torch.from_numpy(np.concatenate(values) if values else np.empty(shape, dtype=dtype))
         points = packed(parts, (0, 3), np.float32)
         match = self.image_index.match(seq, tq)
-        box = None if match.path is None else self.box_by_image.get((seq, match.path.name))
+        label_path = None if match.path is None else self.root/seq/self.label_directory/f"{match.path.stem}.txt"
+        box = None if label_path is None else load_yolo_box(label_path, self.camera_wh)
         xyz = torch.as_tensor(np.load(record["target_path"], allow_pickle=False).reshape(3), dtype=torch.float32)
         sample = {
             # Radar
@@ -347,7 +344,7 @@ class MultimodalV2Dataset(Dataset):
             "m_V": match.valid, "vision_delta_t": 0.0 if match.delta_t is None else match.delta_t,
             # Target
             "target_xyz": xyz, "target_valid": bool(torch.isfinite(xyz).all()),
-            "target_timestamp": tq, "gt_box_xyxy_px": torch.zeros(4) if box is None else torch.tensor(box),
+            "target_timestamp": tq, "gt_box_xyxy_px": torch.zeros(4) if box is None else box,
             "gt_2d_valid": box is not None,
             # Diagnostic supervision only, not an observation feature.
             "supervision_recent_mask": packed(recent, (0,), bool),
@@ -451,14 +448,14 @@ def build_datasets(config: Mapping[str, Any], root: Path):
     # Current audited calibration is zero. A nonzero offset requires an explicit new contract.
     if float(geometry.get("time_offset_s", 0.0)) != 0.0:
         raise ValueError("raw historical-image contract requires time_offset_s=0; nonzero offset needs explicit review")
-    manifest = load_label_manifest(resolve(data["annotation_manifest"]), require_boxes=False)
     camera = yaml.safe_load(resolve(data["camera_config"]).read_text())
     args = dict(camera_wh=tuple(camera["cameras"]["left"]["resolution"]),
                 short_edge=int(data["dino_short_edge"]), max_size=int(data["dino_max_size"]),
                 radar_history_s=float(data.get("radar_history_s", 1.0)),
-                max_image_gap_s=float(data.get("max_image_gap_s", 1.0)))
-    train = MultimodalV2Dataset(dataset_root, train_sequences, manifest, filter_empty=True, **args)
-    val = MultimodalV2Dataset(dataset_root, val_sequences, manifest, filter_empty=False, **args)
+                max_image_gap_s=float(data.get("max_image_gap_s", 1.0)),
+                label_directory=str(data.get("label_directory", "2d_detect")))
+    train = MultimodalV2Dataset(dataset_root, train_sequences, filter_empty=True, **args)
+    val = MultimodalV2Dataset(dataset_root, val_sequences, filter_empty=False, **args)
     train_times = {r["query_time"] for r in train.query_records}
     if any(r["query_time"] in train_times for r in val.query_records):
         raise ValueError("duplicate query_time across train/validation")

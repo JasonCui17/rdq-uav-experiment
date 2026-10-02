@@ -19,7 +19,7 @@ from rdq_uav.multimodal_v2.scoring import CandidateScoring
 
 
 def release(root, seq, *, queries=(10.0,), events=(), images=(), n=2):
-    for directory in ('ground_truth', 'livox_avia', 'lidar_360', 'Image'):
+    for directory in ('ground_truth', 'livox_avia', 'lidar_360', 'Image', '2d_detect'):
         (root/seq/directory).mkdir(parents=True, exist_ok=True)
     for tq in queries:
         np.save(root/seq/'ground_truth'/f'{tq}.npy', np.array([1., 2., 3.]))
@@ -30,8 +30,8 @@ def release(root, seq, *, queries=(10.0,), events=(), images=(), n=2):
         Image.new('RGB', (16, 8), 'white').save(root/seq/'Image'/f'{timestamp}.png')
 
 
-def dataset(root, seqs=('seq0001',), manifest=(), **kwargs):
-    return MultimodalV2Dataset(root, seqs, manifest, camera_wh=(16, 8), short_edge=8, max_size=16, **kwargs)
+def dataset(root, seqs=('seq0001',), **kwargs):
+    return MultimodalV2Dataset(root, seqs, camera_wh=(16, 8), short_edge=8, max_size=16, **kwargs)
 
 
 def projection():
@@ -114,12 +114,11 @@ def test_no_event_or_point_cap_and_custom_window(tmp_path):
 
 def test_gt_matches_selected_filename_only(tmp_path):
     release(tmp_path, 'seq0001', images=(9.8, 10.1))
-    old = SimpleNamespace(sequence_id='seq0001', image_path='10.1.png', gt_2d_valid=True,
-                          box_xyxy_px=(1., 1., 4., 4.))
-    assert not dataset(tmp_path, manifest=[old])[0]['gt_2d_valid']
-    selected = SimpleNamespace(sequence_id='seq0001', image_path='9.8.png', gt_2d_valid=True,
-                               box_xyxy_px=(2., 2., 6., 6.))
-    s = dataset(tmp_path, manifest=[old, selected])[0]
+    labels = tmp_path/'seq0001'/'2d_detect'
+    (labels/'10.1.txt').write_text('0 0.5 0.5 0.25 0.5\n')
+    assert not dataset(tmp_path)[0]['gt_2d_valid']
+    (labels/'9.8.txt').write_text('0 0.25 0.5 0.25 0.5\n')
+    s = dataset(tmp_path)[0]
     assert s['gt_2d_valid'] and s['gt_box_xyxy_px'].tolist() == [2., 2., 6., 6.]
     assert s['target_xyz'].tolist() == [1., 2., 3.]
     assert 'calibration_handle' not in s and 'projection' not in s
@@ -179,10 +178,9 @@ def test_build_datasets_new_pair_and_ignores_max_events(tmp_path):
     (tmp_path/'split.json').write_text(json.dumps({'train': ['seq0001'], 'val': ['seq0002']}))
     (tmp_path/'geometry.json').write_text('{"time_offset_s": 0.0}')
     (tmp_path/'camera.yaml').write_text('cameras:\n  left:\n    resolution: [16, 8]\n')
-    (tmp_path/'labels.jsonl').write_text('')
     cfg = {'data': dict(root='.', split_file='split.json', train_split='train', val_split='val',
                         geometry_calibration='geometry.json', camera_config='camera.yaml',
-                        annotation_manifest='labels.jsonl', dino_short_edge=8, dino_max_size=16,
+                        dino_short_edge=8, dino_max_size=16,
                         max_events=0)}
     train, val = build_datasets(cfg, tmp_path)
     assert train[0]['m_R'] and len(val) == 1
@@ -250,13 +248,30 @@ def test_current_model_valid_visual_evidence_with_direct_projection(tmp_path):
     assert torch.isfinite(values['loss'])
 
 
-def test_manifest_uses_selected_image_not_query_uid(tmp_path):
-    from rdq_uav.multimodal_v2.data import load_label_manifest
-    path = tmp_path/'labels.jsonl'
-    path.write_text(json.dumps(dict(sequence_id='seq0001', image_path='seq0001/Image/10.1.png',
-                                    gt_2d_valid=True, box_xyxy_px=[1., 1., 4., 4.]))+'\n')
-    records = load_label_manifest(path)
-    assert records[0].gt_2d_valid and records[0].box_xyxy_px == (1., 1., 4., 4.)
+@pytest.mark.parametrize('contents', ['', '   \n'])
+def test_empty_label_does_not_create_negative(tmp_path, contents):
+    release(tmp_path, 'seq0001', images=(10.,))
+    (tmp_path/'seq0001'/'2d_detect'/'10.0.txt').write_text(contents)
+    s = dataset(tmp_path)[0]
+    assert s['m_V'] and not s['gt_2d_valid']
+
+
+@pytest.mark.parametrize('contents', ['0 0.5 0.5 0.2', '0 nan 0.5 0.2 0.2',
+                                     '0 0.1 0.5 0.9 0.2',
+                                     '0 0.5 0.5 0.2 0.2\n0 0.5 0.5 0.1 0.1'])
+def test_bad_or_multiple_labels_raise(tmp_path, contents):
+    release(tmp_path, 'seq0001', images=(10.,))
+    (tmp_path/'seq0001'/'2d_detect'/'10.0.txt').write_text(contents)
+    with pytest.raises(ValueError):
+        dataset(tmp_path)[0]
+
+
+def test_yolo_uses_left_crop_size_not_stereo_png_size(tmp_path):
+    release(tmp_path, 'seq0001', images=(10.,))
+    Image.new('RGB', (32, 8)).save(tmp_path/'seq0001'/'Image'/'10.0.png')
+    (tmp_path/'seq0001'/'2d_detect'/'10.0.txt').write_text('0 0.5 0.5 0.25 0.5')
+    assert dataset(tmp_path)[0]['gt_box_xyxy_px'].tolist() == [6., 2., 10., 6.]
+
 
 
 def test_future_only_image_is_missing(tmp_path):

@@ -194,3 +194,20 @@ PYTHONPATH=src python experiments/multimodal_v2/diagnostics/check_data_samples.p
 本轮修订验证：同第7节测试命令，55 passed，1个原有attention mask类型warning；
 其中41项V2测试与14项旧链路回归。compileall和git diff --check通过。
 真实MMAUD数据仍不在当前环境，真实Sample smoke/GPU门禁仍待验证。
+
+
+## 2026-10-02: direct YOLO supervision (implementation pending verification)
+
+V2 no longer consumes annotation_manifest or a bbox mapping dictionary.
+For the selected causal historical image, read
+`<root>/<sequence>/<label_directory>/<image_stem>.txt`. Default directory:
+`2d_detect`. All directory boxes are trusted supervision as instructed by
+the user. Convert YOLO class/cx/cy/w/h using the calibrated left source image
+size, consistent with gt_bbox_annotator (including side-by-side PNG crops).
+Missing/empty files give zero box and gt_2d_valid=False, never implicit negative
+supervision. Malformed/out-of-frame or multiple-box files raise explicit errors:
+the current target contract supports one UAV box. Historical image selection,
+modality masks and train-only both-missing filtering remain unchanged.
+Tests and the smoke entry were updated; no tests/smoke were run for this revision
+per the user's instruction to defer verification until equipment is available.
+Earlier passing test totals apply to the preceding manifest-based revision.

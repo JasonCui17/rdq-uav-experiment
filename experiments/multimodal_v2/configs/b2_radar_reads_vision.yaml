@@ -12,7 +12,7 @@ data:
   max_events: 20
   radar_history_s: 1.0
   max_image_gap_s: 1.0
-  annotation_manifest: manifests/multimodal_v1/vision_annotated20.jsonl
+  label_directory: 2d_detect
   camera_config: configs/calibration/mmaud_v1_omni.yaml
   geometry_calibration: calibration/official_left_p4_current_geometry.json
   dino_short_edge: 800

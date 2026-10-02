@@ -94,3 +94,20 @@ Missing historical RGB is masked even when a closer future frame exists.
 Updated labels and validity checks use this historical frame only.
 Regression result: 55 passed (41 V2 + 14 legacy), one existing mask-type warning;
 compileall and diff check passed. Real-data/GPU gates remain pending.
+
+
+## 2026-10-02: direct YOLO supervision (implementation pending verification)
+
+V2 no longer consumes annotation_manifest or a bbox mapping dictionary.
+For the selected causal historical image, read
+`<root>/<sequence>/<label_directory>/<image_stem>.txt`. Default directory:
+`2d_detect`. All directory boxes are trusted supervision as instructed by
+the user. Convert YOLO class/cx/cy/w/h using the calibrated left source image
+size, consistent with gt_bbox_annotator (including side-by-side PNG crops).
+Missing/empty files give zero box and gt_2d_valid=False, never implicit negative
+supervision. Malformed/out-of-frame or multiple-box files raise explicit errors:
+the current target contract supports one UAV box. Historical image selection,
+modality masks and train-only both-missing filtering remain unchanged.
+Tests and the smoke entry were updated; no tests/smoke were run for this revision
+per the user's instruction to defer verification until equipment is available.
+Earlier passing test totals apply to the preceding manifest-based revision.

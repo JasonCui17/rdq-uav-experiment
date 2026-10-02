@@ -210,3 +210,23 @@ previous 83.4167% B0 result used the old input definition and is historical;
 new B2 results require a B0 comparison under this same one-second definition.
 Historical E0 retains its latest-20 definition and is not an input-aligned
 replacement for the new B0 baseline.
+
+
+## 2026-10-02: direct YOLO supervision (implementation pending verification)
+
+V2 no longer consumes annotation_manifest or a bbox mapping dictionary.
+For the selected causal historical image, read
+`<root>/<sequence>/<label_directory>/<image_stem>.txt`. Default directory:
+`2d_detect`. All directory boxes are trusted supervision as instructed by
+the user. Convert YOLO class/cx/cy/w/h using the calibrated left source image
+size, consistent with gt_bbox_annotator (including side-by-side PNG crops).
+Missing/empty files give zero box and gt_2d_valid=False, never implicit negative
+supervision. Malformed/out-of-frame or multiple-box files raise explicit errors:
+the current target contract supports one UAV box. Historical image selection,
+modality masks and train-only both-missing filtering remain unchanged.
+Tests and the smoke entry were updated; no tests/smoke were run for this revision
+per the user's instruction to defer verification until equipment is available.
+Earlier passing test totals apply to the preceding manifest-based revision.
+
+Current Dataset constructor removes the manifest argument. Configuration uses
+`data.label_directory: 2d_detect`; label changes take effect at the next read.
