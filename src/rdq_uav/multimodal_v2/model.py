@@ -7,7 +7,7 @@ from typing import Any, Mapping
 import torch
 from torch import nn
 
-from rdq_uav.multimodal_v1.interaction.geometry_local import project_omni_radtan
+from .geometry import ProjectionContext, project_omni_radtan
 
 from .contracts import CandidateBatch, CrossModalEvidence, MultimodalOutput, validate_batch
 from .interaction import CandidateCrossAttention, _zero_evidence
@@ -40,20 +40,20 @@ class MultimodalV2(nn.Module):
         return candidate.index_select(available[candidate.batch_index])
 
     def forward(self, batch: Mapping[str, Any], images: torch.Tensor,
-                image_padding_mask: torch.Tensor, context: Any) -> MultimodalOutput:
+                image_padding_mask: torch.Tensor, projection: ProjectionContext) -> MultimodalOutput:
         validate_batch(batch)
         lidar_raw, radar = self.lidar(batch)
         vision_raw, visual = self.vision(images, image_padding_mask, batch["image_source_wh"])
-        radar = self._filter_modality(radar, context.m_R)
-        visual = self._filter_modality(visual, context.m_V)
+        radar = self._filter_modality(radar, batch["m_R"])
+        visual = self._filter_modality(visual, batch["m_V"])
         projected, projection_valid = project_omni_radtan(
-            radar.xyz_m.float(), radar.batch_index, context.projection
+            radar.xyz_m.float(), radar.batch_index, projection
         )
         radar = radar.with_projection(projected, projection_valid)
         if self.interaction_enabled:
             radar_evidence, vision_evidence = self.interaction(
                 radar, visual, vision_raw["pyramid"].features[:2], image_padding_mask,
-                context, enable_radar_to_vision=self.vision_reads_radar,
+                projection, batch["m_R"], batch["m_V"], enable_radar_to_vision=self.vision_reads_radar,
             )
         else:
             radar_evidence, vision_evidence = _zero_evidence(radar), _zero_evidence(visual)

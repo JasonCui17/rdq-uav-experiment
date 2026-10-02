@@ -22,7 +22,7 @@ from torch.utils.data import DataLoader
 from rdq_uav.lidar_v2.loss import CandidateLoss
 from rdq_uav.lidar_v2.model import LiDARUAVDetector
 from rdq_uav.lidar_v2.selector import CandidateSelector
-from rdq_uav.multimodal_v1 import load_left_projection_context
+from rdq_uav.multimodal_v2.geometry import load_left_projection_context
 from rdq_uav.multimodal_v1.training import supervised_dino_loss
 from rdq_uav.multimodal_v1.vision.uav_dino import adapt_dino_class_head_to_single_uav
 from rdq_uav.runtime_paths import ensure_detrex_config_link
@@ -176,10 +176,10 @@ def synchronize_dino_device(runtime: V2Runtime, device: torch.device) -> None:
 
 def forward_step(runtime: V2Runtime, batch: Mapping[str, Any], device: torch.device,
                  *, compute_frozen_losses: bool = True) -> dict[str, Any]:
-    lidar_batch, images, masks, context, targets, transforms = prepare_model_batch(
+    lidar_batch, images, masks, projection, targets, transforms = prepare_model_batch(
         batch, runtime.dino_detector, runtime.projection_base, device,
     )
-    output = runtime.model(lidar_batch, images, masks, context)
+    output = runtime.model(lidar_batch, images, masks, projection)
     rank = runtime.ranking_loss(output, targets)
     result = {"output": output, "targets": targets, **rank}
     if compute_frozen_losses:

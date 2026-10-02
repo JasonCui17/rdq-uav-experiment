@@ -6,7 +6,7 @@ import pytest
 import torch
 from torch import nn
 
-from rdq_uav.multimodal_v1.contracts import InteractionContext, ProjectionContext
+from rdq_uav.multimodal_v2.geometry import ProjectionContext
 from rdq_uav.multimodal_v2.contracts import CandidateBatch, CrossModalEvidence
 from rdq_uav.multimodal_v2.interaction import CandidateCrossAttention
 from rdq_uav.multimodal_v2.loss import CandidateRankingLoss, MultimodalTargets
@@ -69,7 +69,7 @@ def context(m_r=True, m_v=True):
         torch.tensor([[0.0, 50.0, 50.0, 50.0, 50.0]]),
         torch.zeros(1, 4), torch.tensor([[100.0, 100.0]]), torch.ones(1, 2),
     )
-    return InteractionContext(("cal",), torch.tensor([m_r]), torch.tensor([m_v]), projection)
+    return projection, torch.tensor([m_r]), torch.tensor([m_v])
 
 
 def test_r_only_and_v_only_have_task_specific_fields_and_rankings():
@@ -202,7 +202,7 @@ def test_missing_vision_invalid_projection_and_padding_zero_visual_evidence():
         (candidate("R", xyz=((0.0, 0.0, -2.0),)), context(), padding),
         (candidate("R"), context(), torch.ones_like(padding)),
     ):
-        result = module.read_visual_for_radar(radar, pyramid, mask, ctx)
+        result = module.read_visual_for_radar(radar, pyramid, mask, *ctx)
         assert not result.valid.any()
         assert torch.equal(result.feature, torch.zeros_like(result.feature))
 
@@ -210,7 +210,7 @@ def test_missing_vision_invalid_projection_and_padding_zero_visual_evidence():
 def test_no_nearby_lidar_is_exact_vision_identity():
     radar = candidate("R", projected=((0.0, 0.0),))
     vision = candidate("V", boxes=((80.0, 80.0, 90.0, 90.0),))
-    ev = CandidateCrossAttention().read_radar_for_vision(vision, radar, context())
+    ev = CandidateCrossAttention().read_radar_for_vision(vision, radar, *context())
     scoring = CandidateScoring()
     nn.init.constant_(scoring.score_head.vision[-1].bias, 1.0)
     output = scoring(radar, vision, evidence(1, valid=False), ev, num_samples=1,

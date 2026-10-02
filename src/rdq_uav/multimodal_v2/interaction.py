@@ -8,8 +8,7 @@ from typing import Sequence
 import torch
 from torch import nn
 
-from rdq_uav.multimodal_v1.contracts import InteractionContext
-from rdq_uav.multimodal_v1.interaction.geometry_local import project_omni_radtan
+from .geometry import ProjectionContext, project_omni_radtan
 
 from .contracts import CandidateBatch, CrossModalEvidence
 
@@ -69,8 +68,8 @@ class CandidateCrossAttention(nn.Module):
         self.box_margin_px = float(box_margin_px)
 
     def _visual_memory(self, radar: CandidateBatch, pyramid: Sequence[torch.Tensor],
-                       image_masks: torch.Tensor, context: InteractionContext):
-        pixels, projection_valid = project_omni_radtan(radar.xyz_m.float(), radar.batch_index, context.projection)
+                       image_masks: torch.Tensor, projection: ProjectionContext, m_R: torch.Tensor, m_V: torch.Tensor):
+        pixels, projection_valid = project_omni_radtan(radar.xyz_m.float(), radar.batch_index, projection)
         side = 2 * self.visual_radius + 1
         per_level = side * side
         total = per_level * len(self.visual_proj)
@@ -82,8 +81,8 @@ class CandidateCrossAttention(nn.Module):
             torch.arange(-self.visual_radius, self.visual_radius + 1, device=radar.feature.device),
             indexing="ij",
         ), dim=-1).reshape(-1, 2)[:, [1, 0]]
-        scale = context.projection.image_scale_xy[radar.batch_index].to(pixels.dtype)
-        for level, (feature, projection) in enumerate(zip(pyramid, self.visual_proj)):
+        scale = projection.image_scale_xy[radar.batch_index].to(pixels.dtype)
+        for level, (feature, feature_projection) in enumerate(zip(pyramid, self.visual_proj)):
             _, _, height, width = feature.shape
             padded_height, padded_width = image_masks.shape[-2:]
             cell_scale = pixels.new_tensor((width / padded_width, height / padded_height))[None]
@@ -98,18 +97,18 @@ class CandidateCrossAttention(nn.Module):
             visible = in_bounds & ~resized_mask[radar.batch_index[:, None], safe_y, safe_x]
             raw = feature.permute(0, 2, 3, 1)[radar.batch_index[:, None], safe_y, safe_x]
             start = level * per_level
-            memory[:, start:start + per_level] = projection(raw)
+            memory[:, start:start + per_level] = feature_projection(raw)
             padding[:, start:start + per_level] = ~visible
             distance = torch.linalg.vector_norm(offsets.float(), dim=1)
             bias[:, start:start + per_level] = -distance[None]
         return memory, padding, bias, pixels, projection_valid
 
     def read_visual_for_radar(self, radar: CandidateBatch, pyramid: Sequence[torch.Tensor],
-                              image_masks: torch.Tensor, context: InteractionContext) -> CrossModalEvidence:
+                              image_masks: torch.Tensor, projection: ProjectionContext, m_R: torch.Tensor, m_V: torch.Tensor) -> CrossModalEvidence:
         if radar.n == 0:
             return _zero_evidence(radar)
-        memory, padding, bias, pixels, projected = self._visual_memory(radar, pyramid, image_masks, context)
-        active = projected & context.m_R[radar.batch_index] & context.m_V[radar.batch_index] & (~padding).any(1)
+        memory, padding, bias, pixels, projected = self._visual_memory(radar, pyramid, image_masks, projection, m_R, m_V)
+        active = projected & m_R[radar.batch_index] & m_V[radar.batch_index] & (~padding).any(1)
         feature = radar.feature.new_zeros((radar.n, 128)); gate = radar.score.new_zeros(radar.n)
         if bool(active.any()):
             values, weights = self.radar_reads_vision(
@@ -119,10 +118,10 @@ class CandidateCrossAttention(nn.Module):
         return CrossModalEvidence(feature, active, (~padding).sum(1), gate, pixels)
 
     def read_radar_for_vision(self, vision: CandidateBatch, radar: CandidateBatch,
-                              context: InteractionContext) -> CrossModalEvidence:
+                              projection: ProjectionContext, m_R: torch.Tensor, m_V: torch.Tensor) -> CrossModalEvidence:
         if vision.n == 0:
             return _zero_evidence(vision)
-        radar_pixels, radar_valid = project_omni_radtan(radar.xyz_m.float(), radar.batch_index, context.projection)
+        radar_pixels, radar_valid = project_omni_radtan(radar.xyz_m.float(), radar.batch_index, projection)
         k = self.lidar_neighbors
         memory = vision.feature.new_zeros((vision.n, k, 128))
         padding = torch.ones((vision.n, k), dtype=torch.bool, device=vision.feature.device)
@@ -130,7 +129,7 @@ class CandidateCrossAttention(nn.Module):
         for vi in range(vision.n):
             batch = vision.batch_index[vi]
             ids = torch.nonzero((radar.batch_index == batch) & radar_valid, as_tuple=False).flatten()
-            if not len(ids) or not bool(context.m_R[batch] & context.m_V[batch]):
+            if not len(ids) or not bool(m_R[batch] & m_V[batch]):
                 continue
             box = vision.box_xyxy_px[vi].float()
             points = radar_pixels[ids].float()
@@ -158,7 +157,7 @@ class CandidateCrossAttention(nn.Module):
             padding[vi, :count] = False
             scale = max(1.0, float(torch.linalg.vector_norm(box[2:] - box[:2])))
             bias[vi, :count] = -distance[order] / scale
-        active = context.m_V[vision.batch_index] & (~padding).any(1)
+        active = m_V[vision.batch_index] & (~padding).any(1)
         feature = vision.feature.new_zeros((vision.n, 128)); gate = vision.score.new_zeros(vision.n)
         if bool(active.any()):
             values, weights = self.vision_reads_radar(
@@ -172,7 +171,7 @@ class CandidateCrossAttention(nn.Module):
 
     def forward(self, radar: CandidateBatch, vision: CandidateBatch,
                 pyramid: Sequence[torch.Tensor], image_masks: torch.Tensor,
-                context: InteractionContext, *, enable_radar_to_vision: bool = True):
-        r = self.read_visual_for_radar(radar, pyramid, image_masks, context)
-        v = self.read_radar_for_vision(vision, radar, context) if enable_radar_to_vision else _zero_evidence(vision)
+                projection: ProjectionContext, m_R: torch.Tensor, m_V: torch.Tensor, *, enable_radar_to_vision: bool = True):
+        r = self.read_visual_for_radar(radar, pyramid, image_masks, projection, m_R, m_V)
+        v = self.read_radar_for_vision(vision, radar, projection, m_R, m_V) if enable_radar_to_vision else _zero_evidence(vision)
         return r, v

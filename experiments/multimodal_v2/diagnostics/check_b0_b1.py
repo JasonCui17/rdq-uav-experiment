@@ -12,7 +12,7 @@ from torch.utils.data import DataLoader,Subset
 from rdq_uav.runtime_paths import apply_runtime_path_overrides,resolve_project_path
 from rdq_uav.multimodal_v2.data import build_datasets,collate_multimodal_v2,prepare_model_batch
 from rdq_uav.multimodal_v2.training import build_runtime,synchronize_dino_device
-from rdq_uav.multimodal_v1 import load_left_projection_context
+from rdq_uav.multimodal_v2.geometry import load_left_projection_context
 
 def maxdiff(a,b):
     return 0.0 if not a.numel() else float((a.float()-b.float()).abs().max())
@@ -21,18 +21,18 @@ def main():
     p=argparse.ArgumentParser();p.add_argument("--config",type=Path,required=True);p.add_argument("--output",type=Path,required=True)
     p.add_argument("--device",default="cuda:0");p.add_argument("--samples",type=int,default=2);args=p.parse_args()
     resolve=lambda x:resolve_project_path(x,ROOT);cfg=apply_runtime_path_overrides(yaml.safe_load(resolve(args.config).read_text()))
-    _,_,dataset=build_datasets(cfg,ROOT);dataset=Subset(dataset,range(min(args.samples,len(dataset))))
+    _,dataset=build_datasets(cfg,ROOT);dataset=Subset(dataset,range(min(args.samples,len(dataset))))
     loader=DataLoader(dataset,batch_size=1,shuffle=False,collate_fn=collate_multimodal_v2)
     device=torch.device(args.device);runtime=build_runtime(cfg,ROOT,torch.device("cpu"));runtime.model.to(device).eval();synchronize_dino_device(runtime,device)
     runtime.projection_base=load_left_projection_context(runtime.camera_config,runtime.geometry_calibration,image_scale_xy=torch.ones((1,2),device=device),device=device)
     reports=[]
     with torch.no_grad():
       for batch in loader:
-        lidar,images,masks,context,_,_=prepare_model_batch(batch,runtime.dino_detector,runtime.projection_base,device)
+        lidar,images,masks,projection,_,_=prepare_model_batch(batch,runtime.dino_detector,runtime.projection_base,device)
         runtime.model.interaction_enabled=False
-        with torch.autocast(device_type=device.type,enabled=False):b0=runtime.model(lidar,images,masks,context)
+        with torch.autocast(device_type=device.type,enabled=False):b0=runtime.model(lidar,images,masks,projection)
         runtime.model.interaction_enabled=True
-        with torch.autocast(device_type=device.type,enabled=False):b1=runtime.model(lidar,images,masks,context)
+        with torch.autocast(device_type=device.type,enabled=False):b1=runtime.model(lidar,images,masks,projection)
         reports.append({
           "sample_id":batch["sample_id"][0],"radar_xyz_max_diff":maxdiff(b0.radar_candidates.xyz_m,b1.radar_candidates.xyz_m),
           "radar_score_max_diff":maxdiff(b0.radar_candidates.score,b1.radar_candidates.score),

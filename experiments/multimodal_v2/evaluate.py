@@ -67,7 +67,7 @@ def main():
     cfg["model"]["interaction_enabled"] = args.mode != "B0"
     cfg["model"]["vision_reads_radar"] = args.mode == "B3"
     cfg["model"]["vision_scoring_enabled"] = args.mode == "B3"
-    _, _, dataset = build_datasets(cfg, ROOT)
+    _, dataset = build_datasets(cfg, ROOT)
     if args.limit is not None: dataset = Subset(dataset, range(min(args.limit, len(dataset))))
     loader = DataLoader(dataset, batch_size=1, shuffle=False, num_workers=args.num_workers,
                         collate_fn=collate_multimodal_v2)
@@ -76,7 +76,7 @@ def main():
     if args.checkpoint:
         checkpoint_info = load_network(runtime.model, resolve(args.checkpoint))
     runtime.model.to(device).eval(); synchronize_dino_device(runtime, device)
-    from rdq_uav.multimodal_v1 import load_left_projection_context
+    from rdq_uav.multimodal_v2.geometry import load_left_projection_context
     runtime.projection_base = load_left_projection_context(
         runtime.camera_config, runtime.geometry_calibration,
         image_scale_xy=torch.ones((1,2),device=device), device=device,
@@ -84,11 +84,11 @@ def main():
     rows, type_counts, top_type_counts = [], Counter(), Counter()
     loss_counts = Counter()
     for batch in loader:
-        lidar, images, masks, context, targets, _ = prepare_model_batch(
+        lidar, images, masks, projection, targets, _ = prepare_model_batch(
             batch, runtime.dino_detector, runtime.projection_base, device
         )
         with torch.autocast(device_type=device.type, enabled=False):
-            output = runtime.model(lidar, images, masks, context)
+            output = runtime.model(lidar, images, masks, projection)
         loss_values = runtime.ranking_loss(output, targets)
         for key, value in loss_values.items():
             if key.startswith("n_"):

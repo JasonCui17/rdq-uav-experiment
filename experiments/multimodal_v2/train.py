@@ -77,7 +77,7 @@ def main():
     elif last.exists() and not args.fast_dev_run:
         raise FileExistsError(f"{last} exists; use --resume auto or a new output")
     L.seed_everything(int(cfg["experiment"]["seed"]), workers=True)
-    train_lidar, train_data, val_data = build_datasets(cfg, ROOT)
+    train_data, val_data = build_datasets(cfg, ROOT)
     if args.train_limit is not None: train_data = Subset(train_data, range(min(args.train_limit, len(train_data))))
     if args.val_limit is not None: val_data = Subset(val_data, range(min(args.val_limit, len(val_data))))
     runtime = build_runtime(cfg, ROOT, torch.device("cpu"))

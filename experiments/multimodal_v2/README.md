@@ -60,8 +60,12 @@ remain frozen and disabled in the B2 config.
 - V1 `SwinPyramidAdapter`, `DINOAdapter`, and `RGBCandidateBuilder` preserve the
   audited DINO execution, SSOD weights, padding masks, and object-query
   candidate semantics.
-- V1 calibrated projection and data alignment are reused to avoid a second
-  coordinate or timestamp implementation.
+- V2 owns query-time Sample construction and collate in `data.py`. Radar uses
+  the inclusive `[t-radar_history_s,t]` window; RGB uses the latest historical raw timestamp
+  within `[t-max_image_gap_s,t]` (future RGB is forbidden). `max_events` remains only
+  for the historical LiDAR-only E0 diagnostic.
+- `geometry.py` owns ProjectionContext and the migrated, unchanged calibrated
+  projection mathematics. V2 no longer uses the V1 InteractionContext wrapper.
 
 V2 owns association, bidirectional candidate evidence, task-separated scoring,
 and ranking loss. It does not call V1 candidate association.
@@ -181,3 +185,28 @@ current five valid validation boxes are exploratory only.
 There is no trained checkpoint from the earlier V2 implementation. New V2
 checkpoints use one canonical DINO prefix, `vision.dino.detector.*`; E5 source
 checkpoints are still imported by the explicit compatibility loader.
+
+## Query-time data contract (2026-10-02)
+
+See [data refactor audit and progress](reports/DATA_REFACTOR_PROGRESS_20261002.md)
+for field shapes, compatibility changes, verification and remaining gates.
+`build_datasets()` now returns `(train, val)`, not a wrapped LiDAR Dataset.
+The training Dataset removes both-missing queries during initialization; the
+validation Dataset retains them. Absolute time and file identities stay in the
+audit batch and do not enter the model input dictionary.
+
+Before new training, run the read-only real-data smoke on a sequence that is
+present locally:
+
+```bash
+PYTHONPATH=src python experiments/multimodal_v2/diagnostics/check_data_samples.py \
+  --config experiments/multimodal_v2/configs/b2_radar_reads_vision.yaml \
+  --sequence seq0001 --samples 3 \
+  --output outputs/own_multimodal_research/multimodal_v2/data_1s_smoke.json
+```
+
+Run B0/B1 identity and full B0/B1 again with separate output directories. The
+previous 83.4167% B0 result used the old input definition and is historical;
+new B2 results require a B0 comparison under this same one-second definition.
+Historical E0 retains its latest-20 definition and is not an input-aligned
+replacement for the new B0 baseline.

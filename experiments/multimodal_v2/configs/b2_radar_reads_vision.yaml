@@ -8,8 +8,10 @@ data:
   split_file: splits/mmaud_annotated20.json
   train_split: train_sub
   val_split: validation_sub
+  # Historical LiDAR-only E0 diagnostic only; V2 Dataset ignores max_events.
   max_events: 20
-  max_image_gap_s: 0.04
+  radar_history_s: 1.0
+  max_image_gap_s: 1.0
   annotation_manifest: manifests/multimodal_v1/vision_annotated20.jsonl
   camera_config: configs/calibration/mmaud_v1_omni.yaml
   geometry_calibration: calibration/official_left_p4_current_geometry.json
