@@ -203,7 +203,7 @@ def validate_sample(sample: Mapping[str, Any]) -> None:
         raise ValueError("radar event sequence mismatch")
     if any(not np.isfinite(t) or not tq-history <= t <= tq for t in times):
         raise ValueError("radar event outside causal history window")
-    radar_keys = ("points", "delta_t", "sensor_id", "supervision_recent_mask")
+    radar_keys = ("points", "delta_t", "sensor_id")
     if sample["m_R"]:
         points = sample["points"]
         if points is None or points.ndim != 2 or points.shape[1] != 3 or not len(points):
@@ -337,15 +337,12 @@ class MultimodalV2Dataset(Dataset):
         record = self.query_records[index]
         seq, tq = record["sequence_id"], record["query_time"]
         events = self.select_radar_events(seq, tq)
-        parts, times, sensors, recent = [], [], [], []
-        for i, event in enumerate(events):
+        parts, times, sensors = [], [], []
+        for event in events:
             points = load_released_xyz(event.file_path)[0].astype(np.float32)
             parts.append(points)
             times.append(np.full(len(points), event.timestamp-tq, dtype=np.float32))
             sensors.append(np.full(len(points), event.sensor_id, dtype=np.int64))
-            # Preserve the frozen LiDAR diagnostic loss's latest-four semantics.
-            # This mask never limits observation selection or enters the encoder.
-            recent.append(np.full(len(points), i >= max(0, len(events)-4), dtype=bool))
         def packed(values, shape, dtype):
             return torch.from_numpy(np.concatenate(values) if values else np.empty(shape, dtype=dtype))
         points = packed(parts, (0, 3), np.float32)
@@ -363,8 +360,6 @@ class MultimodalV2Dataset(Dataset):
             "target_xyz": xyz, "target_valid": bool(torch.isfinite(xyz).all()),
             "target_timestamp": tq, "gt_box_xyxy_px": torch.zeros(4) if box is None else box,
             "gt_2d_valid": box is not None,
-            # Diagnostic supervision only, not an observation feature.
-            "supervision_recent_mask": packed(recent, (0,), bool),
             # Meta
             "sequence_id": seq, "query_time": tq, "sample_id": record["sample_id"],
             "num_samples": 1, "event_count": len(events),
@@ -375,7 +370,7 @@ class MultimodalV2Dataset(Dataset):
             "radar_history_s": self.radar_history_s, "max_image_gap_s": self.max_image_gap_s,
         }
         if not sample["m_R"]:
-            for key in ("points", "delta_t", "sensor_id", "supervision_recent_mask"):
+            for key in ("points", "delta_t", "sensor_id"):
                 sample[key] = None
         if match.valid:
             sample.update(prepare_image(match.path, self.camera_wh, self.short_edge, self.max_size))
@@ -400,7 +395,7 @@ def collate_multimodal_v2(samples: Sequence[Mapping[str, Any]]) -> dict[str, Any
                  vision_batch_index=torch.tensor(vision_ids, dtype=torch.long), point_counts=counts,
                  point_batch_index=torch.repeat_interleave(torch.arange(len(radar_ids)), counts))
     for key, shape, dtype in (("points", (0, 3), torch.float32), ("delta_t", (0,), torch.float32),
-                              ("sensor_id", (0,), torch.long), ("supervision_recent_mask", (0,), torch.bool)):
+                              ("sensor_id", (0,), torch.long)):
         batch[key] = torch.cat([samples[i][key] for i in radar_ids]) if radar_ids else torch.empty(shape, dtype=dtype)
     for key in ("m_R", "m_V", "target_valid", "gt_2d_valid"):
         batch[key] = torch.tensor([bool(s[key]) for s in samples], dtype=torch.bool)
@@ -430,7 +425,7 @@ def radar_model_batch(batch: Mapping[str, Any]) -> dict[str, Any]:
     """
     ids = batch["radar_batch_index"]
     result = {key: batch[key] for key in
-              ("points", "delta_t", "sensor_id", "supervision_recent_mask", "point_counts", "point_batch_index")}
+              ("points", "delta_t", "sensor_id", "point_counts", "point_batch_index")}
     result.update(num_samples=len(ids), target_xyz=batch["target_xyz"][ids],
                   target_valid=batch["target_valid"][ids])
     return result
@@ -451,7 +446,7 @@ def expand_projection(base: ProjectionContext, scale_xy: torch.Tensor) -> Projec
 def prepare_model_batch(batch: Mapping[str, Any], dino_detector: Any,
                         projection_base: ProjectionContext, device: torch.device):
     validate_batch(batch)
-    model_keys = ("points", "delta_t", "sensor_id", "supervision_recent_mask", "point_counts",
+    model_keys = ("points", "delta_t", "sensor_id", "point_counts",
                   "point_batch_index", "radar_batch_index", "vision_batch_index", "m_R", "m_V",
                   "vision_delta_t", "target_xyz", "target_valid", "gt_box_xyxy_px", "gt_2d_valid",
                   "image_source_wh", "image_view_wh", "image_scale_xy")

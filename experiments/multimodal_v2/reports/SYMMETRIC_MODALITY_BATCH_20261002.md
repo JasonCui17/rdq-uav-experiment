@@ -23,7 +23,6 @@
 | Vision | m_V | bool | False |
 | Target | target_xyz / target_valid | float32 [3] / bool | GT 无效时 mask |
 | Target | gt_box_xyxy_px / gt_2d_valid | float32 [4] / bool | 零框 / False |
-| Diagnostic supervision | supervision_recent_mask | bool [Nr]，历史窗口中最后四事件 | None |
 | Meta | sequence_id / sample_id | str | 保留 |
 | Meta | query_time / target_timestamp | float | 保留 |
 | Meta | event_timestamps / event_sequence_ids / event_count | list[float] / list[str] / int | 可为空 |
@@ -41,7 +40,7 @@ B 是全部 Sample 数；Br=sum(m_R)，Bv=sum(m_V)。
 | 字段 | Shape / 语义 |
 |---|---|
 | points | [sum(Nr),3]，仅有效雷达点 |
-| delta_t / sensor_id / supervision_recent_mask | [sum(Nr)] |
+| delta_t / sensor_id | [sum(Nr)] |
 | point_counts | [Br]，每个有效雷达样本的点数 |
 | point_batch_index | [sum(Nr)]，取值 0..Br-1，雷达局部索引 |
 | radar_batch_index | [Br]，雷达局部样本 → 原 Sample 索引 |
@@ -69,7 +68,7 @@ prepare_model_batch 的六元返回接口保持：prepared_batch、images 或 No
 
 ## 修改范围与待验证
 
-修改 data.py、contracts.py、model.py、training.py、数据测试、数据 smoke 脚本和文档。没有修改 LiDAR-only baseline、检测器网络、候选生成、attention 数学、标定投影公式、关联或 loss 数学。模型适配器对 V1 / LiDAR V2 的既有依赖仍存在；本次只解耦数据构造与缺失模态执行。
+修改 data.py、contracts.py、model.py、training.py、数据测试、数据 smoke 脚本和文档。检测器网络、候选生成、attention 数学、标定投影公式、关联和 loss 公式保持不变。后续全输入点监督清理也作用于共享 LiDAR V2 数据和诊断 loss，详见 ALL_INPUT_POINT_SUPERVISION_20261002.md。模型适配器对 V1 / LiDAR V2 的既有依赖仍存在；本次只解耦数据构造与缺失模态执行。
 
 本次按用户要求暂不运行 pytest / 实际数据 smoke / GPU gate。新增测试代码覆盖 None 缺失、缺失分支不调用、四种样本混合且索引非连续、paired interaction、evidence 梯度回填、冻结 loss 的局部监督映射、错误 Batch 索引。此前 55 PASS 是旧版本结果，不能当作本版本验证。
 

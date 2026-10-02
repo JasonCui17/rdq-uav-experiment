@@ -329,7 +329,7 @@ def test_symmetric_missing_samples_are_none(tmp_path):
     assert r['m_R'] and not r['m_V']
     assert r['image_uint8'] is None and r['image_scale_xy'] is None
     assert v['m_V'] and not v['m_R']
-    assert all(v[k] is None for k in ('points', 'delta_t', 'sensor_id', 'supervision_recent_mask'))
+    assert all(v[k] is None for k in ('points', 'delta_t', 'sensor_id'))
     assert missing['points'] is None and missing['image_uint8'] is None
 
 
@@ -454,3 +454,21 @@ def test_double_missing_frozen_losses_are_skipped(tmp_path, monkeypatch):
     result = training.forward_step(runtime, b, torch.device('cpu'))
     assert result['loss_lidar_frozen'] == result['loss_vision_frozen'] == 0
     assert result['vision_supervised'] == 0
+
+
+
+def test_full_history_early_point_participates_in_frozen_labels(tmp_path):
+    from rdq_uav.lidar_v2.loss import CandidateLoss
+    events=[(9.+i*.1, 0) for i in range(6)]
+    release(tmp_path, 'seq0001', events=events, n=1)
+    # Only the oldest event contains a point at the query GT position.
+    np.save(tmp_path/'seq0001'/'livox_avia'/'9.0.npy', np.array([[1.,2.,3.]],dtype=np.float32))
+    b=collate_multimodal_v2([dataset(tmp_path)[0]])
+    local=radar_model_batch(b)
+    n=len(local['points'])
+    out=dict(logits=torch.zeros(n),pred_xyz=local['points'],voxel_centers=local['points'],
+             batch_index=local['point_batch_index'],layouts=SimpleNamespace(point_to_l0=torch.arange(n)))
+    criterion=CandidateLoss(dict(focal_alpha=.25,focal_gamma=2.,smooth_l1_beta=1.,reg_weight=1.))
+    positive,ignore,negative,_=criterion.labels(out,local)
+    assert positive.tolist()==[True,False,False,False,False,False]
+    assert not ignore.any() and negative[1:].all()

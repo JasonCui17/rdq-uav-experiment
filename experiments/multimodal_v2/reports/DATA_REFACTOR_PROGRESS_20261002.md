@@ -83,7 +83,7 @@ query_time（ground_truth 文件名）
 - 图像取不晚于query_time的最新帧；超差图像 path/time=None，placeholder 且 m_V=False；不会读取它的2D框。
 - 训练初始化过滤双缺失，必要时检查事件是否有有效点并缓存每事件布尔值；不缓存全部点云。验证保留双缺失查询。
 - selected event_count 包含窗口内文件，即使某事件清理后0点；m_R 只由最终有效点数决定。
-- `supervision_recent_mask` 保留窗口内末四事件语义，供冻结 LiDAR loss 诊断使用，不限制输入，不作为编码器特征。
+- 雷达监督使用全部输入点判定支持，不生成按事件数量筛选的额外点级 mask。
 - 模态状态只有 m_R/m_V，一一对应 radar.valid/vision.valid，没有第二套可能冲突的布尔量。
 - 原图为左视图 crop 后 resize，image_uint8 在0..255；DINO normalizer 在 preprocess 中处理。padding mask 描述图像空间布局；placeholder 在 m_V 处屏蔽候选和证据，避免全 mask DINO 引入 NaN。
 
@@ -107,7 +107,6 @@ N 为单条有效点数，P=sum(N_i)，B 为 batch size，H/W 为 resize 后尺�
 | Target | target_valid | bool | bool [B] |
 | Target | gt_box_xyxy_px | float32 [4]，source pixels；missing全0 | float32 [B,4] |
 | Target | gt_2d_valid | bool | bool [B] |
-| Diagnostic supervision | supervision_recent_mask | bool [N] | bool [P] |
 | Packing | num_samples | int=1 | int=B |
 | Packing | point_counts | batch生成 | int64 [B] |
 | Packing | point_batch_index | batch生成 | int64 [P] |

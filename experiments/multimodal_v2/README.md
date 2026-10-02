@@ -1,6 +1,6 @@
 # Multimodal V2 experiments
 
-> 当前数据接口以 [对称模态 Batch 契约](reports/SYMMETRIC_MODALITY_BATCH_20261002.md) 为准：缺失观测在 Sample 为 None；collate 只收集有效模态，使用 radar_batch_index / vision_batch_index；模型跳过缺失分支。下文早期 placeholder 与全 B 图像 Shape 已被替代。本轮运行验证待设备可用后进行。
+> 当前数据接口以 [对称模态 Batch 契约](reports/SYMMETRIC_MODALITY_BATCH_20261002.md) 为准：缺失观测在 Sample 为 None；collate 只收集有效模态，使用 radar_batch_index / vision_batch_index；模型跳过缺失分支。下文早期 placeholder 与全 B 图像 Shape 已被替代。本轮运行验证待设备可用后进行。 后续已移除事件数量限制的点级监督 mask，雷达监督使用全部输入点；详见 [全输入点监督清理](reports/ALL_INPUT_POINT_SUPERVISION_20261002.md)。
 
 All experiment-only entry points, configurations, tests, diagnostics, and
 reports live here. The reusable model is confined to
