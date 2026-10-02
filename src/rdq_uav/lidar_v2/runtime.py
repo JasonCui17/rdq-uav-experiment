@@ -50,9 +50,7 @@ def evaluate_batch(outputs,batch,selector,criterion):
     for b,item in enumerate(selected):
         if not bool(batch['target_valid'][b]):continue
         gt=batch["target_xyz"][b]; current=bool(torch.any(pos & (outputs["batch_index"]==b)))
-        recent_points=batch["supervision_recent_mask"]&(batch["point_batch_index"]==b)
-        recent_neighbors=int(torch.count_nonzero(torch.linalg.vector_norm(batch["points"][recent_points]-gt,dim=1)<=1.))
-        row={"sample_id":batch["sample_id"][b],"sequence_id":batch["sequence_id"][b],"t0":float(batch["query_time"][b]),"support_group":"CURRENT_SUPPORT" if current else "NO_CURRENT_SUPPORT","recent_neighbor_group":"1" if recent_neighbors==1 else "2-3" if recent_neighbors in (2,3) else "4+" if recent_neighbors>=4 else "0"}
+        row={"sample_id":batch["sample_id"][b],"sequence_id":batch["sequence_id"][b],"t0":float(batch["query_time"][b]),"support_group":"CURRENT_SUPPORT" if current else "NO_CURRENT_SUPPORT"}
         for kind in ("raw","nms"):
             dist=torch.linalg.vector_norm(item[kind]["xyz"]-gt,dim=1)
             row[f"{kind}_distances"]=dist.cpu().tolist(); row[f"{kind}_count"]=len(dist)
@@ -76,5 +74,4 @@ def summarize_metrics(rows):
     result={"all":one(rows)}
     for key in ("CURRENT_SUPPORT","NO_CURRENT_SUPPORT"): result[key.lower()]=one([r for r in rows if r["support_group"]==key])
     result["per_sequence"]={seq:one([r for r in rows if r["sequence_id"]==seq]) for seq in sorted({r["sequence_id"] for r in rows})}
-    result["per_recent_neighbor_group"]={key:one([r for r in rows if r["recent_neighbor_group"]==key]) for key in ("0","1","2-3","4+")}
     return result

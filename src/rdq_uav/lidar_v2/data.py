@@ -62,16 +62,15 @@ class LiDARQueryBuilder:
         query_time=float(query_time)
         if not np.isfinite(query_time): raise ValueError("Non-finite query_time")
         events=self.select_events(sequence_id,query_time)
-        parts=[]; sensors=[]; times=[]; recent=[]
-        for i,event in enumerate(events):
+        parts=[]; sensors=[]; times=[]
+        for event in events:
             assert event.timestamp<=query_time, "Future event violation"
             points=load_released_xyz(event.file_path)[0].astype(np.float32)
             parts.append(points);sensors.append(np.full(len(points),event.sensor_id,np.int64))
             times.append(np.full(len(points),event.timestamp-query_time,np.float32))
-            recent.append(np.full(len(points),i>=max(0,len(events)-4),bool))
         cat=lambda a,shape,dtype: torch.from_numpy(np.concatenate(a) if a else np.empty(shape,dtype))
         result={"points":cat(parts,(0,3),np.float32),"sensor_id":cat(sensors,(0,),np.int64),
-                "delta_t":cat(times,(0,),np.float32),"supervision_recent_mask":cat(recent,(0,),bool),
+                "delta_t":cat(times,(0,),np.float32),
                 "sequence_id":sequence_id,"query_time":query_time,"num_samples":1,
                 "sample_id":sample_id or f"{sequence_id}_query_{query_time:.9f}",
                 "query_uid":query_uid if query_uid is not None else (sample_id or f"query_{query_time:.9f}"),
@@ -145,7 +144,7 @@ def collate_lidar_samples(samples):
     if not samples:raise ValueError('Cannot collate an empty spatial query batch')
     for query in samples:assert_query_integrity(query,require_events=True)
     counts=torch.tensor([len(q['points']) for q in samples],dtype=torch.long);n=len(samples)
-    batch={k:torch.cat([q[k] for q in samples]) for k in ('points','sensor_id','delta_t','supervision_recent_mask')}
+    batch={k:torch.cat([q[k] for q in samples]) for k in ('points','sensor_id','delta_t')}
     batch.update(num_samples=n,
         point_batch_index=torch.repeat_interleave(torch.arange(n),counts),point_counts=counts,
         query_time=torch.tensor([q['query_time'] for q in samples],dtype=torch.float64),

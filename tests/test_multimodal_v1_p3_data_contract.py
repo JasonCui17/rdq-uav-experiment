@@ -27,7 +27,6 @@ def lidar_query(sequence: str, uid: int, query_time: float) -> dict:
         "points": torch.tensor([[1.0, 2.0, 3.0]]),
         "sensor_id": torch.tensor([0]),
         "delta_t": torch.tensor([-0.1]),
-        "supervision_recent_mask": torch.tensor([True]),
         "event_count": 1,
         "event_timestamps": [event_time],
         "event_sequence_ids": [sequence],

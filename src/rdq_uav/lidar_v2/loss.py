@@ -17,11 +17,8 @@ class CandidateLoss(nn.Module):
         h=outputs["layouts"]; inv=h.point_to_l0; n=len(outputs["logits"]); gt=spatial_gt[outputs["batch_index"]]
         point_gt=spatial_gt[batch["point_batch_index"]]; dist=torch.linalg.vector_norm(batch["points"]-point_gt,dim=1)
         all_min=dist.new_full((n,),torch.inf); all_min.scatter_reduce_(0,inv,dist,reduce="amin",include_self=True)
-        # latest-four membership is supervision metadata, never a model feature.
-        recent=batch["supervision_recent_mask"]
-        recent_min=dist.new_full((n,),torch.inf); ridx=inv[recent]; rdist=dist[recent]
-        if len(ridx): recent_min.scatter_reduce_(0,ridx,rdist,reduce="amin",include_self=True)
-        positive=recent_min<=1.; ignore=(~positive)&(all_min<=2.); negative=all_min>2.
+        # Every input point participates; no event-count subset for supervision.
+        positive=all_min<=1.; ignore=(~positive)&(all_min<=2.); negative=all_min>2.
         valid=spatial_valid[outputs['batch_index']]
         return positive&valid,ignore&valid,negative&valid,encode_residual(gt,outputs["voxel_centers"],1.0)
     def forward(self,outputs,batch):
