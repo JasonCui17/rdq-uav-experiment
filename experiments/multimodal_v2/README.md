@@ -1,5 +1,7 @@
 # Multimodal V2 experiments
 
+> 当前数据接口以 [对称模态 Batch 契约](reports/SYMMETRIC_MODALITY_BATCH_20261002.md) 为准：缺失观测在 Sample 为 None；collate 只收集有效模态，使用 radar_batch_index / vision_batch_index；模型跳过缺失分支。下文早期 placeholder 与全 B 图像 Shape 已被替代。本轮运行验证待设备可用后进行。
+
 All experiment-only entry points, configurations, tests, diagnostics, and
 reports live here. The reusable model is confined to
 `src/rdq_uav/multimodal_v2/`; no new root-level `tools/` or `tests/` files are

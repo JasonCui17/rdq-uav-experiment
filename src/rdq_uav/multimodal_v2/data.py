@@ -1,7 +1,9 @@
 """V2 data boundary: query -> Sample -> packed Batch -> model inputs.
 
 Flat fields keep the existing detector interfaces. Radar: points/delta_t/
-sensor_id/m_R. Vision: image_uint8/vision_delta_t/m_V and resize dimensions.
+sensor_id/m_R (None when absent). Vision: image_uint8/vision_delta_t/m_V
+and resize dimensions (None when absent). Collate packs only observed samples;
+radar_batch_index/vision_batch_index map local batches to original Sample slots.
 Target: target_xyz/target_valid/gt_box_xyxy_px/gt_2d_valid. All remaining
 identity, absolute time and file fields are audit metadata, not model inputs.
 """
@@ -21,6 +23,7 @@ import yaml
 from rdq_uav.multimodal.merged_lidar import LidarFrameEvent, load_released_xyz, merge_frame_streams
 from .geometry import ProjectionContext
 from .loss import MultimodalTargets
+from .contracts import validate_batch
 
 @dataclass(frozen=True)
 class ViewTransform:
@@ -168,16 +171,15 @@ def resize_wh(source_wh: tuple[int, int], short_edge: int, max_size: int) -> tup
     return int(width*scale+0.5), int(height*scale+0.5)
 
 
-def prepare_image(path: str | Path | None, source_wh: tuple[int, int],
+def prepare_image(path: str | Path, source_wh: tuple[int, int],
                   short_edge: int, max_size: int) -> dict[str, torch.Tensor]:
     if path is None:
-        source = Image.new("RGB", source_wh)
-    else:
-        with Image.open(path) as handle:
-            source = handle.convert("RGB")
-        if source.width < source_wh[0] or source.height < source_wh[1]:
-            raise ValueError(f"image {source.size} smaller than calibration {source_wh}: {path}")
-        source = source.crop((0, 0, source_wh[0], source_wh[1]))
+        raise ValueError("prepare_image requires an observed image, not a placeholder")
+    with Image.open(path) as handle:
+        source = handle.convert("RGB")
+    if source.width < source_wh[0] or source.height < source_wh[1]:
+        raise ValueError(f"image {source.size} smaller than calibration {source_wh}: {path}")
+    source = source.crop((0, 0, source_wh[0], source_wh[1]))
     view_wh = resize_wh(source_wh, short_edge, max_size)
     array = np.asarray(source.resize(view_wh, Image.Resampling.BILINEAR), dtype=np.uint8).copy()
     return {
@@ -201,23 +203,37 @@ def validate_sample(sample: Mapping[str, Any]) -> None:
         raise ValueError("radar event sequence mismatch")
     if any(not np.isfinite(t) or not tq-history <= t <= tq for t in times):
         raise ValueError("radar event outside causal history window")
-    points = sample["points"]
-    n = len(points)
-    if points.shape != (n, 3) or not torch.isfinite(points).all():
-        raise ValueError("points must be finite [N,3]")
-    for key in ("delta_t", "sensor_id", "supervision_recent_mask"):
-        if sample[key].shape != (n,):
-            raise ValueError(f"{key} must be [N]")
-    dt = sample["delta_t"]
-    # Float32 conversion only: do not expand the event selection window.
-    tolerance = np.finfo(np.float32).eps*max(1.0, history)
-    if not torch.isfinite(dt).all() or bool(((dt > 0) | (dt < -history-tolerance)).any()):
-        raise ValueError("point relative time outside causal history window")
-    if sample["sensor_id"].dtype != torch.long or bool(((sample["sensor_id"] < 0) | (sample["sensor_id"] > 1)).any()):
-        raise ValueError("sensor_id must be long with 0=Avia, 1=Mid360")
-    if bool(sample["m_R"]) != (n > 0):
-        raise ValueError("m_R must equal nonempty valid points")
+    radar_keys = ("points", "delta_t", "sensor_id", "supervision_recent_mask")
+    if sample["m_R"]:
+        points = sample["points"]
+        if points is None or points.ndim != 2 or points.shape[1] != 3 or not len(points):
+            raise ValueError("valid radar requires nonempty [N,3] points")
+        n = len(points)
+        if not torch.isfinite(points).all():
+            raise ValueError("points must be finite")
+        for key in radar_keys[1:]:
+            if sample[key] is None or sample[key].shape != (n,):
+                raise ValueError(f"{key} must be [N]")
+        dt = sample["delta_t"]
+        tolerance = np.finfo(np.float32).eps*max(1.0, history)
+        if not torch.isfinite(dt).all() or bool(((dt > 0) | (dt < -history-tolerance)).any()):
+            raise ValueError("point relative time outside causal history window")
+        if sample["sensor_id"].dtype != torch.long or bool(((sample["sensor_id"] < 0) | (sample["sensor_id"] > 1)).any()):
+            raise ValueError("sensor_id must be long with 0=Avia, 1=Mid360")
+    elif any(sample[k] is not None for k in radar_keys):
+        raise ValueError("missing radar must have None observation fields")
+    vision_keys = ("image_uint8", "vision_delta_t", "image_source_wh", "image_view_wh", "image_scale_xy")
     if sample["m_V"]:
+        image = sample["image_uint8"]
+        if image is None or image.ndim != 3 or image.shape[0] != 3 or image.dtype != torch.uint8:
+            raise ValueError("valid vision requires uint8 [3,H,W]")
+        for key in vision_keys[2:]:
+            if sample[key] is None or sample[key].shape != (2,):
+                raise ValueError(f"{key} must be [2]")
+        if tuple(sample["image_view_wh"].tolist()) != (image.shape[2], image.shape[1]):
+            raise ValueError("image view dimensions mismatch")
+        if not torch.allclose(sample["image_scale_xy"], sample["image_view_wh"].float()/sample["image_source_wh"]):
+            raise ValueError("image scale mismatch")
         it = sample["image_time"]
         if sample["image_sequence_id"] != seq or sample["left_image_path"] is None:
             raise ValueError("image sequence/path mismatch")
@@ -225,7 +241,8 @@ def validate_sample(sample: Mapping[str, Any]) -> None:
             raise ValueError("valid image outside causal history window")
         if sample["vision_delta_t"] != it-tq:
             raise ValueError("vision relative time mismatch")
-    elif sample["left_image_path"] is not None or sample["image_time"] is not None or sample["gt_2d_valid"]:
+    elif (any(sample[k] is not None for k in vision_keys) or sample["left_image_path"] is not None
+          or sample["image_time"] is not None or sample["gt_2d_valid"]):
         raise ValueError("invalid image must not carry an input path/time or valid box")
     if sample["target_xyz"].shape != (3,) or sample["gt_box_xyxy_px"].shape != (4,):
         raise ValueError("target shapes must be [3]/[4]")
@@ -340,8 +357,8 @@ class MultimodalV2Dataset(Dataset):
             # Radar
             "points": points, "delta_t": packed(times, (0,), np.float32),
             "sensor_id": packed(sensors, (0,), np.int64), "m_R": bool(len(points)),
-            # Vision; missing relative time is zero storage masked by m_V.
-            "m_V": match.valid, "vision_delta_t": 0.0 if match.delta_t is None else match.delta_t,
+            # Vision; absent observation fields are None, never fake images.
+            "m_V": match.valid, "vision_delta_t": match.delta_t,
             # Target
             "target_xyz": xyz, "target_valid": bool(torch.isfinite(xyz).all()),
             "target_timestamp": tq, "gt_box_xyxy_px": torch.zeros(4) if box is None else box,
@@ -357,37 +374,66 @@ class MultimodalV2Dataset(Dataset):
             "image_sequence_id": seq if match.valid else None,
             "radar_history_s": self.radar_history_s, "max_image_gap_s": self.max_image_gap_s,
         }
-        sample.update(prepare_image(match.path, self.camera_wh, self.short_edge, self.max_size))
+        if not sample["m_R"]:
+            for key in ("points", "delta_t", "sensor_id", "supervision_recent_mask"):
+                sample[key] = None
+        if match.valid:
+            sample.update(prepare_image(match.path, self.camera_wh, self.short_edge, self.max_size))
+        else:
+            sample.update({key: None for key in
+                           ("image_uint8", "image_source_wh", "image_view_wh", "image_scale_xy")})
         validate_sample(sample)
         return sample
 
 
-# Batch construction: no identity deduplication or fixed-point padding.
+# Batch construction: compact modality batches share original Sample index maps.
 def collate_multimodal_v2(samples: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
     if not samples:
         raise ValueError("cannot collate an empty sample list")
     for sample in samples:
         validate_sample(sample)
     n = len(samples)
-    counts = torch.tensor([len(s["points"]) for s in samples], dtype=torch.long)
-    batch = {k: torch.cat([s[k] for s in samples]) for k in
-             ("points", "delta_t", "sensor_id", "supervision_recent_mask")}
-    batch.update(num_samples=n, point_counts=counts,
-                 point_batch_index=torch.repeat_interleave(torch.arange(n), counts))
+    radar_ids = [i for i, sample in enumerate(samples) if sample["m_R"]]
+    vision_ids = [i for i, sample in enumerate(samples) if sample["m_V"]]
+    counts = torch.tensor([len(samples[i]["points"]) for i in radar_ids], dtype=torch.long)
+    batch = dict(num_samples=n, radar_batch_index=torch.tensor(radar_ids, dtype=torch.long),
+                 vision_batch_index=torch.tensor(vision_ids, dtype=torch.long), point_counts=counts,
+                 point_batch_index=torch.repeat_interleave(torch.arange(len(radar_ids)), counts))
+    for key, shape, dtype in (("points", (0, 3), torch.float32), ("delta_t", (0,), torch.float32),
+                              ("sensor_id", (0,), torch.long), ("supervision_recent_mask", (0,), torch.bool)):
+        batch[key] = torch.cat([samples[i][key] for i in radar_ids]) if radar_ids else torch.empty(shape, dtype=dtype)
     for key in ("m_R", "m_V", "target_valid", "gt_2d_valid"):
         batch[key] = torch.tensor([bool(s[key]) for s in samples], dtype=torch.bool)
-    shapes = {tuple(s["image_uint8"].shape) for s in samples}
-    if len(shapes) != 1:
-        raise ValueError(f"image views in a batch must share shape, got {sorted(shapes)}")
-    for key in ("target_xyz", "gt_box_xyxy_px", "image_uint8", "image_source_wh", "image_view_wh", "image_scale_xy"):
+    for key in ("target_xyz", "gt_box_xyxy_px"):
         batch[key] = torch.stack([s[key] for s in samples])
-    batch["vision_delta_t"] = torch.tensor([s["vision_delta_t"] for s in samples], dtype=torch.float32)
+    shapes = {tuple(samples[i]["image_uint8"].shape) for i in vision_ids}
+    if len(shapes) > 1:
+        raise ValueError(f"image views must share shape, got {sorted(shapes)}")
+    batch["image_uint8"] = torch.stack([samples[i]["image_uint8"] for i in vision_ids]) if vision_ids else None
+    for key, dtype in (("image_source_wh", torch.long), ("image_view_wh", torch.long), ("image_scale_xy", torch.float32)):
+        batch[key] = torch.stack([samples[i][key] for i in vision_ids]) if vision_ids else torch.empty((0, 2), dtype=dtype)
+    batch["vision_delta_t"] = torch.tensor([samples[i]["vision_delta_t"] for i in vision_ids], dtype=torch.float32)
     for key in ("query_time", "target_timestamp", "image_time"):
         batch[key] = torch.tensor([float('nan') if s[key] is None else s[key] for s in samples], dtype=torch.float64)
     batch["event_count"] = torch.tensor([s["event_count"] for s in samples], dtype=torch.long)
     for key in ("sequence_id", "sample_id", "left_image_path", "event_timestamps", "event_sequence_ids", "image_sequence_id"):
         batch[key] = [s[key] for s in samples]
+    validate_batch(batch)
     return batch
+
+
+def radar_model_batch(batch: Mapping[str, Any]) -> dict[str, Any]:
+    """Only tensor indexing of the prepared Batch; no file reads or matching.
+
+    Detector point indices and targets use compact radar-local sample indices.
+    Candidate indices are restored to original Sample indices by the model.
+    """
+    ids = batch["radar_batch_index"]
+    result = {key: batch[key] for key in
+              ("points", "delta_t", "sensor_id", "supervision_recent_mask", "point_counts", "point_batch_index")}
+    result.update(num_samples=len(ids), target_xyz=batch["target_xyz"][ids],
+                  target_valid=batch["target_valid"][ids])
+    return result
 
 
 def expand_projection(base: ProjectionContext, scale_xy: torch.Tensor) -> ProjectionContext:
@@ -404,31 +450,39 @@ def expand_projection(base: ProjectionContext, scale_xy: torch.Tensor) -> Projec
 # Model preparation: absolute timestamps, identities and paths never cross this boundary.
 def prepare_model_batch(batch: Mapping[str, Any], dino_detector: Any,
                         projection_base: ProjectionContext, device: torch.device):
+    validate_batch(batch)
     model_keys = ("points", "delta_t", "sensor_id", "supervision_recent_mask", "point_counts",
-                  "point_batch_index", "m_R", "m_V", "vision_delta_t", "target_xyz", "target_valid",
-                  "gt_box_xyxy_px", "gt_2d_valid", "image_source_wh", "image_scale_xy")
+                  "point_batch_index", "radar_batch_index", "vision_batch_index", "m_R", "m_V",
+                  "vision_delta_t", "target_xyz", "target_valid", "gt_box_xyxy_px", "gt_2d_valid",
+                  "image_source_wh", "image_view_wh", "image_scale_xy")
     moved = {key: batch[key].to(device, non_blocking=True) for key in model_keys}
     moved["num_samples"] = int(batch["num_samples"])
-    # validate_batch currently checks the image field, but detectors use preprocessed images below.
+    # Used for contract validation; the model consumes the preprocessed tensor.
     moved["image_uint8"] = batch["image_uint8"]
-    image_batch = batch["image_uint8"].to(device=device, dtype=torch.float32, non_blocking=True)
     inputs, transforms = [], []
-    for index in range(len(image_batch)):
-        source_wh = tuple(map(int, batch["image_source_wh"][index].tolist()))
-        view_wh = tuple(map(int, batch["image_view_wh"][index].tolist()))
-        inputs.append({"image": image_batch[index], "height": view_wh[1], "width": view_wh[0]})
-        transforms.append(ViewTransform(source_wh, view_wh, False))
-    images = dino_detector.preprocess_image(inputs)
-    image_mask = torch.ones((len(inputs), images.tensor.shape[-2], images.tensor.shape[-1]),
-                            dtype=torch.bool, device=device)
-    for index, (height, width) in enumerate(images.image_sizes):
-        # Padding mask describes layout only. Keep finite DINO execution for
-        # placeholders; m_V gates candidates/evidence in the model.
-        image_mask[index, :height, :width] = False
-    projection = expand_projection(projection_base, moved["image_scale_xy"])
+    if batch["image_uint8"] is not None:
+        image_batch = batch["image_uint8"].to(device=device, dtype=torch.float32, non_blocking=True)
+        for index in range(len(image_batch)):
+            source_wh = tuple(map(int, batch["image_source_wh"][index].tolist()))
+            view_wh = tuple(map(int, batch["image_view_wh"][index].tolist()))
+            inputs.append({"image": image_batch[index], "height": view_wh[1], "width": view_wh[0]})
+            transforms.append(ViewTransform(source_wh, view_wh, False))
+    image_tensor, image_mask = None, None
+    if inputs:
+        images = dino_detector.preprocess_image(inputs)
+        image_tensor = images.tensor
+        image_mask = torch.ones((len(inputs), images.tensor.shape[-2], images.tensor.shape[-1]),
+                                dtype=torch.bool, device=device)
+        for index, (height, width) in enumerate(images.image_sizes):
+            image_mask[index, :height, :width] = False
+    # Projection uses original Sample indices. Neutral resize for samples without
+    # an image is geometry bookkeeping only, never a fabricated observation.
+    scale = torch.ones((moved["num_samples"], 2), device=device)
+    scale[moved["vision_batch_index"]] = moved["image_scale_xy"]
+    projection = expand_projection(projection_base, scale)
     targets = MultimodalTargets(moved["target_xyz"], moved["target_valid"],
                                 moved["gt_box_xyxy_px"], moved["gt_2d_valid"])
-    return moved, images.tensor, image_mask, projection, targets, transforms
+    return moved, image_tensor, image_mask, projection, targets, transforms
 
 
 def build_datasets(config: Mapping[str, Any], root: Path):

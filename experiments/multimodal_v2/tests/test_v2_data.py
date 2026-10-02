@@ -9,7 +9,7 @@ import torch
 from torch import nn
 
 from rdq_uav.multimodal_v2.data import (
-    MultimodalV2Dataset, build_datasets, collate_multimodal_v2, prepare_model_batch, validate_sample,
+    MultimodalV2Dataset, build_datasets, collate_multimodal_v2, prepare_model_batch, validate_sample, radar_model_batch,
 )
 from rdq_uav.multimodal_v2.geometry import ProjectionContext, project_omni_radtan
 from rdq_uav.multimodal_v2.contracts import CandidateBatch, validate_batch
@@ -73,12 +73,12 @@ def test_nearest_historical_image_rejects_closer_future_and_relative_time(tmp_pa
     assert s['delta_t'].tolist() == pytest.approx([-.4, -.4])
 
 
-def test_image_gap_masks_placeholder(tmp_path):
+def test_image_gap_has_no_observation(tmp_path):
     release(tmp_path, 'seq0001', images=(8.8,))
     s = dataset(tmp_path)[0]
     assert not s['m_V'] and not s['gt_2d_valid']
     assert s['left_image_path'] is None and s['image_time'] is None
-    assert not s['image_uint8'].any()
+    assert s['image_uint8'] is None and s['vision_delta_t'] is None
 
 
 def test_batch_variable_counts(tmp_path):
@@ -131,11 +131,12 @@ def test_prepare_contract_padding_and_no_identity_features(tmp_path):
     moved, images, mask, proj, target, transforms = prepare_model_batch(b, FakeDINO(), projection(), torch.device('cpu'))
     assert validate_batch(moved) == 2
     assert not {'query_time', 'sample_id', 'sequence_id', 'image_time', 'left_image_path'} & moved.keys()
-    assert images.shape == (2, 3, 10, 18) and mask.shape == (2, 10, 18)
+    assert images.shape == (1, 3, 10, 18) and mask.shape == (1, 10, 18)
     assert not mask[:, :8, :16].any() and mask[:, 8:, :].all() and mask[:, :, 16:].all()
     assert moved['m_V'].tolist() == [True, False]
     assert target.has_xyz.tolist() == [True, True] and not target.has_box.any()
-    assert len(transforms) == 2 and proj.batch_size == 2
+    assert len(transforms) == 1 and proj.batch_size == 2
+    assert moved["vision_batch_index"].tolist() == [0]
 
 
 def test_duplicate_query_time_rejected(tmp_path):
@@ -193,18 +194,24 @@ class FakeCandidateProducer(nn.Module):
     def __init__(self, source):
         super().__init__()
         self.source = source
+        self.calls = 0
+        self.batch_sizes = []
     def forward(self, *args):
+        self.calls += 1
         source = self.source
-        cand = CandidateBatch(torch.zeros(1, 128), torch.tensor([.8]),
-                              torch.tensor([[0., 0., 2.]]), torch.tensor([source == 'R']),
-                              torch.tensor([[6., 2., 10., 6.]]), torch.tensor([source == 'V']),
-                              torch.zeros(1, dtype=torch.long), torch.zeros(1, dtype=torch.long), source,
-                              torch.zeros(1, 2), torch.tensor([False]))
-        raw = {} if source == 'R' else {'pyramid': SimpleNamespace(features=(torch.ones(1, 96, 4, 8), torch.ones(1, 192, 2, 4)))}
+        n = args[0]["num_samples"] if source == 'R' else len(args[0])
+        self.batch_sizes.append(n)
+        assert n > 0, "detector must not receive an empty batch"
+        cand = CandidateBatch(torch.zeros(n, 128), torch.full((n,), .8),
+                              torch.tensor([[0., 0., 2.]]).repeat(n, 1), torch.full((n,), source == 'R'),
+                              torch.tensor([[6., 2., 10., 6.]]).repeat(n, 1), torch.full((n,), source == 'V'),
+                              torch.arange(n), torch.arange(n), source,
+                              torch.zeros(n, 2), torch.zeros(n, dtype=torch.bool))
+        raw = {} if source == 'R' else {'pyramid': SimpleNamespace(features=(torch.ones(n, 96, 4, 8), torch.ones(n, 192, 2, 4)))}
         return raw, cand
 
 
-def test_current_model_chain_gates_placeholder_candidates(tmp_path):
+def test_current_model_chain_skips_absent_vision(tmp_path):
     release(tmp_path, 'seq0001', events=((9.5, 0),))
     b = collate_multimodal_v2([dataset(tmp_path)[0]])
     moved, images, masks, proj, _, _ = prepare_model_batch(b, FakeDINO(), projection(), torch.device('cpu'))
@@ -227,8 +234,9 @@ def test_lidar_detector_and_frozen_loss_accept_new_batch(tmp_path):
     cfg = yaml.safe_load((root/'configs/lidar_uav_v2.yaml').read_text())
     detector = LiDARUAVDetector(cfg).eval()
     with torch.no_grad():
-        out = detector(moved)
-        loss = CandidateLoss(cfg)(out, moved)
+        local = radar_model_batch(moved)
+        out = detector(local)
+        loss = CandidateLoss(cfg)(out, local)
     assert out['pred_xyz'].shape[-1] == 3
     assert torch.isfinite(out['pred_xyz']).all() and torch.isfinite(loss['loss'])
     assert not (out['batch_index'] == 1).any()
@@ -278,7 +286,7 @@ def test_future_only_image_is_missing(tmp_path):
     release(tmp_path, 'seq0001', images=(10.1, 10.9))
     s = dataset(tmp_path)[0]
     assert not s['m_V'] and s['image_time'] is None and s['left_image_path'] is None
-    assert not s['gt_2d_valid'] and not s['image_uint8'].any()
+    assert not s['gt_2d_valid'] and s['image_uint8'] is None
 
 
 @pytest.mark.parametrize('image_time,valid', [(9., True), (10., True), (8.999, False), (10.001, False)])
@@ -303,3 +311,146 @@ def test_validation_rejects_future_image(tmp_path):
     s.update(image_time=10.1, vision_delta_t=.1)
     with pytest.raises(ValueError, match='causal history window'):
         validate_sample(s)
+
+
+class SpyDINO(FakeDINO):
+    def __init__(self):
+        self.calls = 0
+    def preprocess_image(self, inputs):
+        self.calls += 1
+        assert inputs, "no preprocessing for absent vision"
+        return super().preprocess_image(inputs)
+
+
+def test_symmetric_missing_samples_are_none(tmp_path):
+    release(tmp_path, 'seq0001', queries=(10., 20., 30.), events=((9.5, 0),), images=(20.,))
+    d = dataset(tmp_path)
+    r, v, missing = d[0], d[1], d[2]
+    assert r['m_R'] and not r['m_V']
+    assert r['image_uint8'] is None and r['image_scale_xy'] is None
+    assert v['m_V'] and not v['m_R']
+    assert all(v[k] is None for k in ('points', 'delta_t', 'sensor_id', 'supervision_recent_mask'))
+    assert missing['points'] is None and missing['image_uint8'] is None
+
+
+@pytest.mark.parametrize('mode', ['radar', 'vision', 'neither'])
+def test_entire_missing_branch_never_called(tmp_path, mode):
+    release(tmp_path, 'seq0001', events=((9.5, 0),) if mode == 'radar' else (),
+            images=(10.,) if mode == 'vision' else ())
+    b = collate_multimodal_v2([dataset(tmp_path)[0]])
+    dino = SpyDINO()
+    moved, images, masks, proj, _, _ = prepare_model_batch(b, dino, projection(), torch.device('cpu'))
+    radar, vision = FakeCandidateProducer('R'), FakeCandidateProducer('V')
+    class ForbiddenInteraction(nn.Module):
+        def forward(self, *args, **kwargs):
+            raise AssertionError('single-modality samples must bypass interaction')
+    model = MultimodalV2(radar, vision, ForbiddenInteraction(), CandidateScoring(), vision_scoring_enabled=True)
+    out = model(moved, images, masks, proj)
+    assert radar.calls == int(mode == 'radar')
+    assert vision.calls == dino.calls == int(mode == 'vision')
+    assert out.radar_candidates.n == int(mode == 'radar')
+    assert out.vision_candidates.n == int(mode == 'vision')
+    assert torch.equal(out.score_3d_before, out.score_3d_after)
+    assert torch.equal(out.score_2d_before, out.score_2d_after)
+    if mode == 'neither':
+        assert not len(out.batch_index) and images is None and masks is None
+
+
+def test_mixed_batch_compact_indices_and_paired_interaction(tmp_path):
+    # Original order: V only, R only, neither, both. Compact maps differ.
+    release(tmp_path, 'seq0001', queries=(10., 20., 30., 40.),
+            events=((19.5, 0), (39.5, 1)), images=(10., 40.))
+    d = dataset(tmp_path)
+    b = collate_multimodal_v2([d[i] for i in range(4)])
+    assert b['radar_batch_index'].tolist() == [1, 3]
+    assert b['vision_batch_index'].tolist() == [0, 3]
+    assert b['point_counts'].tolist() == [2, 2]
+    assert b['point_batch_index'].tolist() == [0, 0, 1, 1]
+    assert b['image_uint8'].shape == (2, 3, 8, 16)
+    moved, images, masks, proj, targets, transforms = prepare_model_batch(b, SpyDINO(), projection(), torch.device('cpu'))
+    local = radar_model_batch(moved)
+    assert local['num_samples'] == 2 and local['target_xyz'].shape == (2, 3)
+    class PairedInteraction(CandidateCrossAttention):
+        def forward(self, radar, vision, *args, **kwargs):
+            # Original sample 3 maps to visual-local sample 1.
+            assert radar.batch_index.tolist() == [1]
+            assert vision.batch_index.tolist() == [1]
+            return super().forward(radar, vision, *args, **kwargs)
+    radar, vision = FakeCandidateProducer('R'), FakeCandidateProducer('V')
+    model = MultimodalV2(radar, vision, PairedInteraction(), CandidateScoring())
+    out = model(moved, images, masks, proj)
+    assert radar.batch_sizes == vision.batch_sizes == [2]
+    assert out.radar_candidates.batch_index.tolist() == [1, 3]
+    assert out.vision_candidates.batch_index.tolist() == [0, 3]
+    assert out.diagnostics['radar_evidence'].valid.tolist() == [False, True]
+    assert not out.top3d_indices(4)[0].numel()
+    assert not out.top2d_indices(4)[1].numel()
+    assert not out.top3d_indices(4)[2].numel() and not out.top2d_indices(4)[2].numel()
+    assert len(transforms) == 2 and targets.xyz_m.shape == (4, 3)
+    evidence = out.diagnostics['radar_evidence']
+    evidence.feature.sum().backward()
+    assert model.interaction.visual_proj[0].weight.grad is not None
+
+
+def test_batch_rejects_inconsistent_local_maps(tmp_path):
+    release(tmp_path, 'seq0001', queries=(10., 20.), events=((19.5, 0),), images=(10.,))
+    d = dataset(tmp_path)
+    b = collate_multimodal_v2([d[0], d[1]])
+    with pytest.raises(ValueError, match='radar_batch_index'):
+        validate_batch({**b, 'radar_batch_index': torch.tensor([0])})
+    with pytest.raises(ValueError, match='radar-local'):
+        validate_batch({**b, 'point_batch_index': torch.ones(2, dtype=torch.long)})
+
+
+def test_prepare_image_rejects_placeholder():
+    from rdq_uav.multimodal_v2.data import prepare_image
+    with pytest.raises(ValueError, match='observed image'):
+        prepare_image(None, (16, 8), 8, 16)
+
+
+def test_frozen_losses_use_modality_local_supervision(tmp_path, monkeypatch):
+    from rdq_uav.multimodal_v2 import training
+    from rdq_uav.multimodal_v2.loss import CandidateRankingLoss
+    release(tmp_path, 'seq0001', queries=(10., 20., 30., 40.),
+            events=((19.5, 0), (39.5, 1)), images=(10., 40.))
+    for tq in (10., 20., 30., 40.):
+        np.save(tmp_path/'seq0001'/'ground_truth'/f'{tq}.npy', np.array([tq, 2., 3.]))
+    for tq in (10., 40.):
+        (tmp_path/'seq0001'/'2d_detect'/f'{tq}.txt').write_text('0 0.5 0.5 0.25 0.5')
+    d = dataset(tmp_path)
+    b = collate_multimodal_v2([d[i] for i in range(4)])
+    calls = []
+    def lidar_loss(raw, local):
+        calls.append('R')
+        assert local['num_samples'] == 2
+        assert local['target_xyz'][:, 0].tolist() == [20., 40.]
+        return {'loss': torch.tensor(0.)}
+    def vision_loss(detector, raw, *, gt_box_xyxy_source, gt_2d_valid, transforms):
+        calls.append('V')
+        assert gt_box_xyxy_source.shape == (2, 4)
+        assert gt_2d_valid.tolist() == [True, True] and len(transforms) == 2
+        return torch.tensor(0.), {}, 2
+    monkeypatch.setattr(training, 'supervised_dino_loss', vision_loss)
+    model = MultimodalV2(FakeCandidateProducer('R'), FakeCandidateProducer('V'),
+                        CandidateCrossAttention(), CandidateScoring())
+    runtime = SimpleNamespace(model=model, dino_detector=SpyDINO(), projection_base=projection(),
+                              ranking_loss=CandidateRankingLoss(), lidar_loss=lidar_loss)
+    result = training.forward_step(runtime, b, torch.device('cpu'))
+    assert calls == ['R', 'V'] and result['vision_supervised'] == 2
+
+
+def test_double_missing_frozen_losses_are_skipped(tmp_path, monkeypatch):
+    from rdq_uav.multimodal_v2 import training
+    from rdq_uav.multimodal_v2.loss import CandidateRankingLoss
+    release(tmp_path, 'seq0001')
+    b = collate_multimodal_v2([dataset(tmp_path)[0]])
+    def forbidden(*args, **kwargs):
+        raise AssertionError('missing modality must not invoke its loss')
+    monkeypatch.setattr(training, 'supervised_dino_loss', forbidden)
+    model = MultimodalV2(FakeCandidateProducer('R'), FakeCandidateProducer('V'),
+                        CandidateCrossAttention(), CandidateScoring())
+    runtime = SimpleNamespace(model=model, dino_detector=SpyDINO(), projection_base=projection(),
+                              ranking_loss=CandidateRankingLoss(), lidar_loss=forbidden)
+    result = training.forward_step(runtime, b, torch.device('cpu'))
+    assert result['loss_lidar_frozen'] == result['loss_vision_frozen'] == 0
+    assert result['vision_supervised'] == 0

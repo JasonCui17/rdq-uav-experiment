@@ -47,9 +47,9 @@ def main():
                    radar_event_count=s['event_count'],
                    radar_event_min_time=min(times) if times else None,
                    radar_event_max_time=max(times) if times else None,
-                   radar_delta_t_min=float(dt.min()) if len(dt) else None,
-                   radar_delta_t_max=float(dt.max()) if len(dt) else None,
-                   number_of_points=len(s['points']), radar_valid=s['m_R'],
+                   radar_delta_t_min=float(dt.min()) if dt is not None else None,
+                   radar_delta_t_max=float(dt.max()) if dt is not None else None,
+                   number_of_points=len(s['points']) if s['points'] is not None else 0, radar_valid=s['m_R'],
                    image_time=s['image_time'], image_delta_t=s['vision_delta_t'] if s['m_V'] else None,
                    image_valid=s['m_V'], image_path=s['left_image_path'],
                    target_xyz=s['target_xyz'].tolist(), target_valid=s['target_valid'],
@@ -59,8 +59,8 @@ def main():
     report = {'status': 'PASS', 'kind': 'real_sequence_data_smoke', 'sequence': args.sequence,
               'radar_history_s': ds.radar_history_s, 'max_image_gap_s': ds.max_image_gap_s,
               'time_offset_s': geometry.get('time_offset_s'), 'samples': rows,
-              'batch_shapes': {k: list(batch[k].shape) for k in
-                               ('points', 'delta_t', 'sensor_id', 'point_batch_index', 'point_counts', 'image_uint8')}}
+              'batch_shapes': {k: list(batch[k].shape) if batch[k] is not None else None for k in
+                               ('points', 'delta_t', 'sensor_id', 'point_batch_index', 'point_counts', 'radar_batch_index', 'vision_batch_index', 'image_uint8')}}
     print(json.dumps(report, indent=2))
     if args.output:
         args.output.parent.mkdir(parents=True, exist_ok=True)

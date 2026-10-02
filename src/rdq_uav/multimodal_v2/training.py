@@ -183,13 +183,21 @@ def forward_step(runtime: V2Runtime, batch: Mapping[str, Any], device: torch.dev
     rank = runtime.ranking_loss(output, targets)
     result = {"output": output, "targets": targets, **rank}
     if compute_frozen_losses:
+        zero = targets.xyz_m.new_zeros(())
         lidar_raw = output.diagnostics["lidar_raw"]
-        result["loss_lidar_frozen"] = runtime.lidar_loss(lidar_raw, lidar_batch)["loss"]
-        vision, _, count = supervised_dino_loss(
-            runtime.dino_detector, output.diagnostics["vision_raw"],
-            gt_box_xyxy_source=targets.box_xyxy_px,
-            gt_2d_valid=targets.has_box, transforms=transforms,
+        result["loss_lidar_frozen"] = (
+            runtime.lidar_loss(lidar_raw, output.diagnostics["lidar_batch"])["loss"]
+            if lidar_raw is not None else zero
         )
+        vision_raw = output.diagnostics["vision_raw"]
+        vision, count = zero, 0
+        if vision_raw is not None:
+            ids = lidar_batch["vision_batch_index"]
+            vision, _, count = supervised_dino_loss(
+                runtime.dino_detector, vision_raw,
+                gt_box_xyxy_source=targets.box_xyxy_px[ids],
+                gt_2d_valid=targets.has_box[ids], transforms=transforms,
+            )
         result["loss_vision_frozen"] = vision
         result["vision_supervised"] = count
     return result

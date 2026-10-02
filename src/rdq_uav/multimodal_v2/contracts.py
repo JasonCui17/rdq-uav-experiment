@@ -232,13 +232,58 @@ class MultimodalOutput:
 
 
 def validate_batch(batch: Mapping[str, Any]) -> int:
-    required = ("points", "point_batch_index", "num_samples", "target_xyz", "target_valid",
-                "m_R", "m_V", "image_uint8", "image_source_wh", "image_scale_xy")
+    """Validate compact modality batches and their maps into the full Batch."""
+    required = ("points", "delta_t", "sensor_id", "point_counts", "point_batch_index", "num_samples",
+                "target_xyz", "target_valid", "gt_box_xyxy_px", "gt_2d_valid", "m_R", "m_V",
+                "image_uint8", "image_source_wh", "image_view_wh", "image_scale_xy", "vision_delta_t",
+                "radar_batch_index", "vision_batch_index")
     missing = [key for key in required if key not in batch]
     if missing:
         raise KeyError(f"Multimodal V2 batch missing {missing}")
     count = int(batch["num_samples"])
-    for key in ("target_valid", "m_R", "m_V"):
+    if count <= 0:
+        raise ValueError("num_samples must be positive")
+    for key in ("target_valid", "gt_2d_valid", "m_R", "m_V"):
         if tuple(batch[key].shape) != (count,) or batch[key].dtype != torch.bool:
             raise ValueError(f"{key} must be bool [{count}]")
+    for mask, key in (("m_R", "radar_batch_index"), ("m_V", "vision_batch_index")):
+        ids = batch[key]
+        expected = torch.nonzero(batch[mask], as_tuple=False).flatten()
+        if ids.dtype != torch.long or ids.ndim != 1 or not torch.equal(ids, expected):
+            raise ValueError(f"{key} must exactly map the valid {mask} samples in order")
+    br, bv = len(batch["radar_batch_index"]), len(batch["vision_batch_index"])
+    counts = batch["point_counts"]
+    if counts.shape != (br,) or counts.dtype != torch.long or bool((counts <= 0).any()):
+        raise ValueError("point_counts must be positive long [Br]")
+    n = int(counts.sum())
+    if batch["points"].shape != (n, 3) or not torch.isfinite(batch["points"]).all():
+        raise ValueError("points must be finite [sum(Nr),3]")
+    for key in ("delta_t", "sensor_id", "point_batch_index"):
+        if batch[key].shape != (n,):
+            raise ValueError(f"{key} must be [sum(Nr)]")
+    expected = torch.repeat_interleave(torch.arange(br, device=counts.device), counts)
+    if batch["point_batch_index"].dtype != torch.long or not torch.equal(batch["point_batch_index"], expected):
+        raise ValueError("point_batch_index must use compact radar-local indices")
+    if batch["sensor_id"].dtype != torch.long or bool(((batch["sensor_id"] < 0) | (batch["sensor_id"] > 1)).any()):
+        raise ValueError("invalid radar sensor ids")
+    if not torch.isfinite(batch["delta_t"]).all() or bool((batch["delta_t"] > 0).any()):
+        raise ValueError("radar relative time must be finite and causal")
+    for key in ("image_source_wh", "image_view_wh", "image_scale_xy"):
+        if batch[key].shape != (bv, 2) or not torch.isfinite(batch[key]).all() or bool((batch[key] <= 0).any()):
+            raise ValueError(f"{key} must be finite positive [Bv,2]")
+    images = batch["image_uint8"]
+    if bv:
+        if images is None or images.ndim != 4 or images.shape[:2] != (bv, 3) or images.dtype != torch.uint8:
+            raise ValueError("images must be uint8 [Bv,3,H,W]")
+        wh = batch["image_view_wh"]
+        if bool((wh != wh.new_tensor((images.shape[3], images.shape[2]))).any()):
+            raise ValueError("image view size mismatch")
+    elif images is not None:
+        raise ValueError("zero visual samples must have image_uint8=None")
+    if batch["vision_delta_t"].shape != (bv,) or not torch.isfinite(batch["vision_delta_t"]).all() or bool((batch["vision_delta_t"] > 0).any()):
+        raise ValueError("vision_delta_t must be finite causal [Bv]")
+    if batch["target_xyz"].shape != (count, 3) or batch["gt_box_xyxy_px"].shape != (count, 4):
+        raise ValueError("targets must preserve full Sample batch dimensions")
+    if bool((batch["gt_2d_valid"] & ~batch["m_V"]).any()):
+        raise ValueError("valid box supervision requires a valid image")
     return count
