@@ -8,7 +8,7 @@ from typing import Sequence
 import torch
 from torch import nn
 
-from .geometry import ProjectionContext, project_omni_radtan
+from .geometry import ProjectionContext, project_omni_radtan, validate_geometry_gate, geometry_gate_margins
 
 from .contracts import CandidateBatch, CrossModalEvidence
 
@@ -52,7 +52,7 @@ class CandidateCrossAttention(nn.Module):
 
     def __init__(self, vision_dims: Sequence[int] = (96, 192),
                  visual_radius: int = 1, lidar_neighbors: int = 16,
-                 box_margin_px: float = 16.0) -> None:
+                 geometry_gate: dict | None = None) -> None:
         super().__init__()
         if tuple(vision_dims) != (96, 192):
             raise ValueError("the frozen Swin-T contract uses V0/V1 channels 96/192")
@@ -65,7 +65,7 @@ class CandidateCrossAttention(nn.Module):
         self.vision_reads_radar = _EvidenceAttention()
         self.visual_radius = int(visual_radius)
         self.lidar_neighbors = int(lidar_neighbors)
-        self.box_margin_px = float(box_margin_px)
+        self.geometry_gate = validate_geometry_gate(geometry_gate)
 
     def _visual_memory(self, radar: CandidateBatch, pyramid: Sequence[torch.Tensor],
                        image_masks: torch.Tensor, projection: ProjectionContext, m_R: torch.Tensor, m_V: torch.Tensor):
@@ -144,7 +144,7 @@ class CandidateCrossAttention(nn.Module):
                 torch.maximum(box[1] - points[:, 1], points[:, 1] - box[3]),
                 torch.zeros_like(points[:, 1]),
             )
-            near_box = torch.sqrt(dx.square() + dy.square()) <= self.box_margin_px
+            near_box = torch.sqrt(dx.square() + dy.square()) <= geometry_gate_margins(radar.xyz_m[ids], self.geometry_gate)
             ids = ids[near_box]; points = points[near_box]
             if not len(ids):
                 continue

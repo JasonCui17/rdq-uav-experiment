@@ -10,6 +10,8 @@ from torch import nn
 
 from .contracts import CandidateBatch, CrossModalEvidence, MultimodalOutput
 
+from .geometry import validate_geometry_gate, geometry_gate_margins
+
 HYP_RV, HYP_R, HYP_V = 0, 1, 2
 
 
@@ -40,9 +42,10 @@ def associate_geometry_greedy(
     vision: CandidateBatch,
     *,
     num_samples: int,
-    geometry_gate_px: float = 16.0,
+    geometry_gate: dict | None = None,
 ) -> AssociationRows:
     """Stable, rejectable one-to-one association in calibrated image geometry."""
+    geometry_gate = validate_geometry_gate(geometry_gate)
     device = radar.feature.device if radar.n else vision.feature.device
     floating_template = radar.score if radar.n else vision.score
     rows: list[tuple[int, int, int, int, bool, float, float]] = []
@@ -82,7 +85,7 @@ def associate_geometry_greedy(
             feasible = (
                 valid_radar[:, None]
                 & valid_vision[None]
-                & (distance_to_box <= float(geometry_gate_px))
+                & (distance_to_box <= geometry_gate_margins(radar.xyz_m[radar_ids], geometry_gate)[:, None])
             )
             local_radar, local_vision = torch.nonzero(feasible, as_tuple=True)
             for local_r, local_v in zip(local_radar.tolist(), local_vision.tolist()):
@@ -215,10 +218,10 @@ class EvidenceScoreHead(nn.Module):
 
 
 class CandidateScoring(nn.Module):
-    def __init__(self, geometry_gate_px: float = 16.0,
+    def __init__(self, geometry_gate: dict | None = None,
                  max_abs_delta_logit: float = 2.0) -> None:
         super().__init__()
-        self.geometry_gate_px = float(geometry_gate_px)
+        self.geometry_gate = validate_geometry_gate(geometry_gate)
         self.score_head = EvidenceScoreHead(max_abs_delta_logit)
 
     def forward(
@@ -234,7 +237,7 @@ class CandidateScoring(nn.Module):
     ) -> MultimodalOutput:
         association = associate_geometry_greedy(
             radar, vision, num_samples=num_samples,
-            geometry_gate_px=self.geometry_gate_px,
+            geometry_gate=self.geometry_gate,
         )
         n = len(association.batch_index)
         index_device = association.batch_index.device

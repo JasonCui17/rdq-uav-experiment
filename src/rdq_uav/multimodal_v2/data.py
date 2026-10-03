@@ -254,15 +254,67 @@ def validate_sample(sample: Mapping[str, Any]) -> None:
             raise ValueError("valid box must be finite, non-degenerate source-pixel xyxy")
 
 
+@dataclass(frozen=True)
+class QueryRecord:
+    """External query identity; no supervision or observation paths."""
+    sequence_id: str
+    query_time: float
+    sample_id: str
+
+    def __post_init__(self):
+        if (not self.sequence_id or Path(self.sequence_id).name != self.sequence_id
+                or self.sequence_id in (".", "..") or not self.sample_id
+                or not np.isfinite(self.query_time)):
+            raise ValueError("invalid query identity")
+
+
+@dataclass(frozen=True)
+class Target3DRecord:
+    xyz_m: torch.Tensor
+    valid: bool
+    source_path: str | None
+
+
+def query_records_from_3d_gt(root: str | Path, sequence_ids: Sequence[str]) -> list[QueryRecord]:
+    """Current offline QuerySource: read GT filenames only, never GT arrays."""
+    records = [QueryRecord(seq, float(p.stem), f"{seq}_query_{p.stem}")
+               for seq in sequence_ids
+               for p in _timestamp_paths(Path(root)/seq/"ground_truth", "npy")]
+    if len({r.query_time for r in records}) != len(records):
+        raise ValueError("duplicate query_time; query_time must uniquely identify a Sample")
+    return records
+
+
+def build_3d_target_index(root: str | Path, sequence_ids: Sequence[str]) -> dict[float, Path]:
+    """Independent exact-time target provider index; no nearest-GT matching."""
+    index = {}
+    for seq in sequence_ids:
+        for path in _timestamp_paths(Path(root)/seq/"ground_truth", "npy"):
+            time = float(path.stem)
+            if time in index:
+                raise ValueError("duplicate target query_time")
+            index[time] = path
+    return index
+
+
+def load_3d_target(path: Path | None) -> Target3DRecord:
+    if path is None:
+        return Target3DRecord(torch.zeros(3), False, None)
+    xyz = torch.as_tensor(np.load(path, allow_pickle=False).reshape(3), dtype=torch.float32)
+    valid = bool(torch.isfinite(xyz).all())
+    return Target3DRecord(xyz if valid else torch.zeros(3), valid, str(path))
+
+
 class MultimodalV2Dataset(Dataset):
     """Construct a complete Sample directly from each unique query_time.
 
-    Query records currently originate from sequence ground_truth filenames.
+    Query records are supplied externally; optional exact-time targets are independent.
     Train-only empty-input filtering happens here at initialization, including
     events whose released XYZ rows are all invalid. Cached validity is one bool
     per event; complete clouds are not retained or capped.
     """
-    def __init__(self, root: str | Path, sequence_ids: Sequence[str], *,
+    def __init__(self, root: str | Path, query_records: Sequence[QueryRecord], *,
+                 target_3d_index: Mapping[float, Path] | None = None,
                  camera_wh: tuple[int, int], short_edge: int, max_size: int,
                  radar_history_s: float = 1.0, max_image_gap_s: float = 1.0,
                  filter_empty: bool = False, label_directory: str = "2d_detect") -> None:
@@ -276,14 +328,22 @@ class MultimodalV2Dataset(Dataset):
         self.max_image_gap_s = float(max_image_gap_s)
         if not np.isfinite(self.radar_history_s) or self.radar_history_s < 0:
             raise ValueError("radar_history_s must be finite and non-negative")
-        if len(set(sequence_ids)) != len(sequence_ids):
-            raise ValueError("duplicate sequence in split")
+        records = list(query_records)
+        if any(not isinstance(r, QueryRecord) for r in records):
+            raise TypeError("Dataset requires QueryRecord objects, not sequence names")
+        if len({r.query_time for r in records}) != len(records):
+            raise ValueError("duplicate query_time; query_time must uniquely identify a Sample")
+        sequence_ids = list(dict.fromkeys(r.sequence_id for r in records))
+        self.target_3d_index = {float(t): Path(p) for t, p in (target_3d_index or {}).items()}
+        for r in records:
+            path = self.target_3d_index.get(r.query_time)
+            if path is not None and (path.parent.name != "ground_truth"
+                    or path.parent.parent.name != r.sequence_id or float(path.stem) != r.query_time):
+                raise ValueError("3D target sequence/time mismatch")
         self.image_index = LeftImageIndex(self.root, sequence_ids, max_image_gap_s)
         self.image_index_by_sequence = self.image_index.image_index_by_sequence
         self.radar_events_by_sequence = {}
         self.radar_times_by_sequence = {}
-        records = []
-        seen_times = set()
         for seq in sequence_ids:
             events = merge_frame_streams([
                 [LidarFrameEvent(seq, float(p.stem), sid, name, p)
@@ -291,18 +351,11 @@ class MultimodalV2Dataset(Dataset):
                 for sid, name, directory in SENSORS])
             self.radar_events_by_sequence[seq] = events
             self.radar_times_by_sequence[seq] = np.asarray([e.timestamp for e in events], dtype=np.float64)
-            for path in _timestamp_paths(self.root/seq/"ground_truth", "npy"):
-                tq = float(path.stem)
-                if tq in seen_times:
-                    raise ValueError(f"duplicate query_time {tq}; query_time must uniquely identify a Sample")
-                seen_times.add(tq)
-                records.append(dict(sequence_id=seq, query_time=tq, target_path=path,
-                                    sample_id=f"{seq}_query_{path.stem}"))
         self.query_records = []
         self.filtered_empty_queries = 0
         self._event_validity = {}
         for record in records:
-            seq, tq = record["sequence_id"], record["query_time"]
+            seq, tq = record.sequence_id, record.query_time
             match = self.image_index.match(seq, tq)
             if filter_empty and not match.valid and not self._has_valid_radar(seq, tq):
                 self.filtered_empty_queries += 1
@@ -335,7 +388,7 @@ class MultimodalV2Dataset(Dataset):
 
     def __getitem__(self, index: int) -> dict[str, Any]:
         record = self.query_records[index]
-        seq, tq = record["sequence_id"], record["query_time"]
+        seq, tq = record.sequence_id, record.query_time
         events = self.select_radar_events(seq, tq)
         parts, times, sensors = [], [], []
         for event in events:
@@ -349,7 +402,7 @@ class MultimodalV2Dataset(Dataset):
         match = self.image_index.match(seq, tq)
         label_path = None if match.path is None else self.root/seq/self.label_directory/f"{match.path.stem}.txt"
         box = None if label_path is None else load_yolo_box(label_path, self.camera_wh)
-        xyz = torch.as_tensor(np.load(record["target_path"], allow_pickle=False).reshape(3), dtype=torch.float32)
+        target = load_3d_target(self.target_3d_index.get(tq))
         sample = {
             # Radar
             "points": points, "delta_t": packed(times, (0,), np.float32),
@@ -357,11 +410,12 @@ class MultimodalV2Dataset(Dataset):
             # Vision; absent observation fields are None, never fake images.
             "m_V": match.valid, "vision_delta_t": match.delta_t,
             # Target
-            "target_xyz": xyz, "target_valid": bool(torch.isfinite(xyz).all()),
+            "target_xyz": target.xyz_m, "target_valid": target.valid,
+            "target_source_path": target.source_path,
             "target_timestamp": tq, "gt_box_xyxy_px": torch.zeros(4) if box is None else box,
             "gt_2d_valid": box is not None,
             # Meta
-            "sequence_id": seq, "query_time": tq, "sample_id": record["sample_id"],
+            "sequence_id": seq, "query_time": tq, "sample_id": record.sample_id,
             "num_samples": 1, "event_count": len(events),
             "event_timestamps": [e.timestamp for e in events],
             "event_sequence_ids": [e.sequence_id for e in events],
@@ -503,9 +557,13 @@ def build_datasets(config: Mapping[str, Any], root: Path):
                 radar_history_s=float(data.get("radar_history_s", 1.0)),
                 max_image_gap_s=float(data.get("max_image_gap_s", 1.0)),
                 label_directory=str(data.get("label_directory", "2d_detect")))
-    train = MultimodalV2Dataset(dataset_root, train_sequences, filter_empty=True, **args)
-    val = MultimodalV2Dataset(dataset_root, val_sequences, filter_empty=False, **args)
-    train_times = {r["query_time"] for r in train.query_records}
-    if any(r["query_time"] in train_times for r in val.query_records):
+    train = MultimodalV2Dataset(dataset_root, query_records_from_3d_gt(dataset_root, train_sequences),
+                                target_3d_index=build_3d_target_index(dataset_root, train_sequences),
+                                filter_empty=True, **args)
+    val = MultimodalV2Dataset(dataset_root, query_records_from_3d_gt(dataset_root, val_sequences),
+                              target_3d_index=build_3d_target_index(dataset_root, val_sequences),
+                              filter_empty=False, **args)
+    train_times = {r.query_time for r in train.query_records}
+    if any(r.query_time in train_times for r in val.query_records):
         raise ValueError("duplicate query_time across train/validation")
     return train, val

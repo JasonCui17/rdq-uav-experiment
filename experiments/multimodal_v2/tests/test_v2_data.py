@@ -9,7 +9,7 @@ import torch
 from torch import nn
 
 from rdq_uav.multimodal_v2.data import (
-    MultimodalV2Dataset, build_datasets, collate_multimodal_v2, prepare_model_batch, validate_sample, radar_model_batch,
+    QueryRecord, query_records_from_3d_gt, build_3d_target_index, MultimodalV2Dataset, build_datasets, collate_multimodal_v2, prepare_model_batch, validate_sample, radar_model_batch,
 )
 from rdq_uav.multimodal_v2.geometry import ProjectionContext, project_omni_radtan
 from rdq_uav.multimodal_v2.contracts import CandidateBatch, validate_batch
@@ -31,7 +31,7 @@ def release(root, seq, *, queries=(10.0,), events=(), images=(), n=2):
 
 
 def dataset(root, seqs=('seq0001',), **kwargs):
-    return MultimodalV2Dataset(root, seqs, camera_wh=(16, 8), short_edge=8, max_size=16, **kwargs)
+    return MultimodalV2Dataset(root, query_records_from_3d_gt(root, seqs), target_3d_index=build_3d_target_index(root, seqs), camera_wh=(16, 8), short_edge=8, max_size=16, **kwargs)
 
 
 def projection():
@@ -472,3 +472,62 @@ def test_full_history_early_point_participates_in_frozen_labels(tmp_path):
     positive,ignore,negative,_=criterion.labels(out,local)
     assert positive.tolist()==[True,False,False,False,False,False]
     assert not ignore.any() and negative[1:].all()
+
+
+def external_dataset(root, queries, **kwargs):
+    return MultimodalV2Dataset(root, queries, camera_wh=(16, 8), short_edge=8,
+                               max_size=16, **kwargs)
+
+
+def test_external_query_without_gt_keeps_observations_and_never_loads_gt(tmp_path, monkeypatch):
+    release(tmp_path, 'seq0001', queries=(), events=((8.9, 0), (9.0, 0), (9.6, 1), (10.1, 0)),
+            images=(9.8, 10.1))
+    original = np.load
+    def checked_load(path, *args, **kwargs):
+        assert 'ground_truth' not in str(path)
+        return original(path, *args, **kwargs)
+    monkeypatch.setattr(np, 'load', checked_load)
+    s = external_dataset(tmp_path, [QueryRecord('seq0001', 10., 'external')])[0]
+    assert s['m_R'] and s['m_V']
+    assert s['event_timestamps'] == [9., 9.6]
+    assert s['image_time'] == 9.8 and s['vision_delta_t'] == pytest.approx(-.2)
+    assert not s['target_valid'] and torch.equal(s['target_xyz'], torch.zeros(3))
+    assert s['target_source_path'] is None
+
+
+def test_gt_query_source_reads_only_names_and_preserves_order(tmp_path, monkeypatch):
+    release(tmp_path, 'seq0001', queries=(11., 9., 10.))
+    def forbidden(*args, **kwargs):
+        raise AssertionError('QuerySource must not load target content')
+    monkeypatch.setattr(np, 'load', forbidden)
+    records = query_records_from_3d_gt(tmp_path, ['seq0001'])
+    assert [r.query_time for r in records] == [9., 10., 11.]
+    assert all(not hasattr(r, 'target_path') for r in records)
+    assert set(build_3d_target_index(tmp_path, ['seq0001'])) == {9., 10., 11.}
+
+
+def test_external_train_filter_depends_only_on_observations(tmp_path):
+    release(tmp_path, 'seq0001', queries=(), events=((9.5, 0),), images=(19.5,))
+    records = [QueryRecord('seq0001', t, str(t)) for t in (10., 20., 30.)]
+    ds = external_dataset(tmp_path, records, filter_empty=True)
+    assert [r.query_time for r in ds.query_records] == [10., 20.]
+    assert ds.filtered_empty_queries == 1
+    assert all(not ds[i]['target_valid'] for i in range(2))
+
+
+def test_external_target_is_exact_time_and_sequence_checked(tmp_path):
+    release(tmp_path, 'seq0001', queries=(10.,), images=(9.5,))
+    ds = external_dataset(tmp_path, [QueryRecord('seq0001', 10., 'q')],
+                          target_3d_index=build_3d_target_index(tmp_path, ['seq0001']))
+    assert ds[0]['target_valid'] and torch.equal(ds[0]['target_xyz'], torch.tensor([1., 2., 3.]))
+    release(tmp_path, 'seq0002', queries=(10.,))
+    with pytest.raises(ValueError, match='sequence/time mismatch'):
+        external_dataset(tmp_path, [QueryRecord('seq0001', 10., 'q')],
+                          target_3d_index=build_3d_target_index(tmp_path, ['seq0002']))
+
+
+def test_invalid_target_is_zero_and_masked(tmp_path):
+    release(tmp_path, 'seq0001', images=(9.5,))
+    np.save(tmp_path/'seq0001'/'ground_truth'/'10.0.npy', np.array([np.nan, 2., 3.]))
+    s = dataset(tmp_path)[0]
+    assert not s['target_valid'] and torch.equal(s['target_xyz'], torch.zeros(3))

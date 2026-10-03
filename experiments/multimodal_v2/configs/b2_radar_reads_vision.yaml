@@ -36,7 +36,12 @@ model:
   vision_scoring_enabled: false
   visual_radius_cells: 1
   lidar_neighbors: 16
-  box_margin_px: 16.0
+  geometry_gate:
+    mode: inverse_range
+    min_px: 8.0
+    max_px: 48.0
+    reference_range_m: 20.0
+    reference_margin_px: 16.0
   max_abs_delta_logit: 2.0
 loss:
   focal_alpha: 0.25

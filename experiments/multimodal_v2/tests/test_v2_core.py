@@ -396,3 +396,63 @@ def test_dataloader_rng_state_roundtrip_for_resume():
                                       prefetch_factor=2, seed=999)
     restored.load_state_dict(state)
     assert torch.equal(torch.randperm(20, generator=restored.train_generator), expected)
+
+
+@pytest.mark.parametrize('distance,expected', [(0.,48.),(2.,48.),(5.,40.),(10.,24.),
+                                               (20.,16.),(40.,12.),(80.,10.),(100.,9.6)])
+def test_adaptive_gate_reference_and_bounds(distance, expected):
+    from rdq_uav.multimodal_v2.geometry import geometry_gate_margins
+    value = geometry_gate_margins(torch.tensor([[0., 0., distance]]))
+    assert value.shape == (1,) and value.dtype == torch.float32
+    assert value.item() == pytest.approx(expected)
+
+
+def test_adaptive_association_near_kept_far_rejected():
+    from rdq_uav.multimodal_v2.scoring import associate_geometry_greedy
+    # Both projections are 20px outside the same box; only 5m has sufficient margin.
+    r = candidate('R', score=(.8,.8), xyz=((0,0,5),(0,0,80)),
+                  projected=((75,50),(75,50)))
+    rows = associate_geometry_greedy(r, candidate('V'), num_samples=1)
+    assert rows.radar_index[rows.hypothesis_type == 0].tolist() == [0]
+    assert rows.radar_index[rows.hypothesis_type == 1].tolist() == [1]
+
+
+def test_adaptive_gate_shared_by_attention_and_association():
+    from rdq_uav.multimodal_v2.scoring import associate_geometry_greedy
+    # pinhole projection in context(): u = 50 + 50*x/z = 75, v = 50.
+    # A single candidate in each trial avoids one-to-one competition.
+    projection, mr, mv = context()
+    v = candidate('V')
+    for distance, expected in ((5., True), (80., False)):
+        r = candidate('R', xyz=((.5*distance,0,distance),), projected=((75,50),))
+        er = CandidateCrossAttention().read_radar_for_vision(v, r, projection, mr, mv)
+        rows = associate_geometry_greedy(r, v, num_samples=1)
+        assert bool(er.valid[0]) is expected
+        assert bool(rows.association_valid.any()) is expected
+
+
+@pytest.mark.parametrize('cfg', [{'mode':'fixed'}, {'min_px':49.}, {'reference_range_m':0.},
+                                  {'reference_margin_px':float('nan')}, {'unknown':1.}])
+def test_invalid_adaptive_gate_fails_at_initialization(cfg):
+    with pytest.raises(ValueError):
+        CandidateCrossAttention(geometry_gate=cfg)
+    with pytest.raises(ValueError):
+        CandidateScoring(geometry_gate=cfg)
+
+
+def test_candidate_config_retains_top50_pool_and_caps_final10():
+    from pathlib import Path
+    import yaml
+    from rdq_uav.lidar_v2.selector import CandidateSelector
+    cfg = yaml.safe_load((Path(__file__).resolve().parents[3]/'configs/multimodal_v1/p6_candidates.yaml').read_text())['candidate']
+    assert cfg['radar']['pre_nms_topk'] == cfg['rgb']['pre_topk'] == 50
+    assert cfg['radar']['raw_topk'] == cfg['radar']['final_topk'] == cfg['rgb']['final_topk'] == 10
+    # Highest nine are colocated. Final NMS needs points beyond raw Top10.
+    xyz = torch.zeros(60,3)
+    xyz[9:,0] = torch.arange(1,52)*2.
+    raw = dict(pred_xyz=xyz, logits=torch.linspace(10,0,60), fine_features=torch.zeros(60,128),
+               source_token_id=torch.arange(60), batch_index=torch.zeros(60,dtype=torch.long),
+               aux_stats={'num_samples':1})
+    result = CandidateSelector(cfg['radar'])(raw)[0]
+    assert len(result['raw']['score']) == len(result['nms']['score']) == 10
+    assert result['nms']['source_token_id'].tolist() == [0]+list(range(9,18))

@@ -1,6 +1,6 @@
 # Multimodal V2 experiments
 
-> 当前数据接口以 [对称模态 Batch 契约](reports/SYMMETRIC_MODALITY_BATCH_20261002.md) 为准：缺失观测在 Sample 为 None；collate 只收集有效模态，使用 radar_batch_index / vision_batch_index；模型跳过缺失分支。下文早期 placeholder 与全 B 图像 Shape 已被替代。本轮运行验证待设备可用后进行。 后续已移除事件数量限制的点级监督 mask，雷达监督使用全部输入点；详见 [全输入点监督清理](reports/ALL_INPUT_POINT_SUPERVISION_20261002.md)。
+> 当前数据接口以 [对称模态 Batch 契约](reports/SYMMETRIC_MODALITY_BATCH_20261002.md) 为准：缺失观测在 Sample 为 None；collate 只收集有效模态，使用 radar_batch_index / vision_batch_index；模型跳过缺失分支。下文早期 placeholder 与全 B 图像 Shape 已被替代。本轮运行验证待设备可用后进行。 后续已移除事件数量限制的点级监督 mask，雷达监督使用全部输入点；详见 [全输入点监督清理](reports/ALL_INPUT_POINT_SUPERVISION_20261002.md)。 雷达特征现使用 [时间加权 SBE](reports/TIME_WEIGHTED_SBE_20261002.md)，旧雷达 checkpoint 的输入统计语义已改变，需重新验证精度。
 
 All experiment-only entry points, configurations, tests, diagnostics, and
 reports live here. The reusable model is confined to
@@ -232,3 +232,16 @@ Earlier passing test totals apply to the preceding manifest-based revision.
 
 Current Dataset constructor removes the manifest argument. Configuration uses
 `data.label_directory: 2d_detect`; label changes take effect at the next read.
+
+## 2026-10-03 Query and geometry update
+
+Dataset receives `QueryRecord` objects and an optional independent exact-time
+3D target index. `build_datasets` still uses GT filenames as the offline query
+source; manually supplied queries work without GT. See
+[implementation report](reports/QUERY_CANDIDATE_ADAPTIVE_GATE_20261003.md).
+Current candidates: pre-NMS 50, final at most 10 per modality/sample. The shared
+V1 p6 candidate configuration was also updated. V2 uses `model.geometry_gate`
+for both V<-R admission and association (inverse range, 20m=16 source pixels,
+8..48px); old `box_margin_px`/V1 `geometry_gate_px` do not configure V2 anymore.
+Time-weighted SBE is already implemented with 0.2s half-life; it was not changed
+in this patch. Runtime and real-data validation remain pending.

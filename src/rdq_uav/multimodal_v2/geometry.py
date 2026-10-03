@@ -195,3 +195,51 @@ def project_omni_radtan(
     return pixels, valid
 
 
+
+
+DEFAULT_GEOMETRY_GATE = dict(mode="inverse_range", min_px=8.0, max_px=48.0,
+                             reference_range_m=20.0, reference_margin_px=16.0)
+
+
+def validate_geometry_gate(config=None) -> dict:
+    """One public configuration for association and V<-R admission."""
+    import math
+    cfg = dict(DEFAULT_GEOMETRY_GATE)
+    if config is not None:
+        unknown = set(config) - set(cfg)
+        if unknown:
+            raise ValueError(f"unknown geometry gate keys: {unknown}")
+        cfg.update(config)
+    if cfg["mode"] != "inverse_range":
+        raise ValueError("geometry gate mode must be inverse_range")
+    for key in set(cfg)-{"mode"}:
+        cfg[key] = float(cfg[key])
+        if not math.isfinite(cfg[key]):
+            raise ValueError("geometry gate values must be finite")
+    if not (0 <= cfg["min_px"] <= cfg["reference_margin_px"] <= cfg["max_px"]
+            and cfg["reference_range_m"] > 0):
+        raise ValueError("invalid geometry gate limits/reference")
+    return cfg
+
+
+def adaptive_box_margin_px(xyz_m: torch.Tensor, *, min_px: float, max_px: float,
+                           reference_range_m: float, reference_margin_px: float) -> torch.Tensor:
+    """Radar-origin Euclidean range -> source-camera pixel tolerance [N].
+
+    Empirical inverse-range heuristic, not a calibrated reprojection covariance.
+    Does not change the projection or attention distance bias.
+    """
+    cfg = validate_geometry_gate(dict(min_px=min_px, max_px=max_px,
+                                      reference_range_m=reference_range_m,
+                                      reference_margin_px=reference_margin_px))
+    if xyz_m.ndim != 2 or xyz_m.shape[1] != 3 or not torch.isfinite(xyz_m).all():
+        raise ValueError("geometry gate requires finite XYZ [N,3]")
+    with torch.autocast(device_type=xyz_m.device.type, enabled=False):
+        range_m = torch.linalg.vector_norm(xyz_m.float(), dim=1).clamp_min(1e-3)
+        k = (cfg["reference_margin_px"]-cfg["min_px"])*cfg["reference_range_m"]
+        return (cfg["min_px"]+k/range_m).clamp(cfg["min_px"], cfg["max_px"])
+
+
+def geometry_gate_margins(xyz_m: torch.Tensor, config=None) -> torch.Tensor:
+    cfg = validate_geometry_gate(config)
+    return adaptive_box_margin_px(xyz_m, **{k:v for k,v in cfg.items() if k != "mode"})

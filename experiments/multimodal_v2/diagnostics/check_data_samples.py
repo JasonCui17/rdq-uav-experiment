@@ -10,7 +10,7 @@ ROOT = Path(__file__).resolve().parents[3]
 sys.path.insert(0, str(ROOT/'src'))
 import yaml
 from rdq_uav.runtime_paths import apply_runtime_path_overrides, resolve_project_path
-from rdq_uav.multimodal_v2.data import MultimodalV2Dataset, collate_multimodal_v2
+from rdq_uav.multimodal_v2.data import query_records_from_3d_gt, build_3d_target_index, MultimodalV2Dataset, collate_multimodal_v2
 
 
 def main():
@@ -31,7 +31,8 @@ def main():
     if float(geometry.get('time_offset_s', 0.0)) != 0:
         raise ValueError('raw image-time contract requires zero time_offset_s')
     camera = yaml.safe_load(resolve(data['camera_config']).read_text())
-    ds = MultimodalV2Dataset(root, [args.sequence],
+    ds = MultimodalV2Dataset(root, query_records_from_3d_gt(root, [args.sequence]),
+                            target_3d_index=build_3d_target_index(root, [args.sequence]),
                             camera_wh=tuple(camera['cameras']['left']['resolution']),
                             short_edge=int(data['dino_short_edge']), max_size=int(data['dino_max_size']),
                             radar_history_s=float(data.get('radar_history_s', 1.0)),

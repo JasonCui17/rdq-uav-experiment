@@ -93,10 +93,10 @@ def build_runtime(config: Mapping[str, Any], root: Path, device: torch.device) -
     interaction = CandidateCrossAttention(
         visual_radius=int(model_cfg["visual_radius_cells"]),
         lidar_neighbors=int(model_cfg["lidar_neighbors"]),
-        box_margin_px=float(model_cfg["box_margin_px"]),
+        geometry_gate=model_cfg["geometry_gate"],
     )
     scoring = CandidateScoring(
-        geometry_gate_px=float(candidate_cfg["association"]["geometry_gate_px"]),
+        geometry_gate=model_cfg["geometry_gate"],
         max_abs_delta_logit=float(model_cfg["max_abs_delta_logit"]),
     )
     model = MultimodalV2(
