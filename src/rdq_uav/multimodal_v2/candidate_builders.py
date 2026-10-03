@@ -87,8 +87,6 @@ class RGBCandidateBuilder(nn.Module):
         projected=self.feature_proj(query)
         out=[]
         for b in range(logits.shape[0]):
-            qn=score.shape[1]
-            ids=torch.arange(qn,device=score.device,dtype=torch.long)
             order=torch.argsort(score[b],descending=True,stable=True)[:self.pre_topk]
             kept_local=_nms_xyxy(source_boxes[b,order],score[b,order],self.nms_iou)[:self.final_topk]
             keep=order[kept_local]

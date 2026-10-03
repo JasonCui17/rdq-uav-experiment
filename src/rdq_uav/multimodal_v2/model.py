@@ -99,6 +99,5 @@ class MultimodalV2(nn.Module):
                 "lidar_raw": lidar_raw, "vision_raw": vision_raw, "lidar_batch": lidar_batch,
                 "radar_batch_index": radar_ids, "vision_batch_index": vision_ids,
                 "radar_evidence": radar_evidence, "vision_evidence": vision_evidence,
-                "old_pre_stage_hci_used": False,
             },
         )

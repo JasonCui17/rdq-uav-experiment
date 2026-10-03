@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Real-sample B0/B1 identity gate; performs no optimizer update."""
+"""Real-sample interaction-off/on identity gate; performs no optimizer update."""
 
 from __future__ import annotations
 import argparse,json,sys
@@ -48,6 +48,6 @@ def main():
         })
     passed=all(r["radar_xyz_max_diff"]==0 and r["radar_score_max_diff"]==0 and r["final_xyz_max_diff"]==0 and r["final_box_max_diff"]==0 and r["score_3d_max_diff"]==0 and r["score_2d_max_diff"]==0 and r["source_index_equal"] and r["top3d_equal"] and r["top2d_equal"] and r["b1_nonzero_3d_deltas"]==0 and r["b1_nonzero_2d_deltas"]==0 for r in reports)
     report={"status":"PASS" if passed else "FAIL","optimizer_steps":0,"samples":reports}
-    args.output.mkdir(parents=True,exist_ok=True);(args.output/"b0_b1_identity.json").write_text(json.dumps(report,indent=2));print(json.dumps(report,indent=2))
+    args.output.mkdir(parents=True,exist_ok=True);(args.output/"interaction_identity.json").write_text(json.dumps(report,indent=2));print(json.dumps(report,indent=2))
     if not passed:raise SystemExit(1)
 if __name__=="__main__":main()

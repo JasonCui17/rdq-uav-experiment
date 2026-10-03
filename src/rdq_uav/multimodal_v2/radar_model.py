@@ -12,19 +12,6 @@ def segment_sum(x,index,n):
 def segment_max(x,index,n):
     out=x.new_full((n,)+x.shape[1:],-torch.inf); out.scatter_reduce_(0,index.view(-1,*([1]*(x.ndim-1))).expand_as(x),x,reduce="amax",include_self=True); return out
 
-class LegacyVoxelEmbed(nn.Module):
-    """Packed points [P,3]+sensor+seconds -> L0 tokens [N0,D]."""
-    def __init__(self,dim=128,point_hidden=32,point_out=64,voxel_size=.5):
-        super().__init__(); self.voxel_size=voxel_size
-        self.sensor_embedding=nn.Embedding(2,1); self.point_mlp=nn.Sequential(nn.Linear(5,point_hidden),nn.GELU(),nn.Linear(point_hidden,point_out),nn.GELU())
-        self.proj=nn.Linear(2*point_out+1,dim); self.norm=nn.LayerNorm(dim,eps=1e-5)
-    def forward(self,batch,hierarchy):
-        level=hierarchy.levels[0]; inv=hierarchy.point_to_l0
-        local=(batch["points"]-level.centers[inv])/self.voxel_size
-        pf=torch.cat((local,self.sensor_embedding(batch["sensor_id"]),batch["delta_t"][:,None]/1.0),1)
-        h=self.point_mlp(pf); n=len(level.coords); maximum=segment_max(h,inv,n); mean=segment_sum(h,inv,n)/level.point_count[:,None]
-        return self.norm(self.proj(torch.cat((maximum,mean,torch.log1p(level.point_count.float())[:,None]),1)))
-
 class SparseMerge(nn.Module):
     """Geometry-preserving child-to-parent sparse aggregation.
 
@@ -169,14 +156,9 @@ class LiDARUAVDetector(nn.Module):
     def __init__(self,cfg:dict[str,Any]):
         super().__init__(); m=cfg["model"] if "model" in cfg else cfg; d=m["dim"]; tr=m["transformer"]
         self.version=m["name"]; self.hierarchy=HierarchyBuilder(tuple(m["voxel"]["scales"]))
-        embedding=m['voxel'].get('embedding','legacy')
-        if embedding=='sbe_lite':
-            self.voxel_embed=SBELiteVoxelEmbed(d,m['voxel']['scales'][0],m['voxel'].get('sbe'))
-        elif embedding=='legacy':
-            # Archived compatibility path only; the frozen V2 contract rejects it.
-            ph=m['voxel'].get('point_dims',(5,32,64))
-            self.voxel_embed=LegacyVoxelEmbed(d,ph[1],ph[2],m['voxel']['scales'][0])
-        else:raise ValueError(f'Unknown voxel embedding: {embedding}')
+        if m['voxel'].get('embedding') != 'sbe_lite':
+            raise ValueError('Multimodal V2 requires sbe_lite voxel embedding')
+        self.voxel_embed=SBELiteVoxelEmbed(d,m['voxel']['scales'][0],m['voxel'].get('sbe'))
         self.merge01=SparseMerge(d); self.merge12=SparseMerge(d)
         common=(d,tr["heads"],tr["ffn_dim"],tr["blocks_per_level"][0],tr["window_size"],tr["window_shift"],tr["relative_range"])
         self.encoder0=SpatialTransformer(*common,global_attention=False)
@@ -184,9 +166,6 @@ class LiDARUAVDetector(nn.Module):
         self.encoder2=SpatialTransformer(d,tr["heads"],tr["ffn_dim"],tr["blocks_per_level"][2],tr["window_size"],tr["window_shift"],tr["relative_range"],True)
         self.up21=SparseUp(d); self.up10=SparseUp(d); self.final_norm=nn.LayerNorm(d,eps=1e-5); self.head=CandidateHead(d,m["head"]["hidden_dim"],m["head"]["residual_scale_m"])
         self.apply(self._init)
-        if isinstance(self.voxel_embed,LegacyVoxelEmbed):
-            nn.init.constant_(self.voxel_embed.sensor_embedding.weight[0],0)
-            nn.init.constant_(self.voxel_embed.sensor_embedding.weight[1],1)
         for module in self.modules():
             if isinstance(module,RelativeBias): nn.init.zeros_(module.tables)
         nn.init.constant_(self.head.cls[-1].bias,math.log(.01/.99))

@@ -9,7 +9,6 @@ for Pre-Stage HCI.
 
 from __future__ import annotations
 
-from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
 
@@ -50,9 +49,6 @@ class SwinPyramidOutput:
     @property
     def features(self) -> tuple[torch.Tensor, ...]:
         return tuple(stage.feature for stage in self.stages)
-
-
-PreStageTransform = Callable[[SwinStageInput], torch.Tensor | SwinStageInput]
 
 
 class SwinPyramidAdapter(nn.Module):
@@ -124,35 +120,15 @@ class SwinPyramidAdapter(nn.Module):
             )
         return SwinStageOutput(index, stage_input, raw, feature, following)
 
-    def forward(
-        self,
-        images: torch.Tensor,
-        pre_stage_transform: PreStageTransform | None = None,
-    ) -> SwinPyramidOutput:
-        """Return V0--V3 and the exact p1--p3 mapping consumed by DINO."""
-
+    def forward(self, images: torch.Tensor) -> SwinPyramidOutput:
         current = self.prepare(images)
         outputs: list[SwinStageOutput] = []
         for index in range(4):
-            if pre_stage_transform is not None:
-                replacement = pre_stage_transform(current)
-                if isinstance(replacement, SwinStageInput):
-                    if replacement.index != index:
-                        raise ValueError("pre-stage replacement changed the stage identity")
-                    current = replacement
-                else:
-                    current = SwinStageInput(
-                        index, replacement, current.height, current.width
-                    )
             result = self.run_stage(current)
             outputs.append(result)
             if index < 3:
                 if result.next_input is None:
                     raise RuntimeError(f"Swin stage {index} did not produce the next input")
                 current = result.next_input
-
-        dino_features = {
-            f"p{index}": outputs[index].feature
-            for index in self.backbone.out_indices
-        }
+        dino_features = {f"p{index}": outputs[index].feature for index in self.backbone.out_indices}
         return SwinPyramidOutput(tuple(outputs), dino_features)
