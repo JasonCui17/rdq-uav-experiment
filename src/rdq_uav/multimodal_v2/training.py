@@ -29,7 +29,7 @@ from rdq_uav.runtime_paths import ensure_detrex_config_link
 
 from .data import prepare_model_batch
 from .interaction import CandidateCrossAttention
-from .lidar import LiDARCandidateModel, load_lidar_weights
+from .lidar import LiDARCandidateModel
 from .loss import CandidateRankingLoss
 from .model import MultimodalV2
 from .scoring import CandidateScoring
@@ -54,41 +54,53 @@ def _resolve(root: Path, value: str | Path) -> Path:
     return path if path.is_absolute() else root / path
 
 
-def _load_e5_dino(vision: VisionCandidateModel, checkpoint: Path) -> None:
-    vision.load_e5_weights(str(checkpoint))
+def _load_trained_branch(module: nn.Module, checkpoint: Path, prefix: str) -> None:
+    payload = torch.load(checkpoint, map_location="cpu", weights_only=False)
+    state = payload.get("state_dict", payload)
+    selected = {key[len(prefix):]: value for key, value in state.items() if key.startswith(prefix)}
+    if not selected:
+        raise RuntimeError(f"{checkpoint} has no {prefix} weights")
+    module.load_state_dict(selected, strict=True)
 
 
 def build_runtime(config: Mapping[str, Any], root: Path, device: torch.device) -> V2Runtime:
     init, model_cfg = config["initialization"], config["model"]
-    detrex = _resolve(root, init["dino_root"])
-    ensure_detrex_config_link(detrex)
-    for path in (root / "src", detrex / "detectron2", detrex):
-        if str(path) not in sys.path:
-            sys.path.insert(0, str(path))
-    from detectron2.checkpoint import DetectionCheckpointer
-    from detectron2.config import LazyConfig, instantiate
-
-    dino_cfg = LazyConfig.load(str(_resolve(root, init["dino_config"])))
-    dino_cfg.model.device = str(device)
-    dino_detector = instantiate(dino_cfg.model).to(device)
-    DetectionCheckpointer(dino_detector).load(str(_resolve(root, init["dino_checkpoint"])))
-    adapt_dino_class_head_to_single_uav(dino_detector)
-    candidate_cfg = yaml.safe_load(_resolve(root, init["p6_config"]).read_text())
-    vision = VisionCandidateModel(
-        dino_detector,
-        pre_topk=int(candidate_cfg["candidate"]["rgb"]["pre_topk"]),
-        final_topk=int(candidate_cfg["candidate"]["rgb"]["final_topk"]),
-        nms_iou=float(candidate_cfg["candidate"]["rgb"]["nms_iou"]),
-    )
-    e5_visual = init.get("e5_visual_checkpoint")
-    if e5_visual:
-        _load_e5_dino(vision, _resolve(root, e5_visual))
-
+    stage = str(config["experiment"]["stage"])
+    if stage not in {"B0", "B1", "B2", "B3"}:
+        raise ValueError(f"unknown V2 stage {stage}")
+    candidate_cfg = yaml.safe_load(_resolve(root, init["candidate_config"]).read_text())
     lidar_cfg = yaml.safe_load(_resolve(root, init["lidar_config"]).read_text())
-    lidar_detector = LiDARUAVDetector(lidar_cfg).to(device)
-    lidar_checkpoint = _resolve(root, init["lidar_checkpoint"])
-    load_lidar_weights(lidar_detector, str(lidar_checkpoint))
-    lidar = LiDARCandidateModel(lidar_detector, CandidateSelector(candidate_cfg["candidate"]["radar"]))
+    lidar_detector: nn.Module = nn.Identity()
+    lidar: nn.Module = nn.Identity()
+    if stage != "B1":
+        lidar_detector = LiDARUAVDetector(lidar_cfg).to(device)
+        lidar = LiDARCandidateModel(lidar_detector, CandidateSelector(candidate_cfg["candidate"]["radar"]))
+        if stage in {"B2", "B3"}:
+            _load_trained_branch(lidar_detector, _resolve(root, init["b0_checkpoint"]), "network.lidar.detector.")
+
+    dino_detector: nn.Module = nn.Identity()
+    vision: nn.Module = nn.Identity()
+    if stage != "B0":
+        detrex = _resolve(root, init["dino_root"])
+        ensure_detrex_config_link(detrex)
+        for path in (root / "src", detrex / "detectron2", detrex):
+            if str(path) not in sys.path:
+                sys.path.insert(0, str(path))
+        from detectron2.config import LazyConfig, instantiate
+        dino_cfg = LazyConfig.load(str(_resolve(root, init["dino_config"])))
+        dino_cfg.model.device = str(device)
+        dino_detector = instantiate(dino_cfg.model).to(device)
+        adapt_dino_class_head_to_single_uav(dino_detector)
+        vision = VisionCandidateModel(
+            dino_detector,
+            pre_topk=int(candidate_cfg["candidate"]["rgb"]["pre_topk"]),
+            final_topk=int(candidate_cfg["candidate"]["rgb"]["final_topk"]),
+            nms_iou=float(candidate_cfg["candidate"]["rgb"]["nms_iou"]),
+        )
+        if stage in {"B2", "B3"}:
+            checkpoint = _resolve(root, init["b1_checkpoint"])
+            _load_trained_branch(dino_detector, checkpoint, "network.vision.dino.detector.")
+            _load_trained_branch(vision.builder.feature_proj, checkpoint, "network.vision.builder.feature_proj.")
 
     interaction = CandidateCrossAttention(
         visual_radius=int(model_cfg["visual_radius_cells"]),
@@ -123,8 +135,7 @@ def build_runtime(config: Mapping[str, Any], root: Path, device: torch.device) -
     runtime = V2Runtime(
         model, lidar_detector, dino_detector, ranking, CandidateLoss(lidar_cfg),
         projection, camera_path, geometry_path,
-        {"lidar_checkpoint": str(lidar_checkpoint), "dino_checkpoint": str(_resolve(root, init["dino_checkpoint"])),
-         "e5_visual_checkpoint": None if not e5_visual else str(_resolve(root, e5_visual))},
+        {"stage": stage, "b0_checkpoint": init.get("b0_checkpoint"), "b1_checkpoint": init.get("b1_checkpoint")},
     )
     freeze_for_stage(runtime, str(config["experiment"]["stage"]))
     return runtime
@@ -134,6 +145,10 @@ def freeze_for_stage(runtime: V2Runtime, stage: str) -> None:
     if stage not in {"B0", "B1", "B2", "B3"}:
         raise ValueError(f"unknown V2 stage {stage}")
     runtime.model.requires_grad_(False)
+    if stage == "B0":
+        runtime.model.lidar.requires_grad_(True)
+    if stage == "B1":
+        runtime.model.vision.requires_grad_(True)
     if stage in {"B2", "B3"}:
         runtime.model.interaction.radar_reads_vision.requires_grad_(True)
         runtime.model.interaction.visual_proj.requires_grad_(True)
@@ -162,6 +177,8 @@ def trainable_parameter_groups(runtime: V2Runtime, learning_rate: float,
 
 def synchronize_dino_device(runtime: V2Runtime, device: torch.device) -> None:
     detector = runtime.dino_detector
+    if isinstance(detector, nn.Identity):
+        return
     detector.device = device
     # Detrex captures its normalizer tensors in a Python closure, outside the
     # nn.Module buffer tree. Rebuild it on the actual trainer device.
@@ -174,24 +191,59 @@ def synchronize_dino_device(runtime: V2Runtime, device: torch.device) -> None:
         detector.normalizer = lambda value, mean=mean, std=std: (value - mean) / std
 
 
+def _stage_batch(batch: Mapping[str, Any], stage: str) -> dict[str, Any]:
+    selected = dict(batch)
+    if stage == "B0":
+        selected["m_V"] = torch.zeros_like(batch["m_V"])
+        selected["gt_2d_valid"] = torch.zeros_like(batch["gt_2d_valid"])
+        selected["vision_batch_index"] = batch["vision_batch_index"][:0]
+        selected["image_uint8"] = None
+        for key in ("image_source_wh", "image_view_wh", "image_scale_xy", "vision_delta_t"):
+            selected[key] = batch[key][:0]
+    elif stage == "B1":
+        selected["m_R"] = torch.zeros_like(batch["m_R"])
+        selected["radar_batch_index"] = batch["radar_batch_index"][:0]
+        for key in ("points", "delta_t", "sensor_id", "point_counts", "point_batch_index"):
+            selected[key] = batch[key][:0]
+    return selected
+
+
 def forward_step(runtime: V2Runtime, batch: Mapping[str, Any], device: torch.device,
                  *, compute_frozen_losses: bool = True) -> dict[str, Any]:
+    stage = runtime.initialization["stage"]
+    batch = _stage_batch(batch, stage)
     lidar_batch, images, masks, projection, targets, transforms = prepare_model_batch(
         batch, runtime.dino_detector, runtime.projection_base, device,
     )
     output = runtime.model(lidar_batch, images, masks, projection)
     rank = runtime.ranking_loss(output, targets)
     result = {"output": output, "targets": targets, **rank}
+    if stage == "B0":
+        raw = output.diagnostics["lidar_raw"]
+        radar_loss = runtime.lidar_loss(raw, output.diagnostics["lidar_batch"]) if raw is not None else None
+        result["loss"] = radar_loss["loss"] if radar_loss is not None else rank["loss"]
+        result["has_trainable_loss"] = radar_loss is not None and radar_loss["num_supervised_samples"] > 0
+        result["radar_supervised"] = 0 if radar_loss is None else radar_loss["num_supervised_samples"]
+    elif stage == "B1":
+        ids = lidar_batch["vision_batch_index"]
+        raw = output.diagnostics["vision_raw"]
+        vision_loss, _, count = supervised_dino_loss(
+            runtime.dino_detector, raw, gt_box_xyxy_source=targets.box_xyxy_px[ids],
+            gt_2d_valid=targets.has_box[ids], transforms=transforms,
+        ) if raw is not None else (rank["loss"], {}, 0)
+        result["loss"] = vision_loss
+        result["has_trainable_loss"] = count > 0
+        result["vision_supervised"] = count
     if compute_frozen_losses:
         zero = targets.xyz_m.new_zeros(())
         lidar_raw = output.diagnostics["lidar_raw"]
         result["loss_lidar_frozen"] = (
             runtime.lidar_loss(lidar_raw, output.diagnostics["lidar_batch"])["loss"]
-            if lidar_raw is not None else zero
+            if stage in {"B2", "B3"} and lidar_raw is not None else zero
         )
         vision_raw = output.diagnostics["vision_raw"]
         vision, count = zero, 0
-        if vision_raw is not None:
+        if stage in {"B2", "B3"} and vision_raw is not None:
             ids = lidar_batch["vision_batch_index"]
             vision, _, count = supervised_dino_loss(
                 runtime.dino_detector, vision_raw,
@@ -199,7 +251,8 @@ def forward_step(runtime: V2Runtime, batch: Mapping[str, Any], device: torch.dev
                 gt_2d_valid=targets.has_box[ids], transforms=transforms,
             )
         result["loss_vision_frozen"] = vision
-        result["vision_supervised"] = count
+        if stage in {"B2", "B3"}:
+            result["vision_supervised"] = count
     return result
 
 
@@ -287,6 +340,7 @@ if L is not None:
             self.config = dict(config)
             self.save_hyperparameters({"config": self.config})
             self._val_rows: list[dict[str, Any]] = []
+            self._val_2d: list[float] = []
 
         def transfer_batch_to_device(self, batch, device, dataloader_idx):
             return batch
@@ -304,8 +358,11 @@ if L is not None:
         def on_train_epoch_start(self) -> None:
             # B2/B3 keep both pretrained candidate generators frozen and in
             # deterministic eval mode; only candidate interaction/scoring train.
-            self.runtime.lidar_detector.eval()
-            self.runtime.dino_detector.eval()
+            if self.runtime.initialization["stage"] in {"B2", "B3"}:
+                self.runtime.lidar_detector.eval()
+                self.runtime.dino_detector.eval()
+            else:
+                self.network.train()
 
         def on_validation_start(self) -> None:
             self._refresh_external_device()
@@ -341,8 +398,8 @@ if L is not None:
             self.log_dict({
                 "train/loss": loss, "train/rank_3d": values["loss_rank_3d"],
                 "train/rank_2d": values["loss_rank_2d"],
-                "train/lidar_frozen": values["loss_lidar_frozen"],
-                "train/vision_frozen": values["loss_vision_frozen"],
+                "train/lidar_frozen": values.get("loss_lidar_frozen", loss.new_zeros(())),
+                "train/vision_frozen": values.get("loss_vision_frozen", loss.new_zeros(())),
             }, on_step=True, on_epoch=True, batch_size=batch_size)
             self.log("loss", loss.detach(), prog_bar=True, logger=False)
             self.log("rank3d", values["loss_rank_3d"].detach(), prog_bar=True, logger=False)
@@ -367,6 +424,7 @@ if L is not None:
 
         def on_validation_epoch_start(self) -> None:
             self._val_rows.clear()
+            self._val_2d.clear()
 
         def validation_step(self, batch, batch_idx):
             with torch.autocast(device_type=self.device.type, enabled=False):
@@ -374,6 +432,14 @@ if L is not None:
             self._val_rows.extend(validation_rows(
                 values["output"], values["targets"], batch["sample_id"], batch["sequence_id"]
             ))
+            from .loss import box_iou_aligned
+            for index in range(len(values["targets"].has_box)):
+                if not bool(values["targets"].has_box[index]):
+                    continue
+                ids = values["output"].top2d_indices(len(values["targets"].has_box))[index]
+                iou = box_iou_aligned(values["output"].box_xyxy_px[ids[:1]].float(),
+                                      values["targets"].box_xyxy_px[index].float()) if len(ids) else []
+                self._val_2d.append(float(iou[0]) if len(iou) else 0.0)
             self.log("val/loss", values["loss"].float(), on_epoch=True,
                      batch_size=len(batch["m_R"]))
 
@@ -382,6 +448,8 @@ if L is not None:
             self.log("val/success_1m", float(metrics["success_1m"]), prog_bar=True)
             self.log("val/median_error_m", float(metrics["error_median_m"]), prog_bar=True)
             self.log("val/coverage", float(metrics["coverage"]))
+            self.log("val/2d_iou50", sum(value >= 0.5 for value in self._val_2d) / len(self._val_2d)
+                     if self._val_2d else 0.0, prog_bar=self.runtime.initialization["stage"] == "B1")
 
         def configure_optimizers(self):
             cfg = self.config["training"]

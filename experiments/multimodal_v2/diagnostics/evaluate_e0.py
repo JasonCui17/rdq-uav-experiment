@@ -21,22 +21,23 @@ from rdq_uav.lidar_v2.loss import CandidateLoss
 from rdq_uav.lidar_v2.model import LiDARUAVDetector
 from rdq_uav.lidar_v2.runtime import evaluate_batch, summarize_metrics
 from rdq_uav.lidar_v2.selector import CandidateSelector
-from rdq_uav.multimodal_v2.lidar import load_lidar_weights
 from rdq_uav.runtime_paths import apply_runtime_path_overrides, resolve_project_path
 
 
 def main():
     p=argparse.ArgumentParser(); p.add_argument("--config",type=Path,required=True)
     p.add_argument("--output",type=Path,required=True); p.add_argument("--device",default="cuda:0")
+    p.add_argument("--checkpoint", type=Path, required=True); p.add_argument("--max-events", type=int, default=20)
     p.add_argument("--limit",type=int); p.add_argument("--num-workers",type=int,default=2); args=p.parse_args()
     resolve=lambda value: resolve_project_path(value,ROOT)
-    cfg=apply_runtime_path_overrides(yaml.safe_load(resolve(args.config).read_text())); data=cfg["data"]; init=cfg["initialization"]
-    lidar_cfg=yaml.safe_load(resolve(init["lidar_config"]).read_text())
-    dataset=LiDARUAVDataset(resolve(data["root"]),resolve(data["split_file"]),data["val_split"],max_events=int(data["max_events"]))
+    cfg=apply_runtime_path_overrides(yaml.safe_load(resolve(args.config).read_text())); data=cfg["data"]
+    lidar_cfg=yaml.safe_load(resolve(cfg["initialization"]["lidar_config"]).read_text())
+    dataset=LiDARUAVDataset(resolve(data["root"]),resolve(data["split_file"]),data["val_split"],max_events=args.max_events)
     if args.limit is not None: dataset=Subset(dataset,range(min(args.limit,len(dataset))))
     loader=DataLoader(dataset,batch_size=1,shuffle=False,num_workers=args.num_workers,collate_fn=collate_lidar_samples)
     device=torch.device(args.device); model=LiDARUAVDetector(lidar_cfg).to(device).eval()
-    load_lidar_weights(model,str(resolve(init["lidar_checkpoint"])))
+    payload=torch.load(resolve(args.checkpoint),map_location="cpu",weights_only=False)
+    model.load_state_dict(payload.get("model_state",payload),strict=True)
     # E0 is evaluated with its own frozen selector contract. The multimodal
     # Top-50 candidate pool is deliberately not substituted here.
     selector=CandidateSelector(lidar_cfg); criterion=CandidateLoss(lidar_cfg); rows=[]
@@ -46,7 +47,7 @@ def main():
             with torch.autocast(device_type=device.type,enabled=False): output=model(batch)
             rows.extend(evaluate_batch(output,batch,selector,criterion))
     report={"baseline":"E0_independent_lidar_v2","queries":len(rows),"precision":"fp32",
-            "checkpoint":str(resolve(init["lidar_checkpoint"])),"metrics":summarize_metrics(rows)}
+            "checkpoint":str(resolve(args.checkpoint)),"metrics":summarize_metrics(rows)}
     args.output.mkdir(parents=True,exist_ok=True)
     (args.output/"summary.json").write_text(json.dumps(report,indent=2,allow_nan=True))
     with (args.output/"per_query.jsonl").open("w") as handle:

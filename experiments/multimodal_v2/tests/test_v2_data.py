@@ -434,7 +434,8 @@ def test_frozen_losses_use_modality_local_supervision(tmp_path, monkeypatch):
     model = MultimodalV2(FakeCandidateProducer('R'), FakeCandidateProducer('V'),
                         CandidateCrossAttention(), CandidateScoring())
     runtime = SimpleNamespace(model=model, dino_detector=SpyDINO(), projection_base=projection(),
-                              ranking_loss=CandidateRankingLoss(), lidar_loss=lidar_loss)
+                              ranking_loss=CandidateRankingLoss(), lidar_loss=lidar_loss,
+                                  initialization={"stage": "B2"})
     result = training.forward_step(runtime, b, torch.device('cpu'))
     assert calls == ['R', 'V'] and result['vision_supervised'] == 2
 
@@ -450,10 +451,27 @@ def test_double_missing_frozen_losses_are_skipped(tmp_path, monkeypatch):
     model = MultimodalV2(FakeCandidateProducer('R'), FakeCandidateProducer('V'),
                         CandidateCrossAttention(), CandidateScoring())
     runtime = SimpleNamespace(model=model, dino_detector=SpyDINO(), projection_base=projection(),
-                              ranking_loss=CandidateRankingLoss(), lidar_loss=forbidden)
+                              ranking_loss=CandidateRankingLoss(), lidar_loss=forbidden,
+                                  initialization={"stage": "B2"})
     result = training.forward_step(runtime, b, torch.device('cpu'))
     assert result['loss_lidar_frozen'] == result['loss_vision_frozen'] == 0
     assert result['vision_supervised'] == 0
+
+
+def test_single_modality_stage_batches_keep_only_observed_branch(tmp_path):
+    from rdq_uav.multimodal_v2.training import _stage_batch
+    from rdq_uav.multimodal_v2.contracts import validate_batch
+    release(tmp_path, 'seq0001', queries=(10., 20.), events=((19.5, 0),), images=(10., 20.))
+    original = collate_multimodal_v2([dataset(tmp_path)[i] for i in range(2)])
+    radar = _stage_batch(original, 'B0')
+    vision = _stage_batch(original, 'B1')
+    validate_batch(radar)
+    validate_batch(vision)
+    assert radar['image_uint8'] is None and not radar['m_V'].any()
+    assert radar['vision_batch_index'].numel() == 0 and not radar['gt_2d_valid'].any()
+    assert vision['points'].numel() == 0 and not vision['m_R'].any()
+    assert vision['radar_batch_index'].numel() == 0
+    assert original['m_V'].any() and original['m_R'].any()
 
 
 

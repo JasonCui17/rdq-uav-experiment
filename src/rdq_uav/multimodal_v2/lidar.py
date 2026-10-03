@@ -22,27 +22,5 @@ class LiDARCandidateModel(nn.Module):
 
     def forward(self, batch: Mapping[str, Any]) -> tuple[dict[str, Any], CandidateBatch]:
         raw = self.detector(batch)
-        old = self.builder(raw)
-        candidates = CandidateBatch(
-            old.feature, old.score, old.xyz, old.xyz_valid, old.box_xyxy_px,
-            old.box_valid, old.batch_index, old.source_index, "R",
-            old.xyz.new_zeros((old.n, 2)),
-            torch.zeros(old.n, dtype=torch.bool, device=old.xyz.device),
-        )
+        candidates = self.builder(raw)
         return raw, candidates
-
-
-def load_lidar_weights(detector: LiDARUAVDetector, checkpoint: str,
-                       *, prefix: str | None = None) -> dict[str, Any]:
-    """Strictly load either a native LiDAR V2 or Lightning E5 checkpoint."""
-    try:
-        payload = torch.load(checkpoint, map_location="cpu", weights_only=False)
-    except TypeError:
-        payload = torch.load(checkpoint, map_location="cpu")
-    state = payload.get("state_dict", payload.get("model_state", payload))
-    if prefix is not None:
-        state = {key[len(prefix):]: value for key, value in state.items() if key.startswith(prefix)}
-    if not state:
-        raise RuntimeError(f"no LiDAR weights found in {checkpoint}")
-    detector.load_state_dict(state, strict=True)
-    return payload

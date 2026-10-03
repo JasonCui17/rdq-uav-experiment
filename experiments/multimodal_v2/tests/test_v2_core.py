@@ -209,7 +209,7 @@ def test_missing_vision_invalid_projection_and_padding_zero_visual_evidence():
 
 def test_no_nearby_lidar_is_exact_vision_identity():
     radar = candidate("R", projected=((0.0, 0.0),))
-    vision = candidate("V", boxes=((80.0, 80.0, 90.0, 90.0),))
+    vision = candidate("V", boxes=((0.0, 0.0, 10.0, 10.0),))
     ev = CandidateCrossAttention().read_radar_for_vision(vision, radar, *context())
     scoring = CandidateScoring()
     nn.init.constant_(scoring.score_head.vision[-1].bias, 1.0)
@@ -219,7 +219,7 @@ def test_no_nearby_lidar_is_exact_vision_identity():
     assert torch.equal(output.score_2d_after, output.score_2d_before)
 
 
-def test_b1_initialization_is_exact_b0_for_values_and_ordering():
+def test_zero_interaction_heads_are_exact_identity_for_values_and_ordering():
     radar = candidate("R", score=(0.2, 0.9), projected=((50.0, 50.0), (90.0, 90.0)))
     vision = candidate("V", score=(0.7, 0.6), boxes=((45, 45, 55, 55), (85, 85, 95, 95)))
     b0 = score(radar, vision)
@@ -364,6 +364,14 @@ class _FakeFull(nn.Module):
         self.vision = nn.Linear(2, 2)
         self.interaction = CandidateCrossAttention()
         self.scoring = CandidateScoring()
+
+
+def test_single_modality_stages_train_only_their_own_branch():
+    for stage, prefix in (("B0", "lidar."), ("B1", "vision.")):
+        model = _FakeFull()
+        freeze_for_stage(SimpleNamespace(model=model), stage)
+        names = {name for name, value in model.named_parameters() if value.requires_grad}
+        assert names and all(name.startswith(prefix) for name in names)
 
 
 def test_b2_optimizer_contains_only_radar_reads_visual_path():

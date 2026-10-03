@@ -1,8 +1,8 @@
 experiment:
-  name: multimodal_v2_b2
-  stage: B2
+  name: multimodal_v2_b3
+  stage: B3
   seed: 42
-  output_dir: outputs/own_multimodal_research/multimodal_v2/b2_seed42
+  output_dir: outputs/own_multimodal_research/multimodal_v2/b3_seed42
 data:
   root: data/mmaud_official_train
   split_file: splits/mmaud_annotated20.json
@@ -26,8 +26,8 @@ initialization:
   b1_checkpoint: outputs/own_multimodal_research/multimodal_v2/b1_seed42/checkpoints/best.ckpt
 model:
   interaction_enabled: true
-  vision_reads_radar: false
-  vision_scoring_enabled: false
+  vision_reads_radar: true
+  vision_scoring_enabled: true
   visual_radius_cells: 1
   lidar_neighbors: 16
   geometry_gate:
@@ -45,7 +45,7 @@ loss:
   box_positive_iou: 0.5
   box_ignore_iou: 0.3
   lambda_rank_3d: 1.0
-  lambda_rank_2d: 0.0
+  lambda_rank_2d: 1.0
   negative_only_weight: 0.25
 training:
   epochs: 12

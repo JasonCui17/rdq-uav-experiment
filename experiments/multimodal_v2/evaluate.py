@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""FP32 B0/B1/B2 evaluation with explicit no-output failures."""
+"""FP32 evaluation of independently trained and multimodal V2 stages."""
 
 from __future__ import annotations
 
@@ -20,13 +20,14 @@ import yaml
 
 from rdq_uav.runtime_paths import apply_runtime_path_overrides, resolve_project_path
 from rdq_uav.multimodal_v2.data import build_datasets, collate_multimodal_v2, prepare_model_batch
-from rdq_uav.multimodal_v2.training import build_runtime, summarize_3d, synchronize_dino_device
+from rdq_uav.multimodal_v2.training import build_runtime, summarize_3d, synchronize_dino_device, _stage_batch
+from rdq_uav.multimodal_v2.loss import box_iou_aligned
 
 
 def parse_args():
     p = argparse.ArgumentParser()
     p.add_argument("--config", type=Path, required=True)
-    p.add_argument("--mode", choices=("B0", "B1", "B2"), required=True)
+    p.add_argument("--mode", choices=("B0", "B1", "B2", "B3"), required=True)
     p.add_argument("--checkpoint", type=Path)
     p.add_argument("--output", type=Path, required=True)
     p.add_argument("--device", default="cuda:0")
@@ -59,12 +60,12 @@ def metrics(values):
 @torch.no_grad()
 def main():
     args = parse_args(); device = torch.device(args.device)
-    if args.mode == "B2" and args.checkpoint is None:
-        raise ValueError("B2 evaluation requires --checkpoint; an untrained zero head is B1")
-    if args.mode in {"B0", "B1"} and args.checkpoint is not None:
-        raise ValueError("B0/B1 identity gates do not accept a trained checkpoint")
+    if args.checkpoint is None:
+        raise ValueError("evaluation requires a trained --checkpoint")
     cfg = apply_runtime_path_overrides(yaml.safe_load(resolve(args.config).read_text()))
-    cfg["model"]["interaction_enabled"] = args.mode != "B0"
+    if cfg["experiment"]["stage"] != args.mode:
+        raise ValueError("--mode must match experiment.stage in --config")
+    cfg["model"]["interaction_enabled"] = args.mode in {"B2", "B3"}
     cfg["model"]["vision_reads_radar"] = args.mode == "B3"
     cfg["model"]["vision_scoring_enabled"] = args.mode == "B3"
     _, dataset = build_datasets(cfg, ROOT)
@@ -82,14 +83,23 @@ def main():
         image_scale_xy=torch.ones((1,2),device=device), device=device,
     )
     rows, type_counts, top_type_counts = [], Counter(), Counter()
+    visual_ious = []
     loss_counts = Counter()
     for batch in loader:
+        batch = _stage_batch(batch, args.mode)
         lidar, images, masks, projection, targets, _ = prepare_model_batch(
             batch, runtime.dino_detector, runtime.projection_base, device
         )
         with torch.autocast(device_type=device.type, enabled=False):
             output = runtime.model(lidar, images, masks, projection)
         loss_values = runtime.ranking_loss(output, targets)
+        for index in range(len(targets.has_box)):
+            if not bool(targets.has_box[index]):
+                continue
+            ids = output.top2d_indices(len(targets.has_box))[index]
+            iou = box_iou_aligned(output.box_xyxy_px[ids[:1]].float(),
+                                  targets.box_xyxy_px[index].float()) if len(ids) else []
+            visual_ious.append(float(iou[0]) if len(iou) else 0.0)
         for key, value in loss_values.items():
             if key.startswith("n_"):
                 loss_counts[key] += int(value)
@@ -148,11 +158,16 @@ def main():
         row["radar_oracle_error"] is not None and row["radar_oracle_error"] <= 1.0
         for row in metric_rows
     )
+    vision_metrics = {"labeled_queries": len(visual_ious),
+                      "top1_iou50": sum(value >= 0.5 for value in visual_ious) / len(visual_ious)
+                      if visual_ious else 0.0,
+                      "mean_top1_iou": float(np.mean(visual_ious)) if visual_ious else 0.0}
     report = {
         "mode": args.mode, "checkpoint": None if not args.checkpoint else str(resolve(args.checkpoint)),
         "checkpoint_info": checkpoint_info, "evaluation_precision": "fp32", "queries": len(rows),
         "evaluated_gt3d_queries": len(metric_rows),
-        "metrics": metrics(rows), "hypothesis_counts": {"RV": type_counts[0], "R": type_counts[1], "V": type_counts[2]},
+        "metrics": {"vision_2d": vision_metrics} if args.mode == "B1" else metrics(rows),
+        "hypothesis_counts": {"RV": type_counts[0], "R": type_counts[1], "V": type_counts[2]},
         "top_3d_hypothesis_counts": {"RV": top_type_counts[0], "R": top_type_counts[1], "V": top_type_counts[2]},
         "v_only_participates_in_3d_ranking": False,
         "visual_wrongly_overrode_correct_lidar": demoted,
@@ -161,6 +176,7 @@ def main():
         "correct_lidar_top1_demoted_fraction": float(demoted / before_correct) if before_correct else 0.0,
         "lidar_oracle_recall_1m": float(lidar_oracle_success / len(metric_rows)) if metric_rows else 0.0,
         "loss_query_counts": dict(loss_counts),
+        "vision_2d": vision_metrics,
     }
     args.output.mkdir(parents=True, exist_ok=True)
     (args.output / "summary.json").write_text(json.dumps(report, indent=2, allow_nan=True))

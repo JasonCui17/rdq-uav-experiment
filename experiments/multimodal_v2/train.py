@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Manual training entry for candidate-level Multimodal V2 B2/B3."""
+"""Train the standalone radar, vision, or multimodal V2 stage."""
 
 from __future__ import annotations
 
@@ -29,9 +29,8 @@ from rdq_uav.multimodal_v2.training import (
 
 def parse_args():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--config", type=Path, default=Path("experiments/multimodal_v2/configs/b2_radar_reads_vision.yaml"))
+    parser.add_argument("--config", type=Path, default=Path("experiments/multimodal_v2/configs/b0_standalone.yaml"))
     parser.add_argument("--output", type=Path)
-    parser.add_argument("--e5-visual-checkpoint", type=Path)
     parser.add_argument("--accelerator", choices=("cpu", "gpu", "auto"))
     parser.add_argument("--devices")
     parser.add_argument("--precision", choices=("32-true", "16-mixed", "bf16-mixed"))
@@ -54,16 +53,15 @@ def resolve(path):
 def main():
     args = parse_args()
     cfg = apply_runtime_path_overrides(yaml.safe_load(resolve(args.config).read_text()))
-    if args.e5_visual_checkpoint:
-        cfg["initialization"]["e5_visual_checkpoint"] = str(args.e5_visual_checkpoint)
     for argument, section, key in (
         (args.num_workers, "data", "num_workers"), (args.batch_size, "training", "batch_size"),
         (args.accumulate, "training", "accumulate"), (args.epochs, "training", "epochs"),
     ):
         if argument is not None:
             cfg[section][key] = argument
-    if cfg["experiment"]["stage"] not in {"B2", "B3"}:
-        raise ValueError("training entry accepts B2/B3 only; B0/B1 are evaluation gates")
+    stage = str(cfg["experiment"]["stage"])
+    if stage not in {"B0", "B1", "B2", "B3"}:
+        raise ValueError(f"unknown training stage {stage}")
     accelerator = args.accelerator or cfg["lightning"]["accelerator"]
     precision = args.precision or cfg["lightning"]["precision"]
     devices = int(args.devices) if args.devices and args.devices.isdigit() else (args.devices or cfg["lightning"]["devices"])
@@ -91,10 +89,11 @@ def main():
     output.mkdir(parents=True, exist_ok=True)
     callbacks = [] if args.fast_dev_run else [
         ModelCheckpoint(dirpath=output / "checkpoints", save_last=True, save_top_k=0,
-                        every_n_train_steps=int(cfg["lightning"]["checkpoint_every_updates"]),
+                        every_n_epochs=1,
                         save_on_exception=True),
         ModelCheckpoint(dirpath=output / "checkpoints", filename="best", save_top_k=1,
-                        monitor="val/success_1m", mode="max", every_n_epochs=1),
+                        monitor="val/2d_iou50" if stage == "B1" else "val/success_1m",
+                        mode="max", every_n_epochs=1),
         LearningRateMonitor(logging_interval="step"),
     ]
     logger = False if args.fast_dev_run else [
@@ -115,7 +114,7 @@ def main():
     cfg["runtime"] = {
         "framework": "lightning", "train_queries": len(train_data), "val_queries": len(val_data),
         "precision": precision, "accelerator": accelerator, "devices": devices,
-        "max_updates": args.max_updates, "old_pre_stage_hci": False,
+        "max_updates": args.max_updates,
     }
     if not args.fast_dev_run:
         (output / "effective_config.yaml").write_text(yaml.safe_dump(cfg, sort_keys=False))

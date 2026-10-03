@@ -12,16 +12,14 @@ from .geometry import ProjectionContext, project_omni_radtan
 
 from .contracts import CandidateBatch, CrossModalEvidence, MultimodalOutput, validate_batch
 from .interaction import CandidateCrossAttention, _zero_evidence
-from .lidar import LiDARCandidateModel
 from .scoring import CandidateScoring
-from .vision import VisionCandidateModel
 from .data import radar_model_batch
 
 
 class MultimodalV2(nn.Module):
     """Independent candidates -> geometric evidence -> constrained ranking."""
 
-    def __init__(self, lidar: LiDARCandidateModel, vision: VisionCandidateModel,
+    def __init__(self, lidar: nn.Module, vision: nn.Module,
                  interaction: CandidateCrossAttention, scoring: CandidateScoring,
                  *, interaction_enabled: bool = True,
                  vision_reads_radar: bool = False,

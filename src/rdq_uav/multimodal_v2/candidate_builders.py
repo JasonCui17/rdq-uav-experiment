@@ -6,7 +6,7 @@ import torch
 from torch import nn
 from torchvision.ops import nms
 
-from .candidate_set import CandidateSet
+from .contracts import CandidateBatch
 
 
 def _nms_xyxy(boxes: torch.Tensor, scores: torch.Tensor, iou_threshold: float) -> torch.Tensor:
@@ -43,7 +43,7 @@ class RadarCandidateBuilder:
     def __init__(self, selector: Any) -> None:
         self.selector=selector
 
-    def __call__(self, radar_output: dict[str, Any]) -> CandidateSet:
+    def __call__(self, radar_output: dict[str, Any]) -> CandidateBatch:
         per_batch=self.selector(radar_output)
         chunks=[]
         for b,result in enumerate(per_batch):
@@ -54,25 +54,26 @@ class RadarCandidateBuilder:
         device=radar_output['logits'].device
         dtype=radar_output['fine_features'].dtype
         if not chunks:
-            return CandidateSet.empty(source='radar',device=device,dtype=dtype)
+            return CandidateBatch.empty('R',device,dtype)
         score=torch.cat([c['score'].to(dtype=dtype) for _,c in chunks])
         feature=torch.cat([c['feature'] for _,c in chunks])
         xyz=torch.cat([c['xyz'] for _,c in chunks])
         batch_index=torch.cat([torch.full((len(c['score']),),b,device=device,dtype=torch.long) for b,c in chunks])
         source_index=torch.cat([c['source_token_id'].long() for _,c in chunks])
         n=len(score)
-        return CandidateSet(score,feature,xyz,torch.ones(n,device=device,dtype=torch.bool),
-                            torch.zeros((n,4),device=device,dtype=dtype),torch.zeros(n,device=device,dtype=torch.bool),
-                            batch_index,'radar',source_index)
+        return CandidateBatch(feature,score,xyz,torch.ones(n,device=device,dtype=torch.bool),
+                              torch.zeros((n,4),device=device,dtype=dtype),torch.zeros(n,device=device,dtype=torch.bool),
+                              batch_index,source_index,'R',torch.zeros((n,2),device=device,dtype=dtype),
+                              torch.zeros(n,device=device,dtype=torch.bool))
 
 
 class RGBCandidateBuilder(nn.Module):
-    def __init__(self, query_dim: int=256, feature_dim: int=128, pre_topk: int=100, final_topk: int=50, nms_iou: float=.7) -> None:
+    def __init__(self, query_dim: int=256, feature_dim: int=128, pre_topk: int=50, final_topk: int=10, nms_iou: float=.7) -> None:
         super().__init__()
         self.feature_proj=nn.Linear(query_dim,feature_dim)
         self.pre_topk=int(pre_topk); self.final_topk=int(final_topk); self.nms_iou=float(nms_iou)
 
-    def forward(self, dino_output: dict[str,torch.Tensor], source_image_size_wh: torch.Tensor) -> CandidateSet:
+    def forward(self, dino_output: dict[str,torch.Tensor], source_image_size_wh: torch.Tensor) -> CandidateBatch:
         logits=dino_output['pred_logits']; boxes=dino_output['pred_boxes']; query=dino_output['decoder_query_features']
         if logits.ndim!=3 or boxes.shape[:2]!=logits.shape[:2] or query.shape[:2]!=logits.shape[:2]:
             raise ValueError('DINO logits/boxes/query features must agree on [B,Q]')
@@ -81,7 +82,7 @@ class RGBCandidateBuilder(nn.Module):
         # Final model is one-class UAV. Until that head is adapted, C>1 is
         # intentionally rejected instead of silently treating COCO classes as UAV.
         if logits.shape[-1] != 1:
-            raise ValueError(f'RGB CandidateSet requires 1-class UAV logits, got C={logits.shape[-1]}')
+            raise ValueError(f'RGB candidates require 1-class UAV logits, got C={logits.shape[-1]}')
         score=torch.sigmoid(logits[...,0].float()).to(query.dtype)
         source_boxes=_cxcywh_norm_to_source_xyxy(boxes,source_image_size_wh.to(boxes.dtype))
         projected=self.feature_proj(query)
@@ -92,13 +93,15 @@ class RGBCandidateBuilder(nn.Module):
             keep=order[kept_local]
             if len(keep): out.append((b,keep))
         if not out:
-            return CandidateSet.empty(source='rgb',device=query.device,dtype=query.dtype)
+            return CandidateBatch.empty('V',query.device,query.dtype)
         idx=torch.cat([keep for _,keep in out])
         batch=torch.cat([torch.full((len(keep),),b,device=query.device,dtype=torch.long) for b,keep in out])
         scores=torch.cat([score[b,keep] for b,keep in out])
         feats=torch.cat([projected[b,keep] for b,keep in out])
         bxs=torch.cat([source_boxes[b,keep] for b,keep in out])
         n=len(idx)
-        return CandidateSet(scores,feats,torch.zeros((n,3),device=query.device,dtype=query.dtype),
-                            torch.zeros(n,device=query.device,dtype=torch.bool),bxs,
-                            torch.ones(n,device=query.device,dtype=torch.bool),batch,'rgb',idx)
+        return CandidateBatch(feats,scores,torch.zeros((n,3),device=query.device,dtype=query.dtype),
+                              torch.zeros(n,device=query.device,dtype=torch.bool),bxs,
+                              torch.ones(n,device=query.device,dtype=torch.bool),batch,idx,'V',
+                              torch.zeros((n,2),device=query.device,dtype=query.dtype),
+                              torch.zeros(n,device=query.device,dtype=torch.bool))
