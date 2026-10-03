@@ -41,6 +41,8 @@ def parse_args():
     parser.add_argument("--max-updates", type=int)
     parser.add_argument("--train-limit", type=int)
     parser.add_argument("--val-limit", type=int)
+    parser.add_argument("--train-indices", type=int, nargs="+")
+    parser.add_argument("--val-indices", type=int, nargs="+")
     parser.add_argument("--fast-dev-run", action="store_true")
     parser.add_argument("--resume", nargs="?", const="auto")
     return parser.parse_args()
@@ -76,6 +78,14 @@ def main():
         raise FileExistsError(f"{last} exists; use --resume auto or a new output")
     L.seed_everything(int(cfg["experiment"]["seed"]), workers=True)
     train_data, val_data = build_datasets(cfg, ROOT)
+    if args.train_indices is not None:
+        if args.train_limit is not None or any(i < 0 or i >= len(train_data) for i in args.train_indices):
+            raise ValueError("--train-indices must be in range and cannot be combined with --train-limit")
+        train_data = Subset(train_data, args.train_indices)
+    if args.val_indices is not None:
+        if args.val_limit is not None or any(i < 0 or i >= len(val_data) for i in args.val_indices):
+            raise ValueError("--val-indices must be in range and cannot be combined with --val-limit")
+        val_data = Subset(val_data, args.val_indices)
     if args.train_limit is not None: train_data = Subset(train_data, range(min(args.train_limit, len(train_data))))
     if args.val_limit is not None: val_data = Subset(val_data, range(min(args.val_limit, len(val_data))))
     runtime = build_runtime(cfg, ROOT, torch.device("cpu"))

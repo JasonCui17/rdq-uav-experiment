@@ -22,6 +22,8 @@ PYTHONPATH=src python experiments/multimodal_v2/evaluate.py --config experiments
 
 After reviewing those evaluations, train B2 or B3 with `b2_radar_reads_vision.yaml` or `b3_bidirectional.yaml`. Each training run saves `best.ckpt` and `last.ckpt` under its output directory; use `--resume auto` or `--resume PATH` only to continue that run. `--max-updates 2 --train-limit 16 --val-limit 2 --accelerator cpu --devices 1 --precision 32-true --num-workers 0` provides a small CPU smoke when the model dependencies permit it.
 
+For a focused real-data smoke, training accepts `--train-indices` and `--val-indices`; evaluation accepts `--indices`. These select dataset indices after the configured split and cannot be combined with the corresponding `--train-limit`, `--val-limit`, or `--limit` option.
+
 The dataset keeps QueryRecord separate from optional 3D GT. Same-sequence radar history and the nearest historical image use `[t-1s,t]`; relative times are observation minus query. The YOLO label uses the selected image stem. Batch fields pack only observed modalities and retain original sample indices. Missing modalities skip their network path. Radar SBE uses a 0.2s time half-life and its loss supervises every input point. Candidate budgets are pre-NMS 50 and final at most 10 per modality. Interaction and association share the distance-adaptive geometry gate.
 
 Historical E0/E5 diagnostics and earlier reports remain in this directory for reproduction. The former B0/B1 zero-head identity check is now `diagnostics/check_interaction_identity.py`; it is a diagnostic, not either trainable baseline.

@@ -33,6 +33,7 @@ def parse_args():
     p.add_argument("--device", default="cuda:0")
     p.add_argument("--num-workers", type=int, default=2)
     p.add_argument("--limit", type=int)
+    p.add_argument("--indices", type=int, nargs="+")
     return p.parse_args()
 
 
@@ -69,6 +70,10 @@ def main():
     cfg["model"]["vision_reads_radar"] = args.mode == "B3"
     cfg["model"]["vision_scoring_enabled"] = args.mode == "B3"
     _, dataset = build_datasets(cfg, ROOT)
+    if args.indices is not None:
+        if args.limit is not None or any(i < 0 or i >= len(dataset) for i in args.indices):
+            raise ValueError("--indices must be in range and cannot be combined with --limit")
+        dataset = Subset(dataset, args.indices)
     if args.limit is not None: dataset = Subset(dataset, range(min(args.limit, len(dataset))))
     loader = DataLoader(dataset, batch_size=1, shuffle=False, num_workers=args.num_workers,
                         collate_fn=collate_multimodal_v2)
