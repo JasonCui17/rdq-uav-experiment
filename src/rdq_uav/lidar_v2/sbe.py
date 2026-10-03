@@ -1,18 +1,23 @@
-"""SBE-Lite v1: ordered physical statistics before voxel-level expansion.
+"""SBE-Lite time-weighted v2: ordered statistics before voxel-level expansion.
 
 Uses existing point_to_l0; no point-level learned feature or sensor embedding.
-Geometry/time statistics are FP32, even under autocast. Coordinates are meters,
+Geometry/time statistics are FP32, even under autocast. Spatial means/std
+use exponential time weights; density, sensor ratio and temporal std remain
+unweighted. The eight slots retain their fixed ordering and cross-attention. Coordinates are meters,
 point delta_t is seconds relative to query time, and packed query identity is
 already encoded in hierarchy.point_to_l0.
 """
 from __future__ import annotations
+import math
 import torch
 from torch import nn
 
+STATISTICS_VERSION = "time_weighted_v2"
+
 SLOT_DESCRIPTOR = (
-    'mean_residual_x', 'mean_residual_y', 'mean_residual_z',
-    'max_abs_residual_x', 'max_abs_residual_y', 'max_abs_residual_z',
-    'log_point_count', 'occupancy', 'avia_ratio', 'latest_age', 'temporal_std',
+    'weighted_mean_residual_x', 'weighted_mean_residual_y', 'weighted_mean_residual_z',
+    'weighted_std_residual_x', 'weighted_std_residual_y', 'weighted_std_residual_z',
+    'log_point_count', 'occupancy', 'avia_ratio', 'mean_time_weight', 'temporal_std',
 )
 
 
@@ -96,7 +101,15 @@ class SBELiteVoxelEmbed(nn.Module):
         super().__init__()
         expected=dict(subdivisions=2,slots=8,slot_dim=11,flattened_dim=88,output_dim=dim)
         if config is not None and any(config.get(k)!=v for k,v in expected.items()):
-            raise ValueError(f'SBE-Lite v1 requires {expected}')
+            raise ValueError(f'SBE-Lite slot layout requires {expected}')
+        statistics = {} if config is None else config
+        self.statistics_version = statistics.get('statistics_version', STATISTICS_VERSION)
+        if self.statistics_version != STATISTICS_VERSION:
+            raise ValueError(f'SBE statistics_version must be {STATISTICS_VERSION}')
+        self.time_half_life_s = float(statistics.get('time_half_life_s', 0.2))
+        if (not math.isfinite(self.time_half_life_s)
+                or not torch.finfo(torch.float32).tiny <= self.time_half_life_s <= torch.finfo(torch.float32).max):
+            raise ValueError('time_half_life_s must be positive and representable in FP32')
         self.voxel_size=voxel_size;self.slots=8;self.slot_dim=len(SLOT_DESCRIPTOR)
         vqsa={} if config is None else config.get('vqsa',{})
         if not bool(vqsa.get('enabled',True)):raise ValueError('VQSA-v1 is required by the final SBE embedding')
@@ -116,21 +129,37 @@ class SBELiteVoxelEmbed(nn.Module):
             index=inv*self.slots+slot;n=len(level.coords)*self.slots
             count=torch.bincount(index,minlength=n).float();denom=count.clamp_min(1)
             occupied=count>0
-            sum_r=points.new_zeros((n,3)).index_add_(0,index,residual)
-            max_r=points.new_zeros((n,3))
-            max_r.scatter_reduce_(0,index[:,None].expand(-1,3),residual.abs(),reduce='amax',include_self=True)
+            if not bool(torch.isfinite(dt).all()) or bool((dt > 0).any()):
+                raise ValueError('SBE requires finite causal point delta_t <= 0')
+            # w_i = 2 ** (delta_t_i / half_life). Normalize geometry
+            # per slot using relative exponents to prevent all-weight underflow
+            # for old observations / short half lives. Each occupied slot has
+            # at least one relative weight of exactly 1.
+            max_dt=points.new_full((n,),-torch.inf)
+            max_dt.scatter_reduce_(0,index,dt,reduce='amax',include_self=True)
+            relative_weight=torch.exp2((dt-max_dt[index])/self.time_half_life_s)
+            weight_sum=points.new_zeros(n).index_add_(0,index,relative_weight)
+            weight_denom=weight_sum.clamp_min(1)
+            weighted_sum=points.new_zeros((n,3)).index_add_(0,index,residual*relative_weight[:,None])
+            mean=weighted_sum/weight_denom[:,None]
+            centered=residual-mean[index]
+            weighted_square=points.new_zeros((n,3)).index_add_(0,index,centered.square()*relative_weight[:,None])
+            spatial_variance=(weighted_square/weight_denom[:,None]).clamp_min(0)
+            spatial_variance=torch.where(count[:,None]>1,spatial_variance,torch.zeros_like(spatial_variance))
+            spatial_std=spatial_variance.sqrt()
+            # Absolute (not per-slot-normalized) freshness survives when every
+            # point in a voxel is old. Very old weights may legitimately be 0.
+            time_weight=torch.exp2(dt/self.time_half_life_s)
+            mean_time_weight=points.new_zeros(n).index_add_(0,index,time_weight)/denom
             avia=points.new_zeros(n).index_add_(0,index,(batch['sensor_id']==0).float())
             sum_dt=points.new_zeros(n).index_add_(0,index,dt)
             sum_dt2=points.new_zeros(n).index_add_(0,index,dt.square())
-            max_dt=points.new_full((n,),-torch.inf)
-            max_dt.scatter_reduce_(0,index,dt,reduce='amax',include_self=True)
-            max_dt=torch.where(occupied,max_dt,torch.zeros_like(max_dt))
             variance=(sum_dt2/denom-(sum_dt/denom).square()).clamp_min(0)
             # Exact singleton std, including roundoff-sensitive values.
             variance=torch.where(count>1,variance,torch.zeros_like(variance))
             extras=torch.stack((count.log1p(),occupied.float(),avia/denom,
-                                (-max_dt).clamp_min(0),variance.sqrt()),dim=1)
-            stats=torch.cat((sum_r/denom[:,None],max_r,extras),dim=1)
+                                mean_time_weight,variance.sqrt()),dim=1)
+            stats=torch.cat((mean,spatial_std,extras),dim=1)
             stats=stats.masked_fill(~occupied[:,None],0.)
             stats=stats.reshape(len(level.coords),self.slots,self.slot_dim)
             counts=count.reshape(len(level.coords),self.slots).long()

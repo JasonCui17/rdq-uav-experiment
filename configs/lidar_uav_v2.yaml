@@ -21,6 +21,8 @@ model:
     scales: [0.5, 1.0, 2.0]
     embedding: sbe_lite
     sbe:
+      statistics_version: time_weighted_v2
+      time_half_life_s: 0.2
       subdivisions: 2
       slots: 8
       slot_dim: 11
