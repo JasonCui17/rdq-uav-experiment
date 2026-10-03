@@ -20,7 +20,7 @@ import torch
 from torch.utils.data import Dataset
 import yaml
 
-from rdq_uav.multimodal.merged_lidar import LidarFrameEvent, load_released_xyz, merge_frame_streams
+from .radar_data import LidarFrameEvent, load_released_xyz, merge_frame_streams
 from .geometry import ProjectionContext
 from .loss import MultimodalTargets
 from .contracts import validate_batch

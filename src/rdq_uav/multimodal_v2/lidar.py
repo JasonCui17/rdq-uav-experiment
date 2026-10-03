@@ -7,9 +7,9 @@ from typing import Any, Mapping
 import torch
 from torch import nn
 
-from rdq_uav.lidar_v2.model import LiDARUAVDetector
-from rdq_uav.lidar_v2.selector import CandidateSelector
-from rdq_uav.multimodal_v1.candidate.builders import RadarCandidateBuilder
+from .radar_model import LiDARUAVDetector
+from .radar_selector import CandidateSelector
+from .candidate_builders import RadarCandidateBuilder
 
 from .contracts import CandidateBatch
 

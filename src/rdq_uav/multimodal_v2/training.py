@@ -19,12 +19,12 @@ except ImportError:  # Core model remains importable without training extras.
     L = None
 from torch.utils.data import DataLoader
 
-from rdq_uav.lidar_v2.loss import CandidateLoss
-from rdq_uav.lidar_v2.model import LiDARUAVDetector
-from rdq_uav.lidar_v2.selector import CandidateSelector
+from .radar_loss import CandidateLoss
+from .radar_model import LiDARUAVDetector
+from .radar_selector import CandidateSelector
 from rdq_uav.multimodal_v2.geometry import load_left_projection_context
-from rdq_uav.multimodal_v1.training import supervised_dino_loss
-from rdq_uav.multimodal_v1.vision.uav_dino import adapt_dino_class_head_to_single_uav
+from .dino_supervision import supervised_dino_loss
+from .uav_dino import adapt_dino_class_head_to_single_uav
 from rdq_uav.runtime_paths import ensure_detrex_config_link
 
 from .data import prepare_model_batch

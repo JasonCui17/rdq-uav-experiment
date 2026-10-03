@@ -7,8 +7,8 @@ from typing import Any, Mapping, Sequence
 import torch
 from torch import nn
 
-from rdq_uav.multimodal_v1.candidate.builders import RGBCandidateBuilder
-from rdq_uav.multimodal_v1.vision.dino_adapter import DINOAdapter
+from .candidate_builders import RGBCandidateBuilder
+from .dino_adapter import DINOAdapter
 
 from .contracts import CandidateBatch
 
