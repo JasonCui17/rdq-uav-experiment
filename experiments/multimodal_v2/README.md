@@ -18,7 +18,10 @@ PYTHONPATH=src python experiments/multimodal_v2/train.py --config experiments/mu
 PYTHONPATH=src python experiments/multimodal_v2/train.py --config experiments/multimodal_v2/configs/b1_standalone.yaml
 PYTHONPATH=src python experiments/multimodal_v2/evaluate.py --config experiments/multimodal_v2/configs/b0_standalone.yaml --mode B0 --checkpoint outputs/own_multimodal_research/multimodal_v2/b0_seed42/checkpoints/best.ckpt --output outputs/own_multimodal_research/multimodal_v2/b0_eval
 PYTHONPATH=src python experiments/multimodal_v2/evaluate.py --config experiments/multimodal_v2/configs/b1_standalone.yaml --mode B1 --checkpoint outputs/own_multimodal_research/multimodal_v2/b1_seed42/checkpoints/best.ckpt --output outputs/own_multimodal_research/multimodal_v2/b1_eval
+PYTHONPATH=src python experiments/multimodal_v2/diagnostics/audit_dataset.py --config experiments/multimodal_v2/configs/b0_standalone.yaml --output /tmp/v2_dataset_audit.json
 ```
+
+The 20 annotated sequences use `splits/mmaud_v2_annotated20_seed42.json`: 14 train, 3 validation, and 3 held-out test sequences. Training and checkpoint selection use train and validation only. Evaluation defaults to `--split validation_sub`; pass `--split heldout_test_sub` for final test evaluation after model selection. The audit reads the three groups without loading a model or checkpoint and counts B0 supervision only when a valid 3D target has an input radar point within 1 m.
 
 After reviewing those evaluations, train B2 or B3 with `b2_radar_reads_vision.yaml` or `b3_bidirectional.yaml`. Each training run saves `best.ckpt` and `last.ckpt` under its output directory; use `--resume auto` or `--resume PATH` only to continue that run. `--max-updates 2 --train-limit 16 --val-limit 2 --accelerator cpu --devices 1 --precision 32-true --num-workers 0` provides a small CPU smoke when the model dependencies permit it.
 

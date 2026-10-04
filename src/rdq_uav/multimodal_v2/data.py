@@ -534,7 +534,42 @@ def prepare_model_batch(batch: Mapping[str, Any], dino_detector: Any,
     return moved, image_tensor, image_mask, projection, targets, transforms
 
 
-def build_datasets(config: Mapping[str, Any], root: Path):
+V2_SPLIT_COUNTS = {"train_sub": 14, "validation_sub": 3, "heldout_test_sub": 3}
+
+
+def load_sequence_splits(path: Path) -> dict[str, list[str]]:
+    """Validate sequence isolation before constructing any dataset."""
+    payload = json.loads(path.read_text())
+    if not isinstance(payload, dict):
+        raise ValueError("split file must be an object")
+    strict = payload.get("schema_version") == 1 or "num_sequences" in payload
+    names = V2_SPLIT_COUNTS if strict else {key: None for key in ("train", "val") if key in payload}
+    if strict and payload.get("num_sequences") != 20:
+        raise ValueError("V2 split must declare 20 sequences")
+    if not names:
+        raise ValueError("split file has no sequence groups")
+    groups = {}
+    seen = set()
+    for name, expected in names.items():
+        values = payload.get(name)
+        if not isinstance(values, list) or any(not isinstance(value, str) or not value for value in values):
+            raise ValueError(f"{name} must be a list of sequence names")
+        if expected is not None and len(values) != expected:
+            raise ValueError(f"{name} must contain {expected} sequences")
+        if len(values) != len(set(values)):
+            raise ValueError(f"duplicate sequence within {name}")
+        overlap = seen.intersection(values)
+        if overlap:
+            raise ValueError(f"sequence shared across splits: {sorted(overlap)}")
+        seen.update(values)
+        groups[name] = values
+    if strict and len(seen) != 20:
+        raise ValueError("V2 split must contain 20 distinct sequences")
+    return groups
+
+
+def build_split_dataset(config: Mapping[str, Any], root: Path, split_name: str,
+                        *, filter_empty: bool = False) -> MultimodalV2Dataset:
     data = config["data"]
     def resolve(value):
         path = Path(value)
@@ -542,10 +577,9 @@ def build_datasets(config: Mapping[str, Any], root: Path):
     dataset_root = resolve(data["root"])
     if not dataset_root.is_dir():
         raise FileNotFoundError(f"MMAUD root missing: {dataset_root}")
-    splits = json.loads(resolve(data["split_file"]).read_text())
-    train_sequences, val_sequences = splits[data["train_split"]], splits[data["val_split"]]
-    if set(train_sequences) & set(val_sequences):
-        raise RuntimeError("sequence-level train/validation leakage")
+    splits = load_sequence_splits(resolve(data["split_file"]))
+    if split_name not in splits:
+        raise ValueError(f"unknown sequence split {split_name!r}")
     geometry = json.loads(resolve(data["geometry_calibration"]).read_text())
     # This Sample contract uses raw image_time-query_time, not an implicit clock correction.
     # Current audited calibration is zero. A nonzero offset requires an explicit new contract.
@@ -557,12 +591,18 @@ def build_datasets(config: Mapping[str, Any], root: Path):
                 radar_history_s=float(data.get("radar_history_s", 1.0)),
                 max_image_gap_s=float(data.get("max_image_gap_s", 1.0)),
                 label_directory=str(data.get("label_directory", "2d_detect")))
-    train = MultimodalV2Dataset(dataset_root, query_records_from_3d_gt(dataset_root, train_sequences),
-                                target_3d_index=build_3d_target_index(dataset_root, train_sequences),
-                                filter_empty=True, **args)
-    val = MultimodalV2Dataset(dataset_root, query_records_from_3d_gt(dataset_root, val_sequences),
-                              target_3d_index=build_3d_target_index(dataset_root, val_sequences),
-                              filter_empty=False, **args)
+    sequences = splits[split_name]
+    return MultimodalV2Dataset(dataset_root, query_records_from_3d_gt(dataset_root, sequences),
+                               target_3d_index=build_3d_target_index(dataset_root, sequences),
+                               filter_empty=filter_empty, **args)
+
+
+def build_datasets(config: Mapping[str, Any], root: Path):
+    data = config["data"]
+    if data["train_split"] == "heldout_test_sub" or data["val_split"] == "heldout_test_sub":
+        raise ValueError("heldout_test_sub cannot be used for training or checkpoint selection")
+    train = build_split_dataset(config, root, data["train_split"], filter_empty=True)
+    val = build_split_dataset(config, root, data["val_split"])
     train_times = {r.query_time for r in train.query_records}
     if any(r.query_time in train_times for r in val.query_records):
         raise ValueError("duplicate query_time across train/validation")

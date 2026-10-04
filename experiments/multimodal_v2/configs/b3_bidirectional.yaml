@@ -5,7 +5,7 @@ experiment:
   output_dir: outputs/own_multimodal_research/multimodal_v2/b3_seed42
 data:
   root: data/mmaud_official_train
-  split_file: splits/mmaud_annotated20.json
+  split_file: splits/mmaud_v2_annotated20_seed42.json
   train_split: train_sub
   val_split: validation_sub
   radar_history_s: 1.0

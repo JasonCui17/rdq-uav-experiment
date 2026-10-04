@@ -19,7 +19,7 @@ from torch.utils.data import DataLoader, Subset
 import yaml
 
 from rdq_uav.runtime_paths import apply_runtime_path_overrides, resolve_project_path
-from rdq_uav.multimodal_v2.data import build_datasets, collate_multimodal_v2, prepare_model_batch
+from rdq_uav.multimodal_v2.data import build_split_dataset, collate_multimodal_v2, prepare_model_batch
 from rdq_uav.multimodal_v2.training import build_runtime, summarize_3d, synchronize_dino_device, _stage_batch
 from rdq_uav.multimodal_v2.loss import box_iou_aligned
 
@@ -28,6 +28,7 @@ def parse_args():
     p = argparse.ArgumentParser()
     p.add_argument("--config", type=Path, required=True)
     p.add_argument("--mode", choices=("B0", "B1", "B2", "B3"), required=True)
+    p.add_argument("--split", choices=("validation_sub", "heldout_test_sub"), default="validation_sub")
     p.add_argument("--checkpoint", type=Path)
     p.add_argument("--output", type=Path, required=True)
     p.add_argument("--device", default="cuda:0")
@@ -69,7 +70,7 @@ def main():
     cfg["model"]["interaction_enabled"] = args.mode in {"B2", "B3"}
     cfg["model"]["vision_reads_radar"] = args.mode == "B3"
     cfg["model"]["vision_scoring_enabled"] = args.mode == "B3"
-    _, dataset = build_datasets(cfg, ROOT)
+    dataset = build_split_dataset(cfg, ROOT, args.split)
     if args.indices is not None:
         if args.limit is not None or any(i < 0 or i >= len(dataset) for i in args.indices):
             raise ValueError("--indices must be in range and cannot be combined with --limit")
@@ -168,7 +169,8 @@ def main():
                       if visual_ious else 0.0,
                       "mean_top1_iou": float(np.mean(visual_ious)) if visual_ious else 0.0}
     report = {
-        "mode": args.mode, "checkpoint": None if not args.checkpoint else str(resolve(args.checkpoint)),
+        "mode": args.mode, "split": args.split,
+        "checkpoint": None if not args.checkpoint else str(resolve(args.checkpoint)),
         "checkpoint_info": checkpoint_info, "evaluation_precision": "fp32", "queries": len(rows),
         "evaluated_gt3d_queries": len(metric_rows),
         "metrics": {"vision_2d": vision_metrics} if args.mode == "B1" else metrics(rows),

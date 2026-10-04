@@ -1,0 +1,32 @@
+{
+  "schema_version": 1,
+  "seed": 42,
+  "allocation": "v2_annotated20_sequence_random_14_3_3",
+  "num_sequences": 20,
+  "train_sub": [
+    "seq0019",
+    "seq0022",
+    "seq0023",
+    "seq0024",
+    "seq0028",
+    "seq0037",
+    "seq0046",
+    "seq0049",
+    "seq0050",
+    "seq0055",
+    "seq0061",
+    "seq0089",
+    "seq0101",
+    "seq0102"
+  ],
+  "validation_sub": [
+    "seq0020",
+    "seq0026",
+    "seq0079"
+  ],
+  "heldout_test_sub": [
+    "seq0001",
+    "seq0021",
+    "seq0027"
+  ]
+}
