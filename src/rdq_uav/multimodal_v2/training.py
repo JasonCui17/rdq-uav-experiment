@@ -24,7 +24,7 @@ from .radar_model import LiDARUAVDetector
 from .radar_selector import CandidateSelector
 from rdq_uav.multimodal_v2.geometry import load_left_projection_context
 from .dino_supervision import supervised_dino_loss
-from .uav_dino import adapt_dino_class_head_to_single_uav
+from .uav_dino import adapt_dino_class_head_to_single_uav, load_coco_pretrained_dino
 from rdq_uav.runtime_paths import ensure_detrex_config_link
 
 from .data import prepare_model_batch
@@ -78,6 +78,7 @@ def build_runtime(config: Mapping[str, Any], root: Path, device: torch.device) -
         if stage in {"B2", "B3"}:
             _load_trained_branch(lidar_detector, _resolve(root, init["b0_checkpoint"]), "network.lidar.detector.")
 
+    dino_initialization = None
     dino_detector: nn.Module = nn.Identity()
     vision: nn.Module = nn.Identity()
     if stage != "B0":
@@ -90,6 +91,10 @@ def build_runtime(config: Mapping[str, Any], root: Path, device: torch.device) -
         dino_cfg = LazyConfig.load(str(_resolve(root, init["dino_config"])))
         dino_cfg.model.device = str(device)
         dino_detector = instantiate(dino_cfg.model).to(device)
+        if stage == "B1" and init.get("dino_checkpoint"):
+            dino_initialization = load_coco_pretrained_dino(
+                dino_detector, _resolve(root, init["dino_checkpoint"])
+            )
         adapt_dino_class_head_to_single_uav(dino_detector)
         vision = VisionCandidateModel(
             dino_detector,
@@ -135,7 +140,8 @@ def build_runtime(config: Mapping[str, Any], root: Path, device: torch.device) -
     runtime = V2Runtime(
         model, lidar_detector, dino_detector, ranking, CandidateLoss(lidar_cfg),
         projection, camera_path, geometry_path,
-        {"stage": stage, "b0_checkpoint": init.get("b0_checkpoint"), "b1_checkpoint": init.get("b1_checkpoint")},
+        {"stage": stage, "b0_checkpoint": init.get("b0_checkpoint"), "b1_checkpoint": init.get("b1_checkpoint"),
+         "dino_pretrained": dino_initialization},
     )
     freeze_for_stage(runtime, str(config["experiment"]["stage"]))
     return runtime
