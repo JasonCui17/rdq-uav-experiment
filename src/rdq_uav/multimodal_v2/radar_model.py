@@ -5,6 +5,21 @@ from typing import Any
 import torch
 from torch import nn
 from .radar_sbe import SBELiteVoxelEmbed
+from .lidar_legacy import LegacyVoxelEmbed
+from .lidar_learned_sbe import LearnedSBEVoxelEmbed
+
+
+def build_voxel_embedding(model_cfg):
+    voxel = model_cfg['voxel']
+    name = voxel.get('embedding', 'sbe_lite')
+    dim, size = model_cfg['dim'], voxel['scales'][0]
+    if name == 'sbe_lite':
+        return SBELiteVoxelEmbed(dim, size, voxel.get('sbe'))
+    if name == 'legacy':
+        return LegacyVoxelEmbed(dim, 32, 64, size)
+    if name == 'learned_sbe':
+        return LearnedSBEVoxelEmbed(dim, size, int(voxel.get('learned_sbe', {}).get('point_dim', 32)))
+    raise ValueError(f'Unknown voxel embedding: {name}')
 from .radar_geometry import HierarchyBuilder, SparseHierarchy, SparseLevel, decode_residual
 
 def segment_sum(x,index,n):
@@ -156,16 +171,35 @@ class LiDARUAVDetector(nn.Module):
     def __init__(self,cfg:dict[str,Any]):
         super().__init__(); m=cfg["model"] if "model" in cfg else cfg; d=m["dim"]; tr=m["transformer"]
         self.version=m["name"]; self.hierarchy=HierarchyBuilder(tuple(m["voxel"]["scales"]))
-        if m['voxel'].get('embedding') != 'sbe_lite':
-            raise ValueError('Multimodal V2 requires sbe_lite voxel embedding')
-        self.voxel_embed=SBELiteVoxelEmbed(d,m['voxel']['scales'][0],m['voxel'].get('sbe'))
+        # Opt-in A/B initialization isolates frontend RNG consumption so that
+        # all downstream initial weights match for an identical experiment seed.
+        matched_init = bool(m['voxel'].get('matched_frontend_init', False))
+        frontend_seed = int(m['voxel'].get('frontend_seed', 42))
+        if matched_init:
+            with torch.random.fork_rng(devices=[]):
+                torch.manual_seed(frontend_seed)
+                self.voxel_embed = build_voxel_embedding(m)
+        else:
+            self.voxel_embed = build_voxel_embedding(m)
         self.merge01=SparseMerge(d); self.merge12=SparseMerge(d)
         common=(d,tr["heads"],tr["ffn_dim"],tr["blocks_per_level"][0],tr["window_size"],tr["window_shift"],tr["relative_range"])
         self.encoder0=SpatialTransformer(*common,global_attention=False)
         self.encoder1=SpatialTransformer(d,tr["heads"],tr["ffn_dim"],tr["blocks_per_level"][1],tr["window_size"],tr["window_shift"],tr["relative_range"],False)
         self.encoder2=SpatialTransformer(d,tr["heads"],tr["ffn_dim"],tr["blocks_per_level"][2],tr["window_size"],tr["window_shift"],tr["relative_range"],True)
         self.up21=SparseUp(d); self.up10=SparseUp(d); self.final_norm=nn.LayerNorm(d,eps=1e-5); self.head=CandidateHead(d,m["head"]["hidden_dim"],m["head"]["residual_scale_m"])
-        self.apply(self._init)
+        if matched_init:
+            for child in self.children():
+                if child is self.voxel_embed:
+                    with torch.random.fork_rng(devices=[]):
+                        torch.manual_seed(frontend_seed + 1)
+                        child.apply(self._init)
+                else:
+                    child.apply(self._init)
+        else:
+            self.apply(self._init)
+        if isinstance(self.voxel_embed, (LegacyVoxelEmbed, LearnedSBEVoxelEmbed)):
+            nn.init.constant_(self.voxel_embed.sensor_embedding.weight[0], 0.)
+            nn.init.constant_(self.voxel_embed.sensor_embedding.weight[1], 1.)
         for module in self.modules():
             if isinstance(module,RelativeBias): nn.init.zeros_(module.tables)
         nn.init.constant_(self.head.cls[-1].bias,math.log(.01/.99))
