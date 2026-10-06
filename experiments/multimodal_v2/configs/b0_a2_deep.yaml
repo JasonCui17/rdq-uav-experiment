@@ -1,0 +1,66 @@
+data:
+  camera_config: configs/calibration/mmaud_v1_omni.yaml
+  dino_max_size: 1333
+  dino_short_edge: 800
+  geometry_calibration: calibration/official_left_p4_current_geometry.json
+  label_directory: 2d_detect
+  max_image_gap_s: 1.0
+  num_workers: 2
+  prefetch_factor: 2
+  radar_history_s: 1.0
+  root: data/mmaud_official_train
+  split_file: splits/mmaud_v2_annotated20_seed42.json
+  train_split: train_sub
+  val_split: validation_sub
+experiment:
+  name: multimodal_v2_b0_a2_learned_sbe32
+  output_dir: outputs/b0_a2_learned_sbe32_seed42
+  seed: 42
+  stage: B0
+initialization:
+  candidate_config: experiments/multimodal_v2/configs/candidates.yaml
+  lidar_config: experiments/multimodal_v2/configs/radar_a2_deep.yaml
+lightning:
+  accelerator: gpu
+  deterministic: warn
+  devices: 1
+  num_sanity_val_steps: 1
+  precision: 32-true
+logging:
+  every_updates: 20
+loss:
+  box_ignore_iou: 0.3
+  box_positive_iou: 0.5
+  focal_alpha: 0.25
+  focal_gamma: 2.0
+  lambda_rank_2d: 0.0
+  lambda_rank_3d: 1.0
+  negative_only_weight: 0.25
+  xyz_ignore_m: 2.0
+  xyz_positive_m: 1.0
+model:
+  geometry_gate:
+    max_px: 48.0
+    min_px: 8.0
+    mode: inverse_range
+    reference_margin_px: 16.0
+    reference_range_m: 20.0
+  interaction_enabled: false
+  lidar_neighbors: 16
+  max_abs_delta_logit: 2.0
+  vision_reads_radar: false
+  vision_scoring_enabled: false
+  visual_radius_cells: 1
+training:
+  accumulate: 1
+  batch_size: 4
+  betas:
+  - 0.9
+  - 0.999
+  epochs: 12
+  eps: 1.0e-08
+  final_lr_ratio: 0.01
+  grad_clip_norm: 1.0
+  learning_rate: 0.0001
+  warmup_fraction: 0.05
+  weight_decay: 0.0001
