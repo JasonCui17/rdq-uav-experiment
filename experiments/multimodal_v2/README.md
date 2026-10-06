@@ -7,11 +7,13 @@ V2's own data, radar SBE/backbone, candidate builders, Swin/DINO adapters, geome
 | Stage | Training supervision | Initialization | Evaluation |
 | --- | --- | --- | --- |
 | B0 | Radar's all-input-point 3D candidate loss | Random | 3D success and recall |
-| B1 | DINO criterion on the selected image's YOLO box | Random | 2D top-1 IoU ≥ 0.5 |
+| B1 | DINO criterion on the selected image's YOLO box | Full COCO-pretrained DINO; newly initialized single-class UAV heads | 2D top-1 IoU ≥ 0.5 |
 | B2 | Radar ranking with vision evidence | This run's B0 and B1 best checkpoints | 3D and 2D |
 | B3 | Bidirectional candidate interaction and ranking | This run's B0 and B1 best checkpoints | 3D and 2D |
 
-B0 and B1 do not load any project or third-party pretrained checkpoint. Only an explicit `--resume` restores a training run. B2/B3 require the `b0_checkpoint` and `b1_checkpoint` paths in their configs. Review the trained B0/B1 metrics before starting a formal B2/B3 run.
+B0 starts from random initialization. By default, B1 loads the full COCO-pretrained DINO checkpoint specified by `initialization.dino_checkpoint` into the original 80-class model, then replaces its classification heads with newly initialized single-class UAV heads and fine-tunes on MMAUD. Backbone, transformer and box-regression weights are retained during head adaptation. If `dino_checkpoint` is omitted or null, B1 starts without pretrained weights. A configured checkpoint that is missing or incompatible raises an error; there is no silent fallback to random initialization.
+
+Pretrained initialization loads model weights; `--resume` continues a training run by restoring its training state. B2/B3 require the `b0_checkpoint` and `b1_checkpoint` paths from this run. Review the trained B0/B1 metrics before starting a formal B2/B3 run. Historical random-initialization B1 results and new COCO-initialized runs must be recorded separately; current defaults do not establish how an earlier run was initialized.
 
 ```bash
 PYTHONPATH=src python experiments/multimodal_v2/train.py --config experiments/multimodal_v2/configs/b0_standalone.yaml

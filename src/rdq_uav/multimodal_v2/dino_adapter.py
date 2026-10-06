@@ -18,7 +18,7 @@ class DINOAdapter(nn.Module):
 
     def forward_from_pyramid(self,pyramid:SwinPyramidOutput,image_masks:torch.Tensor,*,allow_training_candidate_path:bool=False)->dict[str,Any]:
         if self.detector.training and not allow_training_candidate_path:
-            raise RuntimeError("P2 identity path is inference-only. FullMultimodalV1 may explicitly enable the differentiable candidate path; detector-native DINO training remains the SSOD/P8 responsibility.")
+            raise RuntimeError("DINOAdapter training requires allow_training_candidate_path=True. Multimodal V2 B1 supervision is computed by supervised_dino_loss.")
         multi_level_features=self.detector.neck(pyramid.dino_features)
         if image_masks.ndim != 3 or image_masks.shape[0] != multi_level_features[0].shape[0]:
             raise ValueError('image_masks must be [B,H,W]')
@@ -26,7 +26,7 @@ class DINOAdapter(nn.Module):
         masks=[F.interpolate(image_masks[:,None].float(),size=feature.shape[-2:],mode='nearest')[:,0].to(torch.bool) for feature in multi_level_features]
         positions=[self.detector.position_embedding(mask) for mask in masks]
         # detrex CUDA deformable attention does not support BF16.
-        # Keep the rest of E5 under AMP; run this transformer in FP32.
+        # Keep the rest of V2 under AMP; run this transformer in FP32.
         with torch.autocast(device_type=multi_level_features[0].device.type, enabled=False):
             decoder_states,initial_reference,intermediate_references,encoder_state,encoder_reference=self.detector.transformer(
                 [feature.float() for feature in multi_level_features],
