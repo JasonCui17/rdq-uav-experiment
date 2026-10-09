@@ -39,6 +39,27 @@ def select_dino_batch(output: Mapping[str, Any], indices: torch.Tensor) -> dict[
     return selected
 
 
+def build_dino_targets(gt_box_xyxy_source: torch.Tensor, gt_2d_valid: torch.Tensor,
+                       transforms: Sequence[Any]) -> list[dict[str, torch.Tensor]]:
+    """Build view-normalized targets in compact visual order, before CDN.
+
+    Empty entries are only placeholders for CDN batch indexing. Unlabeled
+    images are excluded from both regular and denoising detection losses.
+    """
+    if len(gt_box_xyxy_source) != len(gt_2d_valid) or len(transforms) != len(gt_2d_valid):
+        raise ValueError("DINO boxes, validity, and transforms must have equal batch size")
+    targets = []
+    for index, valid in enumerate(gt_2d_valid):
+        boxes = gt_box_xyxy_source.new_empty((0, 4), dtype=torch.float32)
+        if bool(valid):
+            boxes = source_xyxy_to_normalized_cxcywh(
+                gt_box_xyxy_source[index].float(), transforms[index],
+            ).reshape(1, 4)
+        targets.append({"labels": torch.zeros(len(boxes), dtype=torch.long, device=boxes.device),
+                        "boxes": boxes})
+    return targets
+
+
 def supervised_dino_loss(
     detector: torch.nn.Module,
     output: Mapping[str, Any],
@@ -59,18 +80,15 @@ def supervised_dino_loss(
         zero = output["pred_logits"].sum() * 0.0
         return zero, {}, 0
     selected = select_dino_batch(output, indices)
-    targets = []
-    for index in indices.tolist():
-        normalized = source_xyxy_to_normalized_cxcywh(
-            gt_box_xyxy_source[index], transforms[index]
-        ).reshape(1, 4)
-        targets.append(
-            {
-                "labels": torch.zeros(1, dtype=torch.long, device=normalized.device),
-                "boxes": normalized,
-            }
+    all_targets = build_dino_targets(gt_box_xyxy_source, gt_2d_valid, transforms)
+    targets = [all_targets[index] for index in indices.tolist()]
+    dn_meta = output.get("dn_meta")
+    if dn_meta is not None:
+        dn_meta = dict(dn_meta)
+        dn_meta["output_known_lbs_bboxes"] = select_dino_batch(
+            dn_meta["output_known_lbs_bboxes"], indices,
         )
-    raw = detector.criterion(selected, targets, None)
+    raw = detector.criterion(selected, targets, dn_meta)
     weighted = {
         key: value * float(detector.criterion.weight_dict[key])
         for key, value in raw.items()

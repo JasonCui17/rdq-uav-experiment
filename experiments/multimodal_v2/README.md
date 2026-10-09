@@ -15,6 +15,24 @@ B0 starts from random initialization. By default, B1 loads the full COCO-pretrai
 
 Pretrained initialization loads model weights; `--resume` continues a training run by restoring its training state. B2/B3 require the `b0_checkpoint` and `b1_checkpoint` paths from this run. Review the trained B0/B1 metrics before starting a formal B2/B3 run. Historical random-initialization B1 results and new COCO-initialized runs must be recorded separately; current defaults do not establish how an earlier run was initialized.
 
+B1 training now restores detrex DINO's native contrastive denoising (CDN):
+view-normalized targets are prepared before the transformer, passed to
+`prepare_for_cdn`, and supervised through `dn_post_process` and the native
+criterion's `dn_meta`. The regular decoder, auxiliary decoder and encoder
+losses remain enabled. GT-derived denoising tokens are removed from both
+prediction tensors and query features before candidate selection. Missing
+annotations contribute neither regular detection nor denoising losses.
+Validation/inference never receive GT queries; B2/B3 use the existing ordinary
+candidate forward without CDN. Third-party source files are unchanged.
+
+`loss.box_positive_iou` and `loss.box_ignore_iou` control V2 candidate ranking,
+not B1's native Hungarian detection assignment. B1's `val/2d_iou50` is a fixed
+evaluation metric, not a training or inference filter. No IoU curriculum is
+enabled. This restores the DINO training core, not an identical COCO training
+protocol: the MMAUD data preparation, optimizer/schedule and V2 Top-K/NMS
+postprocessing remain project-specific. Start a new output directory without
+`--resume` to compare this CDN-restored run against the previous B1 run.
+
 ```bash
 PYTHONPATH=src python experiments/multimodal_v2/train.py --config experiments/multimodal_v2/configs/b0_standalone.yaml
 PYTHONPATH=src python experiments/multimodal_v2/train.py --config experiments/multimodal_v2/configs/b1_standalone.yaml

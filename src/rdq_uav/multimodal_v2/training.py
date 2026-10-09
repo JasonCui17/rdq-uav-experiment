@@ -23,7 +23,7 @@ from .radar_loss import CandidateLoss
 from .radar_model import LiDARUAVDetector
 from .radar_selector import CandidateSelector
 from rdq_uav.multimodal_v2.geometry import load_left_projection_context
-from .dino_supervision import supervised_dino_loss
+from .dino_supervision import build_dino_targets, supervised_dino_loss
 from .uav_dino import adapt_dino_class_head_to_single_uav, load_coco_pretrained_dino
 from rdq_uav.runtime_paths import ensure_detrex_config_link
 
@@ -221,7 +221,13 @@ def forward_step(runtime: V2Runtime, batch: Mapping[str, Any], device: torch.dev
     lidar_batch, images, masks, projection, targets, transforms = prepare_model_batch(
         batch, runtime.dino_detector, runtime.projection_base, device,
     )
-    output = runtime.model(lidar_batch, images, masks, projection)
+    model_kwargs = {}
+    if stage == "B1" and runtime.model.training and images is not None:
+        ids = lidar_batch["vision_batch_index"]
+        model_kwargs["vision_targets"] = build_dino_targets(
+            targets.box_xyxy_px[ids], targets.has_box[ids], transforms,
+        )
+    output = runtime.model(lidar_batch, images, masks, projection, **model_kwargs)
     rank = runtime.ranking_loss(output, targets)
     result = {"output": output, "targets": targets, **rank}
     if stage == "B0":

@@ -24,10 +24,10 @@ class VisionCandidateModel(nn.Module):
         )
 
     def forward(self, images: torch.Tensor, image_masks: torch.Tensor,
-                source_image_wh: torch.Tensor) -> tuple[dict[str, Any], CandidateBatch]:
+                source_image_wh: torch.Tensor, *, targets: list[dict[str, torch.Tensor]] | None = None) -> tuple[dict[str, Any], CandidateBatch]:
         pyramid = self.dino.swin(images)
         raw = self.dino.forward_from_pyramid(
-            pyramid, image_masks, allow_training_candidate_path=True,
+            pyramid, image_masks, allow_training_candidate_path=True, targets=targets,
         )
         candidates = self.builder(raw, source_image_wh)
         return raw, candidates

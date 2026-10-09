@@ -196,8 +196,9 @@ class FakeCandidateProducer(nn.Module):
         self.source = source
         self.calls = 0
         self.batch_sizes = []
-    def forward(self, *args):
+    def forward(self, *args, **kwargs):
         self.calls += 1
+        self.vision_targets = kwargs.get('targets')
         source = self.source
         n = args[0]["num_samples"] if source == 'R' else len(args[0])
         self.batch_sizes.append(n)
@@ -209,6 +210,29 @@ class FakeCandidateProducer(nn.Module):
                               torch.zeros(n, 2), torch.zeros(n, dtype=torch.bool))
         raw = {} if source == 'R' else {'pyramid': SimpleNamespace(features=(torch.ones(n, 96, 4, 8), torch.ones(n, 192, 2, 4)))}
         return raw, cand
+
+
+def test_b1_only_supplies_cdn_targets_during_training(tmp_path, monkeypatch):
+    from rdq_uav.multimodal_v2 import training
+    from rdq_uav.multimodal_v2.loss import CandidateRankingLoss
+    release(tmp_path, 'seq0001', queries=(10.,), images=(10.,))
+    (tmp_path/'seq0001'/'2d_detect'/'10.0.txt').write_text('0 0.5 0.5 0.25 0.5')
+    b = collate_multimodal_v2([dataset(tmp_path)[0]])
+    vision = FakeCandidateProducer('V')
+    model = MultimodalV2(FakeCandidateProducer('R'), vision,
+                        CandidateCrossAttention(), CandidateScoring(), interaction_enabled=False)
+    runtime = SimpleNamespace(model=model, dino_detector=SpyDINO(), projection_base=projection(),
+                              ranking_loss=CandidateRankingLoss(), initialization={"stage": "B1"})
+    def loss(detector, raw, **kwargs):
+        return torch.tensor(7.5), {}, 1
+    monkeypatch.setattr(training, 'supervised_dino_loss', loss)
+    trained = training.forward_step(runtime, b, torch.device('cpu'), compute_frozen_losses=False)
+    assert len(vision.vision_targets) == 1
+    assert vision.vision_targets[0]['labels'].tolist() == [0]
+    assert trained['loss'].item() == 7.5 and trained['has_trainable_loss']
+    model.eval()
+    training.forward_step(runtime, b, torch.device('cpu'), compute_frozen_losses=False)
+    assert vision.vision_targets is None
 
 
 def test_current_model_chain_skips_absent_vision(tmp_path):

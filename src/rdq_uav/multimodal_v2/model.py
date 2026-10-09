@@ -49,7 +49,8 @@ class MultimodalV2(nn.Module):
         return CrossModalEvidence(**result)
 
     def forward(self, batch: Mapping[str, Any], images: torch.Tensor | None,
-                image_padding_mask: torch.Tensor | None, projection: ProjectionContext) -> MultimodalOutput:
+                image_padding_mask: torch.Tensor | None, projection: ProjectionContext,
+                *, vision_targets: list[dict[str, torch.Tensor]] | None = None) -> MultimodalOutput:
         validate_batch(batch)
         device = batch["m_R"].device
         radar_ids, vision_ids = batch["radar_batch_index"], batch["vision_batch_index"]
@@ -62,7 +63,8 @@ class MultimodalV2(nn.Module):
         if len(vision_ids):
             if images is None or image_padding_mask is None or len(images) != len(vision_ids):
                 raise ValueError("valid visual samples require matching preprocessed images/masks")
-            vision_raw, visual = self.vision(images, image_padding_mask, batch["image_source_wh"])
+            vision_kwargs = {} if vision_targets is None else {"targets": vision_targets}
+            vision_raw, visual = self.vision(images, image_padding_mask, batch["image_source_wh"], **vision_kwargs)
             visual = replace(visual, batch_index=vision_ids[visual.batch_index])
         elif images is not None or image_padding_mask is not None:
             raise ValueError("absent vision must not provide preprocessed images")
