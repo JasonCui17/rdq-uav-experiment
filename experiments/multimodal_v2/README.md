@@ -50,3 +50,77 @@ For a focused real-data smoke, training accepts `--train-indices` and `--val-ind
 The dataset keeps QueryRecord separate from optional 3D GT. Same-sequence radar history and the nearest historical image use `[t-1s,t]`; relative times are observation minus query. The YOLO label uses the selected image stem. Batch fields pack only observed modalities and retain original sample indices. Missing modalities skip their network path. Radar SBE uses a 0.2s time half-life and its loss supervises every input point. Candidate budgets are pre-NMS 50 and final at most 10 per modality. Interaction and association share the distance-adaptive geometry gate.
 
 Historical E0/E5 diagnostics and earlier reports remain in this directory for reproduction. The former B0/B1 zero-head identity check is now `diagnostics/check_interaction_identity.py`; it is a diagnostic, not either trainable baseline.
+
+## Paper evaluation: XYZ RMSE and image-level COCO AP
+
+Evaluation now retains the existing `summary.json` and adds `paper_metrics.json`,
+`paper_metrics.csv`, and enriched `per_query.jsonl` (GT/predicted XYZ, selected image,
+GT box, all final 2D boxes and scores). Training adds validation XYZ/3D RMSE logs;
+losses, architecture and checkpoint selection are unchanged. Existing checkpoints
+can be re-evaluated without training again. Old per-query files lack XYZ/boxes and
+must first be regenerated with the updated evaluation entry point.
+
+For N valid-GT queries and M finite Top1 outputs, axis RMSE is
+`sqrt(sum((prediction_axis - GT_axis)^2) / M)`; 3D RMSE is
+`sqrt(sum(||prediction - GT||^2) / M)`. Thus squared 3D RMSE equals the sum of
+squared axis RMSEs. RMSE is conditional on an output and must be reported alongside
+`coverage=M/N`, `missing_queries` and Success@0.5/1/2m. Success uses all N queries,
+including missing outputs as failures. No output means null RMSE, never zero.
+B1 has no metric 3D output and leaves all meter RMSE columns empty.
+XYZ axes use the existing GT frame; physical axis directions remain to be verified.
+
+Install the official COCO evaluator without reinstalling PyTorch:
+
+```bash
+python -m pip install 'pycocotools>=2.0.7,<3'
+
+PYTHONPATH=src python experiments/multimodal_v2/evaluate.py \
+  --config experiments/multimodal_v2/configs/b0_standalone.yaml --mode B0 \
+  --checkpoint outputs/b0_formal_seed42/checkpoints/best.ckpt \
+  --split heldout_test_sub --output outputs/b0_formal_seed42/eval_best_heldout_paper
+
+PYTHONPATH=src python experiments/multimodal_v2/evaluate.py \
+  --config experiments/multimodal_v2/configs/b1_standalone.yaml --mode B1 \
+  --checkpoint outputs/b1_formal_seed42/checkpoints/best.ckpt \
+  --split heldout_test_sub --output outputs/b1_formal_seed42/eval_best_heldout_paper
+```
+
+Use the config corresponding to each experiment/checkpoint, including A1/A2.
+Validation can use `--split validation_sub`; select the checkpoint on validation,
+then use heldout only for final reporting. Runtime data/calibration/third-party
+paths must already be configured as for previous evaluations.
+
+COCO reports AP (IoU 0.50:0.05:0.95), AP50, AP75, AP_small and AR100 as fractions
+(multiply by 100 for percentages). It evaluates **final V/RV candidates**, currently
+usually at most 10 per image, with official maxDets=[1,10,100]. AR100 does not mean
+100 predictions were supplied. This is final-pipeline AP, not AP of all raw DINO
+queries. Only images with a valid box are evaluated: missing/empty label files
+are not assumed to be verified negative images. AP_small uses area in source
+left-view pixels, not resized input pixels.
+
+Repeated query records selecting the same sequence/image are counted once for AP.
+Keep the query closest to image time; break ties by query time and sample ID,
+without looking at prediction quality. `coco/` contains GT, predictions and chosen
+query records for audit. Existing query-level Top1 IoU metrics remain unchanged;
+they are different from image-level AP. `--skip-coco` explicitly disables AP.
+
+Day/night is disabled unless reliable labels are supplied with `--conditions`.
+The JSON schema is `{"sequences": {"sequence_id": "day or night"},
+"samples": {"sample_id": "day or night"}}`: replace the values with exactly
+`day` or `night`; per-sample overrides per-sequence. Every evaluated query must
+have a label. Never infer conditions from absolute timestamps or assign defaults.
+Overall RMSE pools all query errors; `macro_mean_day_night_rmse_m` separately
+averages the two group RMSEs and is not the pooled RMSE. Empty groups stay null.
+`--method` labels the CSV method; `--bandwidth` accepts an independently measured
+value with units. Bandwidth and day/night columns remain blank when unavailable.
+
+After generating enriched records, tables can be recomputed without GPU/model:
+
+```bash
+PYTHONPATH=src python experiments/multimodal_v2/diagnostics/export_paper_metrics.py \
+  --input outputs/b0_formal_seed42/eval_best_heldout_paper/per_query.jsonl \
+  --mode B0 --split heldout_test_sub --output outputs/b0_paper_table
+```
+
+State conditional RMSE, coverage, split, image deduplication and candidate scope
+in the paper. Results on different datasets/splits are not automatically comparable.

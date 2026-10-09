@@ -22,6 +22,7 @@ from rdq_uav.runtime_paths import apply_runtime_path_overrides, resolve_project_
 from rdq_uav.multimodal_v2.data import build_split_dataset, collate_multimodal_v2, prepare_model_batch
 from rdq_uav.multimodal_v2.training import build_runtime, summarize_3d, synchronize_dino_device, _stage_batch
 from rdq_uav.multimodal_v2.loss import box_iou_aligned
+from rdq_uav.multimodal_v2.paper_metrics import paper_report, write_paper_csv
 
 
 def parse_args():
@@ -35,6 +36,10 @@ def parse_args():
     p.add_argument("--num-workers", type=int, default=2)
     p.add_argument("--limit", type=int)
     p.add_argument("--indices", type=int, nargs="+")
+    p.add_argument("--conditions", type=Path, help="JSON: sequences/samples mapped to day or night")
+    p.add_argument("--skip-coco", action="store_true", help="Explicitly disable standard image-level AP")
+    p.add_argument("--method", help="Method name for paper_metrics.csv")
+    p.add_argument("--bandwidth", default="", help="Measured sensor bandwidth, with units; never inferred")
     return p.parse_args()
 
 
@@ -132,6 +137,18 @@ def main():
         rv_pairs = list(output.diagnostics["association_rv_pairs"])
         rows.append({
             "sequence_id": batch["sequence_id"][0], "sample_id": batch["sample_id"][0],
+            "query_time": float(batch["query_time"][0]),
+            "image_path": batch["left_image_path"][0],
+            "image_time": float(batch["image_time"][0]) if bool(batch["m_V"][0]) else None,
+            "image_source_wh": batch["image_source_wh"][0].tolist() if len(batch["vision_batch_index"]) else None,
+            "gt_xyz": None if gt is None else gt.cpu().tolist(),
+            "pred_xyz": output.xyz_m[after_ids[0]].float().cpu().tolist() if len(after_ids) else None,
+            "before_pred_xyz": output.xyz_m[before_ids[0]].float().cpu().tolist() if len(before_ids) else None,
+            "radar_pred_xyz": radar.xyz_m[rids[0]].float().cpu().tolist() if len(rids) else None,
+            "has_gt2d": bool(targets.has_box[0]),
+            "gt_box_xyxy_px": targets.box_xyxy_px[0].float().cpu().tolist() if bool(targets.has_box[0]) else None,
+            "pred_boxes_xyxy_px": output.box_xyxy_px[output.top2d_indices(1)[0]].float().cpu().tolist(),
+            "pred_box_scores": output.score_2d_after[output.top2d_indices(1)[0]].float().cpu().tolist(),
             "has_gt3d": has_gt3d,
             "radar_distances": rdist, "radar_error": rdist[0] if rdist else None,
             "radar_oracle_error": min(rdist) if rdist else None,
@@ -189,6 +206,16 @@ def main():
     (args.output / "summary.json").write_text(json.dumps(report, indent=2, allow_nan=True))
     with (args.output / "per_query.jsonl").open("w") as handle:
         for row in rows: handle.write(json.dumps(row) + "\n")
+    conditions = json.loads(resolve(args.conditions).read_text()) if args.conditions else None
+    paper = paper_report(rows, args.mode, conditions, args.output / "coco", not args.skip_coco)
+    paper.update(split=args.split, checkpoint=report["checkpoint"], checkpoint_info=checkpoint_info,
+                 evaluation_precision="fp32", coordinate_frame="same XYZ frame as dataset GT",
+                 conditions_file=str(resolve(args.conditions)) if args.conditions else None,
+                 geometry_calibration=str(resolve(cfg["data"]["geometry_calibration"])))
+    (args.output / "paper_metrics.json").write_text(json.dumps(paper, indent=2, allow_nan=False))
+    write_paper_csv(paper, args.output / "paper_metrics.csv", method=args.method or args.mode,
+                    modality={"B0": "LiDAR", "B1": "RGB", "B2": "LiDAR+RGB", "B3": "LiDAR+RGB"}[args.mode],
+                    bandwidth=args.bandwidth)
     print(json.dumps(report, indent=2, allow_nan=True))
 
 

@@ -24,6 +24,7 @@ from .radar_model import LiDARUAVDetector
 from .radar_selector import CandidateSelector
 from rdq_uav.multimodal_v2.geometry import load_left_projection_context
 from .dino_supervision import build_dino_targets, supervised_dino_loss
+from .paper_metrics import localization_metrics
 from .uav_dino import adapt_dino_class_head_to_single_uav, load_coco_pretrained_dino
 from rdq_uav.runtime_paths import ensure_detrex_config_link
 
@@ -301,6 +302,8 @@ def validation_rows(output: Any, targets: Any, sample_ids: list[str],
         else:
             distances, top = [], None
         rows.append({"sample_id": sample_ids[batch], "sequence_id": sequence_ids[batch],
+                     "has_gt3d": True, "gt_xyz": targets.xyz_m[batch].float().cpu().tolist(),
+                     "pred_xyz": output.xyz_m[ids[0]].float().cpu().tolist() if len(ids) else None,
                      "top1_error": top, "distances": distances,
                      "has_output": bool(ids.numel()),
                      "hypothesis_types": output.hypothesis_type[ids].cpu().tolist() if len(ids) else []})
@@ -457,6 +460,12 @@ if L is not None:
 
         def on_validation_epoch_end(self) -> None:
             metrics = summarize_3d(self._val_rows)
+            if self.runtime.initialization["stage"] != "B1":
+                position = localization_metrics(self._val_rows)
+                for key in ("rmse_x_m", "rmse_y_m", "rmse_z_m", "rmse_3d_m"):
+                    if position[key] is not None:
+                        self.log(f"val/{key}", position[key])
+                self.log("val/rmse_output_count", float(position["predicted_queries"]))
             self.log("val/success_1m", float(metrics["success_1m"]), prog_bar=True)
             self.log("val/median_error_m", float(metrics["error_median_m"]), prog_bar=True)
             self.log("val/coverage", float(metrics["coverage"]))
