@@ -56,7 +56,8 @@ Historical E0/E5 diagnostics and earlier reports remain in this directory for re
 Evaluation now retains the existing `summary.json` and adds `paper_metrics.json`,
 `paper_metrics.csv`, and enriched `per_query.jsonl` (GT/predicted XYZ, selected image,
 GT box, all final 2D boxes and scores). Training adds validation XYZ/3D RMSE logs;
-losses, architecture and checkpoint selection are unchanged. Existing checkpoints
+losses and architecture are unchanged; see the live-monitoring section below for
+B1 checkpoint selection. Existing checkpoints
 can be re-evaluated without training again. Old per-query files lack XYZ/boxes and
 must first be regenerated with the updated evaluation entry point.
 
@@ -124,3 +125,57 @@ PYTHONPATH=src python experiments/multimodal_v2/diagnostics/export_paper_metrics
 
 State conditional RMSE, coverage, split, image deduplication and candidate scope
 in the paper. Results on different datasets/splits are not automatically comparable.
+
+## Live training and validation monitoring (2026-10-09)
+
+The progress bar shows stage-specific metrics instead of displaying B1's undefined
+3D errors. Each training batch reports its **actual optimized loss**, learning rate,
+CUDA peak reserved memory (GiB), and native loss components. B0 shows weighted
+classification/regression; B1 shows weighted final classification, L1 box and GIoU,
+plus disjoint CDN (`dn`), auxiliary decoder (`aux`), encoder (`enc`) and other terms.
+These components sum to the existing loss; the loss definition is not changed.
+`loss_avg` averages processed optimization batches weighted by batch size; skipped
+loss batches are flagged and excluded. Peak reserved memory is a lifetime peak,
+not current allocation.
+
+Progress labels:
+
+- `T/rx,ry,rz,r3,Cov,S1,N`: current-epoch **training** cumulative XYZ/3D RMSE,
+  output coverage, Success@1m and GT query count, updated every batch. They use
+  changing model weights/training mode and are diagnostics, not validation results.
+  Missing outputs count in Coverage/Success, not RMSE. The accumulator stores sums
+  of squared errors and counts rather than averaging batch RMSEs. CSV/TensorBoard
+  also receive Success@0.5m/2m and output counts.
+- `V~/...`: provisional results for the already processed part of the **current
+  validation pass**, not full-validation results. Radar updates each batch; COCO
+  AP refreshes every 50 validation batches by default. AP is re-evaluated on the
+  cumulative, deduplicated image set; batch APs are never averaged.
+- `V/...`: completed validation metrics, recomputed at the end of the pass. The
+  complete summary is printed on a separate line and written to existing loggers.
+- `lastV/AP,AP50,AP75,AP_small,AR100`: last completed visual validation results shown
+  during training. They are not recomputed using each training batch. Before the
+  first complete validation no last-validation metric is fabricated.
+
+AP is a fraction (0.3 means 30%). Undefined metrics display `--`; B1 has no XYZ RMSE.
+The COCO scope and image selection are identical to the paper-evaluation section:
+only valid labeled images, final candidate boxes (typically <=10/image).
+
+B1 now selects best.ckpt using **val/AP (IoU 0.50:0.95)** rather than Top1 IoU50;
+val/2d_iou50 remains logged for older-result comparisons. Radar B0 and B2/B3 retain
+val/success_1m selection. Start the new B1 run in a fresh output directory; changing
+an old run's checkpoint monitor during resume does not preserve its model-selection
+history. This patch neither changes model parameters nor trains a visual 3D head.
+
+Default validation is still once per epoch. To obtain more frequent fixed-weight
+validation results, add the following options to your existing train.py command:
+
+```bash
+--val-check-interval 0.25 --ap-every-val-batches 50
+```
+
+`0.25` runs the full configured validation split at approximately each quarter of
+an epoch, increasing validation cost. AP can update every validation batch with
+`--ap-every-val-batches 1`, but repeatedly sorting/evaluating the cumulative image
+set costs CPU time. No extra train-mode forward pass is added for radar diagnostics.
+The current implementation is verified for the project's single-device protocol;
+DDP/global metric aggregation is not implemented or claimed here.

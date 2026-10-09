@@ -24,7 +24,8 @@ from .radar_model import LiDARUAVDetector
 from .radar_selector import CandidateSelector
 from rdq_uav.multimodal_v2.geometry import load_left_projection_context
 from .dino_supervision import build_dino_targets, supervised_dino_loss
-from .paper_metrics import localization_metrics
+from .paper_metrics import localization_metrics, coco_bbox_metrics
+from .monitoring import RunningLocalization, dino_loss_components, visual_metric_rows, localization_display
 from .uav_dino import adapt_dino_class_head_to_single_uav, load_coco_pretrained_dino
 from rdq_uav.runtime_paths import ensure_detrex_config_link
 
@@ -237,16 +238,21 @@ def forward_step(runtime: V2Runtime, batch: Mapping[str, Any], device: torch.dev
         result["loss"] = radar_loss["loss"] if radar_loss is not None else rank["loss"]
         result["has_trainable_loss"] = radar_loss is not None and radar_loss["num_supervised_samples"] > 0
         result["radar_supervised"] = 0 if radar_loss is None else radar_loss["num_supervised_samples"]
+        result["loss_components"] = {} if radar_loss is None else {
+            "cls": radar_loss["loss_cls"].detach(),
+            "reg": (runtime.lidar_loss.reg_weight * radar_loss["loss_reg"]).detach(),
+        }
     elif stage == "B1":
         ids = lidar_batch["vision_batch_index"]
         raw = output.diagnostics["vision_raw"]
-        vision_loss, _, count = supervised_dino_loss(
+        vision_loss, weighted, count = supervised_dino_loss(
             runtime.dino_detector, raw, gt_box_xyxy_source=targets.box_xyxy_px[ids],
             gt_2d_valid=targets.has_box[ids], transforms=transforms,
         ) if raw is not None else (rank["loss"], {}, 0)
         result["loss"] = vision_loss
         result["has_trainable_loss"] = count > 0
         result["vision_supervised"] = count
+        result["loss_components"] = dino_loss_components(weighted)
     if compute_frozen_losses:
         zero = targets.xyz_m.new_zeros(())
         lidar_raw = output.diagnostics["lidar_raw"]
@@ -356,6 +362,18 @@ if L is not None:
             self.save_hyperparameters({"config": self.config})
             self._val_rows: list[dict[str, Any]] = []
             self._val_2d: list[float] = []
+            self._val_visual: list[dict[str, Any]] = []
+            self._train_position = RunningLocalization()
+            self._val_position = RunningLocalization()
+            self.live_progress = {}
+            self._last_visual = {}
+            self._train_loss_sum = 0.0
+            self._train_loss_samples = 0
+            self._in_validation = False
+            self._train_progress_snapshot = {}
+            self._live_every = int(self.config.get("logging", {}).get("ap_every_val_batches", 50))
+            if self._live_every < 1:
+                raise ValueError("ap_every_val_batches must be positive")
 
         def transfer_batch_to_device(self, batch, device, dataloader_idx):
             return batch
@@ -371,6 +389,11 @@ if L is not None:
             self._refresh_external_device()
 
         def on_train_epoch_start(self) -> None:
+            self._train_position = RunningLocalization()
+            self._train_loss_sum = 0.0
+            self._train_loss_samples = 0
+            self.live_progress = dict(self._last_visual)
+            self._in_validation = False
             # B2/B3 keep both pretrained candidate generators frozen and in
             # deterministic eval mode; only candidate interaction/scoring train.
             if self.runtime.initialization["stage"] in {"B2", "B3"}:
@@ -383,12 +406,37 @@ if L is not None:
             self._refresh_external_device()
 
         def training_step(self, batch, batch_idx):
+            if self._in_validation:
+                self.live_progress = dict(self._train_progress_snapshot)
+                self.live_progress.update(self._last_visual)
+                self._in_validation = False
             if not bool(batch["m_R"].any() | batch["m_V"].any()):
                 self.log("train/both_modalities_missing", float(len(batch["m_R"])),
                          on_step=False, on_epoch=True, reduce_fx="sum")
             values = forward_step(self.runtime, batch, self.device, compute_frozen_losses=True)
             loss = values["loss"]
             batch_size = len(batch["m_R"])
+            if self.runtime.initialization["stage"] != "B1":
+                self._train_position.update(validation_rows(
+                    values["output"], values["targets"], batch["sample_id"], batch["sequence_id"]))
+                position = self._train_position.compute()
+                self.live_progress.update(localization_display(position, "T"))
+                self.log_dict({f"train/live_{k}": float(v) for k, v in position.items() if v is not None},
+                              on_step=True, on_epoch=False, batch_size=batch_size)
+            self.live_progress["loss"] = float(loss.detach())
+            component_names = (("cls", "reg") if self.runtime.initialization["stage"] == "B0"
+                               else ("cls", "bbox", "giou", "dn", "aux", "enc", "other")
+                               if self.runtime.initialization["stage"] == "B1" else ())
+            for key in component_names:
+                value = values.get("loss_components", {}).get(key)
+                self.live_progress[key] = float(value) if value is not None else 0.0
+            if self.runtime.initialization["stage"] in {"B2", "B3"}:
+                self.live_progress.update(rank3d=float(values["loss_rank_3d"].detach()),
+                                          rank2d=float(values["loss_rank_2d"].detach()))
+            if self.device.type == "cuda":
+                self.live_progress["mem"] = torch.cuda.max_memory_reserved()/1024**3
+            if self._trainer is not None and self.trainer.optimizers:
+                self.live_progress["lr"] = self.trainer.optimizers[0].param_groups[0]["lr"]
             statistic_names = (
                 "n_gt3d", "n_with_3d_candidate", "n_with_positive_3d",
                 "n_negative_only_3d", "n_no_3d_candidate", "n_3d_loss_queries",
@@ -400,6 +448,7 @@ if L is not None:
                 on_step=False, on_epoch=True, batch_size=batch_size, reduce_fx="sum",
             )
             if not values["has_trainable_loss"]:
+                self.live_progress["skip"] = 1
                 # A batch can legitimately contain only missing GT or no
                 # task-valid candidates. Lightning accepts None as an explicit
                 # skipped optimization batch; it must not abort the epoch.
@@ -410,17 +459,18 @@ if L is not None:
                 raise RuntimeError("reported trainable V2 loss has no gradient path")
             if not bool(torch.isfinite(loss.float())):
                 raise FloatingPointError(f"non-finite V2 loss at batch {batch_idx}")
+            self.live_progress["skip"] = 0
+            self._train_loss_sum += float(loss.detach())*batch_size
+            self._train_loss_samples += batch_size
+            self.live_progress["loss_avg"] = self._train_loss_sum/self._train_loss_samples
+            for key, value in values.get("loss_components", {}).items():
+                self.log(f"train/native_{key}", value, on_step=True, on_epoch=True, batch_size=batch_size)
             self.log_dict({
                 "train/loss": loss, "train/rank_3d": values["loss_rank_3d"],
                 "train/rank_2d": values["loss_rank_2d"],
                 "train/lidar_frozen": values.get("loss_lidar_frozen", loss.new_zeros(())),
                 "train/vision_frozen": values.get("loss_vision_frozen", loss.new_zeros(())),
             }, on_step=True, on_epoch=True, batch_size=batch_size)
-            self.log("loss", loss.detach(), prog_bar=True, logger=False)
-            self.log("rank3d", values["loss_rank_3d"].detach(), prog_bar=True, logger=False)
-            if self.device.type == "cuda":
-                self.log("mem_GiB", torch.cuda.max_memory_reserved() / 1024 ** 3,
-                         prog_bar=True, logger=False)
             return loss
 
         def on_after_backward(self) -> None:
@@ -438,15 +488,49 @@ if L is not None:
                      on_epoch=False, logger=True)
 
         def on_validation_epoch_start(self) -> None:
+            self._train_progress_snapshot = dict(self.live_progress)
+            self._in_validation = True
             self._val_rows.clear()
             self._val_2d.clear()
+            self._val_visual.clear()
+            self._val_position = RunningLocalization()
+            self.live_progress = {}
+            if self.runtime.initialization["stage"] != "B0":
+                self.live_progress.update({f"V/{key}": "--" for key in ("AP", "AP50", "AP75", "AP_small", "AR100")})
+
+        def _refresh_visual_metrics(self, final=False):
+            metrics = coco_bbox_metrics(self._val_visual)
+            prefix = "V" if final else "V~"
+            for key in ("AP", "AP50", "AP75", "AP_small", "AR100"):
+                self.live_progress.pop(f"V/{key}", None)
+                self.live_progress.pop(f"V~/{key}", None)
+                value = metrics[key]
+                self.live_progress[f"{prefix}/{key}"] = "--" if value is None else value
+                if final and value is not None:
+                    self.log(f"val/{key}", value)
+            self.live_progress[f"{prefix}/images"] = metrics["unique_labeled_images"]
+            if final:
+                self.live_progress.pop("V~/images", None)
+                if not self.trainer.sanity_checking:
+                    self._last_visual = {f"lastV/{key}": self.live_progress[f"V/{key}"]
+                                         for key in ("AP", "AP50", "AP75", "AP_small", "AR100")}
+                self.log("val/coco_images", float(metrics["unique_labeled_images"]))
 
         def validation_step(self, batch, batch_idx):
             with torch.autocast(device_type=self.device.type, enabled=False):
                 values = forward_step(self.runtime, batch, self.device, compute_frozen_losses=False)
-            self._val_rows.extend(validation_rows(
+            rows = validation_rows(
                 values["output"], values["targets"], batch["sample_id"], batch["sequence_id"]
-            ))
+            )
+            self._val_rows.extend(rows)
+            if self.runtime.initialization["stage"] != "B1":
+                self._val_position.update(rows)
+                self.live_progress.update(localization_display(self._val_position.compute(), "V~"))
+            if self.runtime.initialization["stage"] != "B0":
+                self._val_visual.extend(visual_metric_rows(values["output"], values["targets"], batch))
+                if (batch_idx+1) % self._live_every == 0:
+                    self._refresh_visual_metrics()
+            self.live_progress["val_loss"] = float(values["loss"].detach())
             from .loss import box_iou_aligned
             for index in range(len(values["targets"].has_box)):
                 if not bool(values["targets"].has_box[index]):
@@ -466,11 +550,22 @@ if L is not None:
                     if position[key] is not None:
                         self.log(f"val/{key}", position[key])
                 self.log("val/rmse_output_count", float(position["predicted_queries"]))
-            self.log("val/success_1m", float(metrics["success_1m"]), prog_bar=True)
-            self.log("val/median_error_m", float(metrics["error_median_m"]), prog_bar=True)
-            self.log("val/coverage", float(metrics["coverage"]))
+                for key in list(self.live_progress):
+                    if key.startswith("V~/") and key.split("/")[1] in {"rx", "ry", "rz", "r3", "Cov", "S1", "N"}:
+                        self.live_progress.pop(key)
+                self.live_progress.update(localization_display(position, "V"))
+                self.log("val/success_1m", float(metrics["success_1m"]))
+                self.log("val/median_error_m", float(metrics["error_median_m"]))
+                self.log("val/coverage", float(metrics["coverage"]))
+            if self.runtime.initialization["stage"] != "B0":
+                self._refresh_visual_metrics(final=True)
             self.log("val/2d_iou50", sum(value >= 0.5 for value in self._val_2d) / len(self._val_2d)
-                     if self._val_2d else 0.0, prog_bar=self.runtime.initialization["stage"] == "B1")
+                     if self._val_2d else 0.0)
+            if not self.trainer.sanity_checking:
+                from tqdm import tqdm
+                text = " ".join(f"{key}={value:.4g}" if isinstance(value, (float, int)) else f"{key}={value}"
+                                for key, value in self.live_progress.items())
+                tqdm.write(f"Validation epoch {self.current_epoch}: {text}")
 
         def configure_optimizers(self):
             cfg = self.config["training"]

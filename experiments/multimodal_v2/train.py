@@ -25,6 +25,7 @@ from rdq_uav.multimodal_v2.data import build_datasets
 from rdq_uav.multimodal_v2.training import (
     MultimodalV2DataModule, MultimodalV2LightningModule, build_runtime,
 )
+from rdq_uav.multimodal_v2.monitoring import StageProgressBar
 
 
 def parse_args():
@@ -45,6 +46,8 @@ def parse_args():
     parser.add_argument("--val-indices", type=int, nargs="+")
     parser.add_argument("--fast-dev-run", action="store_true")
     parser.add_argument("--resume", nargs="?", const="auto")
+    parser.add_argument("--val-check-interval", type=float, help="Validation frequency within each epoch, e.g. 0.25")
+    parser.add_argument("--ap-every-val-batches", type=int, help="Refresh provisional COCO AP every N validation batches")
     return parser.parse_args()
 
 
@@ -62,6 +65,14 @@ def main():
         if argument is not None:
             cfg[section][key] = argument
     stage = str(cfg["experiment"]["stage"])
+    if args.val_check_interval is not None:
+        if not 0 < args.val_check_interval <= 1:
+            raise ValueError("val-check-interval must be in (0,1]")
+        cfg["lightning"]["val_check_interval"] = args.val_check_interval
+    if args.ap_every_val_batches is not None:
+        if args.ap_every_val_batches < 1:
+            raise ValueError("ap-every-val-batches must be positive")
+        cfg["logging"]["ap_every_val_batches"] = args.ap_every_val_batches
     if stage not in {"B0", "B1", "B2", "B3"}:
         raise ValueError(f"unknown training stage {stage}")
     accelerator = args.accelerator or cfg["lightning"]["accelerator"]
@@ -102,10 +113,11 @@ def main():
                         every_n_epochs=1,
                         save_on_exception=True),
         ModelCheckpoint(dirpath=output / "checkpoints", filename="best", save_top_k=1,
-                        monitor="val/2d_iou50" if stage == "B1" else "val/success_1m",
+                        monitor="val/AP" if stage == "B1" else "val/success_1m",
                         mode="max", every_n_epochs=1),
         LearningRateMonitor(logging_interval="step"),
     ]
+    callbacks.append(StageProgressBar(refresh_rate=1))
     logger = False if args.fast_dev_run else [
         CSVLogger(output / "logs", name="csv"), TensorBoardLogger(output / "logs", name="tensorboard")
     ]
@@ -120,6 +132,7 @@ def main():
         num_sanity_val_steps=int(cfg["lightning"]["num_sanity_val_steps"]),
         deterministic=cfg["lightning"]["deterministic"], fast_dev_run=args.fast_dev_run,
         limit_val_batches=0 if args.max_updates is not None else 1.0,
+        val_check_interval=float(cfg["lightning"].get("val_check_interval", 1.0)),
     )
     cfg["runtime"] = {
         "framework": "lightning", "train_queries": len(train_data), "val_queries": len(val_data),
