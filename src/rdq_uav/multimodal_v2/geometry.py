@@ -119,6 +119,7 @@ def project_omni_radtan(
     points_radar: torch.Tensor,
     batch_index: torch.Tensor,
     projection: ProjectionContext,
+    trace_observer=None,
 ) -> tuple[torch.Tensor, torch.Tensor]:
     """Project radar-frame XYZ with Kalibr omni + radtan in pure torch."""
 
@@ -192,6 +193,9 @@ def project_omni_radtan(
         & (v >= 0.0)
         & (v < height)
     )
+    if trace_observer is not None:
+        trace_observer({"radar_xyz": points_radar, "camera_xyz": points_camera,
+                        "uv_source_px": pixels, "valid": valid})
     return pixels, valid
 
 

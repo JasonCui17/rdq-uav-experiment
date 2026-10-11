@@ -32,6 +32,7 @@ class MultimodalV2(nn.Module):
         self.interaction_enabled = bool(interaction_enabled)
         self.vision_reads_radar = bool(vision_reads_radar)
         self.vision_scoring_enabled = bool(vision_scoring_enabled)
+        self.trace_projection_observer = None
 
     @staticmethod
     def _projection_subset(projection: ProjectionContext, indices: torch.Tensor) -> ProjectionContext:
@@ -69,7 +70,9 @@ class MultimodalV2(nn.Module):
         elif images is not None or image_padding_mask is not None:
             raise ValueError("absent vision must not provide preprocessed images")
 
-        projected, projection_valid = project_omni_radtan(radar.xyz_m.float(), radar.batch_index, projection)
+        projected, projection_valid = project_omni_radtan(
+            radar.xyz_m.float(), radar.batch_index, projection,
+            trace_observer=self.trace_projection_observer)
         radar = radar.with_projection(projected, projection_valid)
         radar_evidence = replace(_zero_evidence(radar), projected_xy_px=projected)
         vision_evidence = _zero_evidence(visual)

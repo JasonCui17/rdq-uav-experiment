@@ -5,7 +5,7 @@ import torch
 class CandidateSelector:
     VERSION="stable_topk100_radius1m_v1"
     def __init__(self,cfg):
-        c=cfg["selector"] if "selector" in cfg else cfg; self.raw_topk=int(c["raw_topk"]); self.pre=int(c["pre_nms_topk"]); self.radius=float(c["nms_radius_m"]); self.final=int(c["final_topk"])
+        c=cfg["selector"] if "selector" in cfg else cfg; self.raw_topk=int(c["raw_topk"]); self.pre=int(c["pre_nms_topk"]); self.radius=float(c["nms_radius_m"]); self.final=int(c["final_topk"]); self.trace_observer=None
     @staticmethod
     def _order(scores,ids):
         # stable preserves ascending source id as tie break after its pre-sort.
@@ -23,15 +23,20 @@ class CandidateSelector:
             # then transfer only the <=100 x <=100 boolean matrix once. The
             # greedy stable-order loop remains identical, without one host
             # synchronization and kernel sequence per candidate.
+            suppressed=None; kept_local=[]; evaluated_count=0
             if len(pool):
                 xyz=o["pred_xyz"][pool]
                 suppressed=(torch.linalg.vector_norm(xyz[:,None]-xyz[None,:],dim=2)<=self.radius).cpu()
-                kept_local=[]
                 for local_idx in range(len(pool)):
+                    evaluated_count=local_idx+1
                     if not kept_local or not bool(suppressed[local_idx,kept_local].any()):
                         kept_local.append(local_idx)
                     if len(kept_local)>=self.final: break
                 final=pool[torch.tensor(kept_local,device=pool.device,dtype=torch.long)]
             else: final=pool
+            if self.trace_observer is not None:
+                self.trace_observer(dict(batch_index=b,order=order,raw=raw,pool=pool,
+                    final=final,suppressed=suppressed,kept_local=kept_local,
+                    radius_m=self.radius,final_topk=self.final,evaluated_count=evaluated_count))
             results.append({"raw":self._gather(o,raw),"nms":self._gather(o,final)})
         return results

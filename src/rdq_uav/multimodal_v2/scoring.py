@@ -43,6 +43,7 @@ def associate_geometry_greedy(
     *,
     num_samples: int,
     geometry_gate: dict | None = None,
+    trace_observer=None,
 ) -> AssociationRows:
     """Stable, rejectable one-to-one association in calibrated image geometry."""
     geometry_gate = validate_geometry_gate(geometry_gate)
@@ -53,6 +54,7 @@ def associate_geometry_greedy(
     rv_pairs: list[dict[str, Any]] = []
 
     for batch_idx in range(num_samples):
+        pair_rows = {} if trace_observer is not None else None
         radar_ids = torch.nonzero(
             radar.batch_index == batch_idx, as_tuple=False
         ).flatten()
@@ -82,11 +84,25 @@ def associate_geometry_greedy(
             center_distance = torch.linalg.vector_norm(
                 points[:, None] - center[None], dim=2
             ) / diagonal[None]
+            margins = geometry_gate_margins(radar.xyz_m[radar_ids], geometry_gate)
             feasible = (
                 valid_radar[:, None]
                 & valid_vision[None]
-                & (distance_to_box <= geometry_gate_margins(radar.xyz_m[radar_ids], geometry_gate)[:, None])
+                & (distance_to_box <= margins[:, None])
             )
+            if pair_rows is not None:
+                for local_r, radar_idx in enumerate(radar_ids.tolist()):
+                    for local_v, vision_idx in enumerate(vision_ids.tolist()):
+                        reason = ("invalid_radar_projection" if not bool(valid_radar[local_r]) else
+                                  "invalid_vision_box" if not bool(valid_vision[local_v]) else
+                                  "outside_geometry_gate" if not bool(feasible[local_r, local_v]) else "feasible")
+                        pair_rows[(radar_idx, vision_idx)] = dict(
+                            radar_index=radar_idx, vision_index=vision_idx,
+                            radar_source_index=int(radar.source_index[radar_idx]),
+                            vision_source_index=int(vision.source_index[vision_idx]),
+                            d_box_px=float(distance_to_box[local_r, local_v]),
+                            d_center_normalized=float(center_distance[local_r, local_v]),
+                            margin_px=float(margins[local_r]), reason=reason)
             local_radar, local_vision = torch.nonzero(feasible, as_tuple=True)
             for local_r, local_v in zip(local_radar.tolist(), local_vision.tolist()):
                 radar_idx = int(radar_ids[local_r])
@@ -112,9 +128,11 @@ def associate_geometry_greedy(
         for _, _, _, radar_idx, vision_idx, d_box, d_center in feasible_items:
             if radar_idx in matched_radar or vision_idx in matched_vision:
                 conflicts += 1
+                if pair_rows is not None: pair_rows[(radar_idx, vision_idx)]["reason"] = "association_conflict"
                 continue
             matched_radar.add(radar_idx)
             matched_vision.add(vision_idx)
+            if pair_rows is not None: pair_rows[(radar_idx, vision_idx)]["reason"] = "accepted"
             rows.append(
                 (radar_idx, vision_idx, batch_idx, HYP_RV, True, d_box, d_center)
             )
@@ -153,6 +171,8 @@ def associate_geometry_greedy(
                 "association_conflicts": conflicts,
             }
         )
+        if trace_observer is not None:
+            trace_observer({"batch_index": batch_idx, "pairs": list(pair_rows.values())})
 
     def long(column: int) -> torch.Tensor:
         return torch.tensor(
@@ -189,6 +209,7 @@ class EvidenceScoreHead(nn.Module):
         nn.init.zeros_(self.vision[-1].weight)
         nn.init.zeros_(self.vision[-1].bias)
         self.max_abs_delta_logit = float(max_abs_delta_logit)
+        self.trace_observer = None
 
     def forward(
         self,
@@ -202,18 +223,24 @@ class EvidenceScoreHead(nn.Module):
     ) -> tuple[torch.Tensor, torch.Tensor]:
         head = self.radar if source == "R" else self.vision
         raw = head(torch.cat((own, evidence), dim=1))[:, 0].float()
+        bounded = torch.tanh(raw)
         delta = (
             self.max_abs_delta_logit
-            * torch.tanh(raw)
+            * bounded
             * gate.float()
             * valid.float()
         )
         safe = base.float().clamp(1e-6, 1 - 1e-6)
-        changed = torch.sigmoid(torch.logit(safe) + delta).to(base.dtype)
+        base_logit = torch.logit(safe)
+        changed = torch.sigmoid(base_logit + delta).to(base.dtype)
         # Keep exact forward identity when delta is zero while preserving the
         # derivative through the zero-initialized final layer.
         exact_identity_with_gradient = base + (changed - changed.detach())
         result = torch.where(delta == 0, exact_identity_with_gradient, changed)
+        if self.trace_observer is not None:
+            self.trace_observer(dict(source=source,base=base,own=own,evidence=evidence,
+                valid=valid,gate=gate,raw=raw,tanh=bounded,base_logit=base_logit,
+                delta=delta,result=result))
         return result, delta.to(base.dtype)
 
 
@@ -223,6 +250,7 @@ class CandidateScoring(nn.Module):
         super().__init__()
         self.geometry_gate = validate_geometry_gate(geometry_gate)
         self.score_head = EvidenceScoreHead(max_abs_delta_logit)
+        self.trace_observer = None
 
     def forward(
         self,
@@ -237,7 +265,7 @@ class CandidateScoring(nn.Module):
     ) -> MultimodalOutput:
         association = associate_geometry_greedy(
             radar, vision, num_samples=num_samples,
-            geometry_gate=self.geometry_gate,
+            geometry_gate=self.geometry_gate, trace_observer=self.trace_observer,
         )
         n = len(association.batch_index)
         index_device = association.batch_index.device

@@ -12,7 +12,7 @@ class LearnedSBEVoxelEmbed(nn.Module):
     into VQSA. Relative time is an input feature; no exponential pooling or
     11-dimensional physical descriptor is used in this variant.
     """
-    def __init__(self, dim=128, voxel_size=.5, point_dim=32):
+    def __init__(self, dim=128, voxel_size=.5, point_dim=32, motion_enabled=False):
         super().__init__()
         if point_dim not in (16, 32):
             raise ValueError("learned_sbe.point_dim must be 16 or 32")
@@ -23,8 +23,10 @@ class LearnedSBEVoxelEmbed(nn.Module):
         self.vqsa = VoxelQuerySlotAggregation(self.slot_dim, 16, 2, 0.)
         self.proj = nn.Linear(8 * self.slot_dim + 16, dim)
         self.norm = nn.LayerNorm(dim, eps=1e-5)
+        self.trace_observer = None
+        self.motion_proj = nn.Linear(3, dim, bias=False) if motion_enabled else None
 
-    def forward(self, batch, hierarchy, return_debug=False):
+    def forward(self, batch, hierarchy, return_debug=False, motion_features=None):
         level, inv = hierarchy.levels[0], hierarchy.point_to_l0
         # Keep physical coordinate and count construction FP32 under AMP.
         with torch.autocast(device_type=batch["points"].device.type, enabled=False):
@@ -48,7 +50,21 @@ class LearnedSBEVoxelEmbed(nn.Module):
             counts = count.reshape(-1, 8)
         dynamic = self.vqsa(slots, counts)
         projection_input = torch.cat((slots.flatten(1), dynamic), 1)
-        tokens = self.norm(self.proj(projection_input))
+        base = self.proj(projection_input)
+        if self.motion_proj is not None:
+            if motion_features is None or motion_features.shape != (len(base), 3):
+                raise ValueError("L0 MTCE features must have shape [N0,3]")
+            base = base + self.motion_proj(motion_features.to(base.dtype))
+        tokens = self.norm(base)
+        if self.trace_observer is not None:
+            self.trace_observer({"point_to_slot": slot, "point_to_slot_flat": index,
+                                 "point_mlp_input": inputs, "point_mlp_output": features,
+                                 "slot_features": slots, "slot_count": counts,
+                                 "slot_mean": mean.reshape(-1, 8, self.point_dim),
+                                 "slot_max": maximum.reshape(-1, 8, self.point_dim),
+                                 "empty_slot_mask": counts == 0,
+                                 "dynamic_summary": dynamic, "projection_input": projection_input,
+                                 "l0_tokens": tokens})
         if return_debug:
             return tokens, {"slot_features": slots, "slot_count": counts,
                             "dynamic_summary": dynamic, "projection_input": projection_input}

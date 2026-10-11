@@ -7,6 +7,7 @@ from torch import nn
 from .radar_sbe import SBELiteVoxelEmbed
 from .lidar_legacy import LegacyVoxelEmbed
 from .lidar_learned_sbe import LearnedSBEVoxelEmbed
+from .radar_temporal_centroid import TemporalCentroidFeatures
 
 
 def build_voxel_embedding(model_cfg):
@@ -18,7 +19,8 @@ def build_voxel_embedding(model_cfg):
     if name == 'legacy':
         return LegacyVoxelEmbed(dim, 32, 64, size)
     if name == 'learned_sbe':
-        return LearnedSBEVoxelEmbed(dim, size, int(voxel.get('learned_sbe', {}).get('point_dim', 32)))
+        return LearnedSBEVoxelEmbed(dim, size, int(voxel.get('learned_sbe', {}).get('point_dim', 32)),
+                                   motion_enabled=bool(voxel.get("motion_centroid", {}).get("enabled", False)))
     raise ValueError(f'Unknown voxel embedding: {name}')
 from .radar_geometry import HierarchyBuilder, SparseHierarchy, SparseLevel, decode_residual
 
@@ -35,9 +37,11 @@ class SparseMerge(nn.Module):
     occupancy topology and log raw-point density.  Slot order is shared with
     SBE-Lite: ``4*x + 2*y + z``.
     """
-    def __init__(self,dim=128):
+    def __init__(self,dim=128,motion_enabled=False):
         super().__init__(); self.child_norm=nn.LayerNorm(dim,eps=1e-5); self.child=nn.Sequential(nn.Linear(dim+3,dim),nn.GELU())
         self.occupancy_slots=8; self.parent=nn.Linear(2*dim+1+self.occupancy_slots,dim); self.out_norm=nn.LayerNorm(dim,eps=1e-5)
+        self.trace_observer=None
+        self.motion_proj=nn.Linear(3,dim,bias=False) if motion_enabled else None
 
     @staticmethod
     def octant_occupancy(child_level,parent_level,parent_map):
@@ -64,11 +68,21 @@ class SparseMerge(nn.Module):
         child_count=torch.bincount(parent_map,minlength=n)
         mx=segment_max(u,parent_map,n); mean=segment_sum(u,parent_map,n)/child_count[:,None]
         density=torch.log1p(parent_level.point_count.to(x.dtype))[:,None]
-        return torch.cat((mx,mean,density,occupancy.to(x.dtype)),1),occupancy,slot
+        parent_input=torch.cat((mx,mean,density,occupancy.to(x.dtype)),1)
+        if self.trace_observer is not None:
+            self.trace_observer(dict(child_to_parent=parent_map,child_octant=slot,
+                child_feature=u,child_count=child_count,mean=mean,maximum=mx,
+                occupancy=occupancy,density=density,parent_input=parent_input))
+        return parent_input,occupancy,slot
 
-    def forward(self,x,child_level,parent_level,parent_map):
+    def forward(self,x,child_level,parent_level,parent_map,motion_features=None):
         parent_input,_,_=self.parent_input(x,child_level,parent_level,parent_map)
-        return self.out_norm(self.parent(parent_input))
+        base=self.parent(parent_input)
+        if self.motion_proj is not None:
+            if motion_features is None or motion_features.shape != (len(base),3):
+                raise ValueError("Parent MTCE features must have shape [Np,3]")
+            base=base+self.motion_proj(motion_features.to(base.dtype))
+        return self.out_norm(base)
 
 class PositionEncoding(nn.Module):
     def __init__(self,dim=128): super().__init__(); self.net=nn.Sequential(nn.Linear(3,32),nn.GELU(),nn.Linear(32,dim))
@@ -99,11 +113,19 @@ class SpatialBlock(nn.Module):
         super().__init__(); self.heads=heads; self.head_dim=dim//heads
         self.norm1=nn.LayerNorm(dim,eps=1e-5); self.qkv=nn.Linear(dim,3*dim); self.proj=nn.Linear(dim,dim)
         self.norm2=nn.LayerNorm(dim,eps=1e-5); self.ffn=nn.Sequential(nn.Linear(dim,ffn_dim),nn.GELU(),nn.Linear(ffn_dim,dim))
-    def forward_group(self,x,coords,bias):
-        n=len(x); qkv=self.qkv(self.norm1(x)).reshape(n,3,self.heads,self.head_dim).permute(1,2,0,3); q,k,v=qkv
-        logits=(q@k.transpose(-2,-1))/math.sqrt(self.head_dim)+bias(coords)
-        y=(torch.softmax(logits.float(),-1).to(v.dtype)@v).transpose(0,1).reshape(n,-1)
-        y=x+self.proj(y); return y+self.ffn(self.norm2(y))
+        self.trace_observer=None; self.trace_focus_token=0
+    def forward_group(self,x,coords,bias,group_ids=None):
+        n=len(x); normalized=self.norm1(x); qkv=self.qkv(normalized).reshape(n,3,self.heads,self.head_dim).permute(1,2,0,3); q,k,v=qkv
+        position_bias=bias(coords)
+        logits=(q@k.transpose(-2,-1))/math.sqrt(self.head_dim)+position_bias
+        weights=torch.softmax(logits.float(),-1).to(v.dtype)
+        attended=(weights@v).transpose(0,1).reshape(n,-1)
+        y=x+self.proj(attended); output=y+self.ffn(self.norm2(y))
+        if self.trace_observer is not None and group_ids is not None:
+            self.trace_observer(dict(token_ids=group_ids,coords=coords,input=x,norm1=normalized,
+                q=q,k=k,v=v,position_bias=position_bias,logits=logits,weights=weights,attended=attended,
+                attention_residual=y,output=output,mask=torch.zeros(n,dtype=torch.bool,device=x.device)))
+        return output
     def forward_local_groups(self,x,coords,groups,bias):
         """Evaluate independent local windows in one padded batched kernel."""
         if not groups:return torch.empty_like(x)
@@ -112,16 +134,29 @@ class SpatialBlock(nn.Module):
         starts=torch.repeat_interleave(torch.cumsum(lengths,0)-lengths,lengths);position=torch.arange(len(flat_ids),device=x.device)-starts
         padded=x.new_zeros((len(groups),width,x.shape[1]));padded_coords=coords.new_zeros((len(groups),width,3));valid=torch.zeros((len(groups),width),device=x.device,dtype=torch.bool)
         padded[group_id,position]=x[flat_ids];padded_coords[group_id,position]=coords[flat_ids];valid[group_id,position]=True
-        qkv=self.qkv(self.norm1(padded)).reshape(len(groups),width,3,self.heads,self.head_dim).permute(2,0,3,1,4);q,k,v=qkv
-        logits=(q@k.transpose(-2,-1))/math.sqrt(self.head_dim)+bias(padded_coords)
+        normalized=self.norm1(padded)
+        qkv=self.qkv(normalized).reshape(len(groups),width,3,self.heads,self.head_dim).permute(2,0,3,1,4);q,k,v=qkv
+        position_bias=bias(padded_coords)
+        logits=(q@k.transpose(-2,-1))/math.sqrt(self.head_dim)+position_bias
         logits=logits.masked_fill(~valid[:,None,None,:],-torch.inf)
-        attended=(torch.softmax(logits.float(),-1).to(v.dtype)@v).transpose(1,2).reshape(len(groups),width,-1)
+        weights=torch.softmax(logits.float(),-1).to(v.dtype)
+        attended=(weights@v).transpose(1,2).reshape(len(groups),width,-1)
         y=padded+self.proj(attended);z=y+self.ffn(self.norm2(y));out=torch.empty_like(x);out[flat_ids]=z[group_id,position]
+        if self.trace_observer is not None:
+            target=next((i for i,ids in enumerate(groups) if bool((ids==self.trace_focus_token).any())),0)
+            count=len(groups[target]);sl=slice(0,count)
+            self.trace_observer(dict(token_ids=groups[target],coords=padded_coords[target,sl],
+                input=padded[target,sl],norm1=normalized[target,sl],q=q[target,:,sl],
+                k=k[target,:,sl],v=v[target,:,sl],position_bias=position_bias[target,:,sl,sl],logits=logits[target,:,sl,sl],
+                weights=weights[target,:,sl,sl],attended=attended[target,sl],
+                attention_residual=y[target,sl],output=z[target,sl],mask=~valid[target,sl]))
         return out
     def forward(self,x,coords,groups,bias,batched_local=False):
         if batched_local:return self.forward_local_groups(x,coords,groups,bias)
         out=torch.empty_like(x)
-        for idx in groups: out[idx]=self.forward_group(x[idx],coords[idx],bias)
+        for idx in groups:
+            trace_ids=idx if self.trace_observer is not None and bool((idx==self.trace_focus_token).any()) else None
+            out[idx]=self.forward_group(x[idx],coords[idx],bias,trace_ids)
         return out
 
 def local_groups(level:SparseLevel,window:int,shift:int)->list[torch.Tensor]:
@@ -143,10 +178,13 @@ class SpatialTransformer(nn.Module):
         super().__init__(); self.position=PositionEncoding(dim); self.bias=RelativeBias(heads,relative_range)
         self.blocks=nn.ModuleList([SpatialBlock(dim,heads,ffn_dim) for _ in range(blocks)])
         self.window_size=window_size; self.window_shift=window_shift; self.global_attention=global_attention
+        self.trace_observer=None
     def forward(self,x,level):
         x=x+self.position(level.centers)
         for i,block in enumerate(self.blocks):
             groups=global_groups(level) if self.global_attention else local_groups(level,self.window_size,0 if i%2==0 else self.window_shift)
+            if self.trace_observer is not None:
+                self.trace_observer(i, groups, 0 if self.global_attention or i%2==0 else self.window_shift)
             x=block(x,level.coords,groups,self.bias,batched_local=not self.global_attention)
         return x
 
@@ -154,8 +192,15 @@ class SparseUp(nn.Module):
     def __init__(self,dim=128):
         super().__init__(); self.parent_norm=nn.LayerNorm(dim,eps=1e-5); self.parent=nn.Linear(dim,dim)
         self.norm=nn.LayerNorm(dim,eps=1e-5); self.ffn=nn.Sequential(nn.Linear(dim,dim),nn.GELU(),nn.Linear(dim,dim))
+        self.trace_observer=None
     def forward(self,fine,coarse,parent_map):
-        y=fine+self.parent(self.parent_norm(coarse))[parent_map]; return y+self.ffn(self.norm(y))
+        parent_feature=self.parent(self.parent_norm(coarse))[parent_map]
+        y=fine+parent_feature
+        output=y+self.ffn(self.norm(y))
+        if self.trace_observer is not None:
+            self.trace_observer(dict(skip=fine,coarse=coarse,parent_map=parent_map,
+                                     parent_feature=parent_feature,residual=y,output=output))
+        return output
 
 class CandidateHead(nn.Module):
     def __init__(self,dim=128,hidden=64,residual_scale_m=1.):
@@ -181,12 +226,20 @@ class LiDARUAVDetector(nn.Module):
                 self.voxel_embed = build_voxel_embedding(m)
         else:
             self.voxel_embed = build_voxel_embedding(m)
-        self.merge01=SparseMerge(d); self.merge12=SparseMerge(d)
+        motion_cfg=m["voxel"].get("motion_centroid",{})
+        self.motion_enabled=bool(motion_cfg.get("enabled",False))
+        if self.motion_enabled and (m["voxel"].get("embedding") != "learned_sbe" or d != 128):
+            raise ValueError("MTCE-3 requires Learned-SBE with dim=128")
+        if self.motion_enabled and (motion_cfg.get("injection","pre_norm_residual") != "pre_norm_residual" or not motion_cfg.get("zero_init",True)):
+            raise ValueError("MTCE-3 requires pre_norm_residual and zero_init=true")
+        self.temporal_centroid=TemporalCentroidFeatures(motion_cfg) if self.motion_enabled else None
+        self.merge01=SparseMerge(d,self.motion_enabled); self.merge12=SparseMerge(d,self.motion_enabled)
         common=(d,tr["heads"],tr["ffn_dim"],tr["blocks_per_level"][0],tr["window_size"],tr["window_shift"],tr["relative_range"])
         self.encoder0=SpatialTransformer(*common,global_attention=False)
         self.encoder1=SpatialTransformer(d,tr["heads"],tr["ffn_dim"],tr["blocks_per_level"][1],tr["window_size"],tr["window_shift"],tr["relative_range"],False)
         self.encoder2=SpatialTransformer(d,tr["heads"],tr["ffn_dim"],tr["blocks_per_level"][2],tr["window_size"],tr["window_shift"],tr["relative_range"],True)
         self.up21=SparseUp(d); self.up10=SparseUp(d); self.final_norm=nn.LayerNorm(d,eps=1e-5); self.head=CandidateHead(d,m["head"]["hidden_dim"],m["head"]["residual_scale_m"])
+        self.trace_observer=None
         if matched_init:
             for child in self.children():
                 if child is self.voxel_embed:
@@ -203,17 +256,26 @@ class LiDARUAVDetector(nn.Module):
         for module in self.modules():
             if isinstance(module,RelativeBias): nn.init.zeros_(module.tables)
         nn.init.constant_(self.head.cls[-1].bias,math.log(.01/.99))
+        if self.motion_enabled:
+            for module in (self.voxel_embed,self.merge01,self.merge12):
+                nn.init.zeros_(module.motion_proj.weight)
     @staticmethod
     def _init(module):
-        if isinstance(module,nn.Linear): nn.init.trunc_normal_(module.weight,std=.02,a=-.04,b=.04); nn.init.zeros_(module.bias)
+        if isinstance(module,nn.Linear):
+            nn.init.trunc_normal_(module.weight,std=.02,a=-.04,b=.04)
+            if module.bias is not None: nn.init.zeros_(module.bias)
         elif isinstance(module,nn.LayerNorm): nn.init.ones_(module.weight); nn.init.zeros_(module.bias)
     def spatial_forward(self,batch):
         h=self.hierarchy(batch["points"],batch["point_batch_index"]); l0,l1,l2=h.levels
-        f0=self.encoder0(self.voxel_embed(batch,h),l0); f1=self.encoder1(self.merge01(f0,l0,l1,h.parent_l0_to_l1),l1)
-        f2=self.encoder2(self.merge12(f1,l1,l2,h.parent_l1_to_l2),l2)
+        if self.trace_observer is not None: self.trace_observer(h)
+        motion,temporal_stats=self.temporal_centroid(batch,h) if self.motion_enabled else ([None]*3,[])
+        embedding=self.voxel_embed(batch,h,motion_features=motion[0]) if self.motion_enabled else self.voxel_embed(batch,h)
+        f0=self.encoder0(embedding,l0)
+        f1=self.encoder1(self.merge01(f0,l0,l1,h.parent_l0_to_l1,motion[1]),l1)
+        f2=self.encoder2(self.merge12(f1,l1,l2,h.parent_l1_to_l2,motion[2]),l2)
         d1=self.up21(f1,f2,h.parent_l1_to_l2); q=self.final_norm(self.up10(f0,d1,h.parent_l0_to_l1)); logits,residual,pred=self.head(q,l0.centers)
         return {"logits":logits,"residual_xyz":residual,"pred_xyz":pred,"fine_features":q,"voxel_centers":l0.centers,
-                "source_token_id":torch.arange(len(q),device=q.device),"batch_index":l0.batch_index,"layouts":h,
+                "source_token_id":torch.arange(len(q),device=q.device),"batch_index":l0.batch_index,"layouts":h,"motion_features":motion if self.motion_enabled else None,"temporal_stats":temporal_stats,
                 "aux_stats":{"token_counts":[len(x.coords) for x in h.levels],"num_samples":int(batch["num_samples"]),"attention_backend":"explicit_pytorch_scaled_dot_product_with_additive_axis_bias"}}
 
     def forward(self,batch):

@@ -21,6 +21,7 @@ from torch.utils.data import DataLoader
 
 from .radar_loss import CandidateLoss
 from .radar_model import LiDARUAVDetector
+from .radar_temporal_centroid import load_a2_warmstart, set_radar_train_mode
 from .radar_selector import CandidateSelector
 from rdq_uav.multimodal_v2.geometry import load_left_projection_context
 from .dino_supervision import build_dino_targets, supervised_dino_loss
@@ -65,7 +66,8 @@ def _load_trained_branch(module: nn.Module, checkpoint: Path, prefix: str) -> No
     module.load_state_dict(selected, strict=True)
 
 
-def build_runtime(config: Mapping[str, Any], root: Path, device: torch.device) -> V2Runtime:
+def build_runtime(config: Mapping[str, Any], root: Path, device: torch.device,
+                  *, initialize_from_baselines: bool = True) -> V2Runtime:
     init, model_cfg = config["initialization"], config["model"]
     stage = str(config["experiment"]["stage"])
     if stage not in {"B0", "B1", "B2", "B3"}:
@@ -77,7 +79,10 @@ def build_runtime(config: Mapping[str, Any], root: Path, device: torch.device) -
     if stage != "B1":
         lidar_detector = LiDARUAVDetector(lidar_cfg).to(device)
         lidar = LiDARCandidateModel(lidar_detector, CandidateSelector(candidate_cfg["candidate"]["radar"]))
-        if stage in {"B2", "B3"}:
+        if stage == "B0" and initialize_from_baselines and init.get("b0_warmstart_checkpoint"):
+            report = load_a2_warmstart(lidar_detector, _resolve(root, init["b0_warmstart_checkpoint"]))
+            print("Loaded A2 MTCE warmstart:", report)
+        if stage in {"B2", "B3"} and initialize_from_baselines:
             _load_trained_branch(lidar_detector, _resolve(root, init["b0_checkpoint"]), "network.lidar.detector.")
 
     dino_initialization = None
@@ -104,7 +109,7 @@ def build_runtime(config: Mapping[str, Any], root: Path, device: torch.device) -
             final_topk=int(candidate_cfg["candidate"]["rgb"]["final_topk"]),
             nms_iou=float(candidate_cfg["candidate"]["rgb"]["nms_iou"]),
         )
-        if stage in {"B2", "B3"}:
+        if stage in {"B2", "B3"} and initialize_from_baselines:
             checkpoint = _resolve(root, init["b1_checkpoint"])
             _load_trained_branch(dino_detector, checkpoint, "network.vision.dino.detector.")
             _load_trained_branch(vision.builder.feature_proj, checkpoint, "network.vision.builder.feature_proj.")
@@ -143,7 +148,8 @@ def build_runtime(config: Mapping[str, Any], root: Path, device: torch.device) -
         model, lidar_detector, dino_detector, ranking, CandidateLoss(lidar_cfg),
         projection, camera_path, geometry_path,
         {"stage": stage, "b0_checkpoint": init.get("b0_checkpoint"), "b1_checkpoint": init.get("b1_checkpoint"),
-         "dino_pretrained": dino_initialization},
+         "dino_pretrained": dino_initialization,
+         "radar_train_mode": config.get("training", {}).get("radar_train_mode", "full")},
     )
     freeze_for_stage(runtime, str(config["experiment"]["stage"]))
     return runtime
@@ -154,7 +160,11 @@ def freeze_for_stage(runtime: V2Runtime, stage: str) -> None:
         raise ValueError(f"unknown V2 stage {stage}")
     runtime.model.requires_grad_(False)
     if stage == "B0":
-        runtime.model.lidar.requires_grad_(True)
+        mode = getattr(runtime, "initialization", {}).get("radar_train_mode", "full")
+        if mode == "full":
+            runtime.model.lidar.requires_grad_(True)
+        else:
+            set_radar_train_mode(runtime.lidar_detector, mode)
     if stage == "B1":
         runtime.model.vision.requires_grad_(True)
     if stage in {"B2", "B3"}:
@@ -416,6 +426,12 @@ if L is not None:
             values = forward_step(self.runtime, batch, self.device, compute_frozen_losses=True)
             loss = values["loss"]
             batch_size = len(batch["m_R"])
+            if self.runtime.initialization["stage"] == "B0":
+                raw = getattr(values["output"], "diagnostics", {}).get("lidar_raw")
+                for level, stats in enumerate((raw or {}).get("temporal_stats", [])):
+                    for key, value in stats.items():
+                        self.log(f"train/mtce_l{level}/{key}", value.float(),
+                                 on_step=False, on_epoch=True, reduce_fx="sum", batch_size=1)
             if self.runtime.initialization["stage"] != "B1":
                 self._train_position.update(validation_rows(
                     values["output"], values["targets"], batch["sample_id"], batch["sequence_id"]))
@@ -484,6 +500,12 @@ if L is not None:
                 nonzero = nonzero or bool(torch.count_nonzero(gradient))
             if not finite:
                 raise FloatingPointError("non-finite gradient in Multimodal V2 trainable path")
+            if self.runtime.initialization.get("radar_train_mode") == "motion_only":
+                detector = self.runtime.lidar_detector
+                for level, module in enumerate((detector.voxel_embed, detector.merge01, detector.merge12)):
+                    gradient = module.motion_proj.weight.grad
+                    norm = 0. if gradient is None else float(gradient.detach().float().norm())
+                    self.log(f"train/mtce_l{level}/gradient_norm", norm, on_step=True, on_epoch=False)
             self.log("train/has_nonzero_gradient", float(nonzero), on_step=True,
                      on_epoch=False, logger=True)
 

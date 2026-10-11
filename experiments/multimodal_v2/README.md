@@ -49,6 +49,16 @@ For a focused real-data smoke, training accepts `--train-indices` and `--val-ind
 
 The dataset keeps QueryRecord separate from optional 3D GT. Same-sequence radar history and the nearest historical image use `[t-1s,t]`; relative times are observation minus query. The YOLO label uses the selected image stem. Batch fields pack only observed modalities and retain original sample indices. Missing modalities skip their network path. Radar SBE uses a 0.2s time half-life and its loss supervises every input point. Candidate budgets are pre-NMS 50 and final at most 10 per modality. Interaction and association share the distance-adaptive geometry gate.
 
+## Inspect a Sample in the browser
+
+```bash
+PYTHONPATH=src python experiments/multimodal_v2/diagnostics/view_sample.py \
+  --config experiments/multimodal_v2/configs/b0_standalone.yaml \
+  --host 127.0.0.1 --port 8766
+```
+
+Open `http://127.0.0.1:8766`. On a remote server, forward the port with `ssh -L 8766:127.0.0.1:8766 USER@SERVER` and open the same URL locally. `--data-root PATH` overrides the configured dataset root. The read-only viewer loads actual V2 Dataset Samples across all three splits: select a sequence, move between queries, inspect the full 1-second radar file window, 3D GT, selected left image and same-stem YOLO bbox, or enter an XYZ point in radar coordinates. Large clouds are decimated only for browser drawing (`--max-points`, default 80000); the displayed total point counts come from the complete Sample. It does not load a model or write labels.
+
 Historical E0/E5 diagnostics and earlier reports remain in this directory for reproduction. The former B0/B1 zero-head identity check is now `diagnostics/check_interaction_identity.py`; it is a diagnostic, not either trainable baseline.
 
 ## Paper evaluation: XYZ RMSE and image-level COCO AP

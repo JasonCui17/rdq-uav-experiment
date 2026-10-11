@@ -66,6 +66,7 @@ class CandidateCrossAttention(nn.Module):
         self.visual_radius = int(visual_radius)
         self.lidar_neighbors = int(lidar_neighbors)
         self.geometry_gate = validate_geometry_gate(geometry_gate)
+        self.trace_visual_observer = None
 
     def _visual_memory(self, radar: CandidateBatch, pyramid: Sequence[torch.Tensor],
                        image_masks: torch.Tensor, projection: ProjectionContext, m_R: torch.Tensor, m_V: torch.Tensor):
@@ -95,6 +96,11 @@ class CandidateCrossAttention(nn.Module):
             )[:, 0].bool()
             safe_x, safe_y = x.clamp(0, width - 1), y.clamp(0, height - 1)
             visible = in_bounds & ~resized_mask[radar.batch_index[:, None], safe_y, safe_x]
+            if self.trace_visual_observer is not None:
+                self.trace_visual_observer(level, {"anchor_xy": anchor, "cell_xy": cells,
+                                                   "visible": visible, "padding_mask": resized_mask,
+                                                   "feature_hw": torch.tensor([height, width], device=feature.device),
+                                                   "padded_hw": torch.tensor([padded_height, padded_width], device=feature.device)})
             raw = feature.permute(0, 2, 3, 1)[radar.batch_index[:, None], safe_y, safe_x]
             start = level * per_level
             memory[:, start:start + per_level] = feature_projection(raw)
