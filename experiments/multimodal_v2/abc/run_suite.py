@@ -54,7 +54,7 @@ def sha256(path):
 
 def main():
     p = argparse.ArgumentParser()
-    p.add_argument('--action', choices=('prepare', 'gate', 'train', 'eval', 'all'), required=True)
+    p.add_argument('--action', choices=('prepare', 'gate', 'benchmark', 'train', 'eval', 'all'), required=True)
     p.add_argument('--checkpoint', type=Path, help='A2 Lightning warmstart, required for prepare')
     p.add_argument('--data-root', type=Path)
     p.add_argument('--base-config', type=Path, default=ROOT/'experiments/multimodal_v2/configs/b0_a2_learned_sbe32.yaml')
@@ -62,9 +62,14 @@ def main():
     p.add_argument('--variants', nargs='+', choices=VARIANTS, default=list(VARIANTS))
     p.add_argument('--seeds', type=int, nargs='+', default=[42])
     p.add_argument('--epochs', type=int, default=12)
+    p.add_argument('--train-mode', choices=('full', 'heads', 'lora'), default='full', help='Used during prepare only')
+    p.add_argument('--lora-rank', type=int, default=8)
+    p.add_argument('--lora-alpha', type=float, default=16.)
+    p.add_argument('--efficiency', action='store_true')
     p.add_argument('--device', default='cuda:0')
     p.add_argument('--num-workers', type=int, default=2)
     p.add_argument('--resume', action='store_true')
+    p.add_argument('--benchmark-updates', type=int, default=200)
     p.add_argument('--split', choices=('validation_sub', 'heldout_test_sub'), default='validation_sub')
     args = p.parse_args()
     root = args.output.resolve()
@@ -79,7 +84,7 @@ def main():
         if not radar_path.is_absolute(): radar_path = ROOT/radar_path
         radar = yaml.safe_load(radar_path.read_text())
         # Reject an already modified starting design; do not hide combined changes.
-        if radar['model'].get('query_decoder', {}).get('enabled') or radar['model'].get('quality_head', {}).get('enabled') or radar['model']['voxel'].get('motion_centroid', {}).get('enabled') or radar['model'].get('head_metadata') or radar['loss'].get('ablation', {}).get('enabled'):
+        if radar['model'].get('lora', {}).get('enabled') or radar['model'].get('query_decoder', {}).get('enabled') or radar['model'].get('quality_head', {}).get('enabled') or radar['model']['voxel'].get('motion_centroid', {}).get('enabled') or radar['model'].get('head_metadata') or radar['loss'].get('ablation', {}).get('enabled'):
             raise ValueError('use an unmodified A2 base for this suite')
         if base['experiment']['stage'] != 'B0': raise ValueError('ABC suite requires a B0 base')
         root.mkdir(parents=True, exist_ok=True)
@@ -87,7 +92,8 @@ def main():
         base['initialization'].pop('b0_warmstart_checkpoint', None)
         base['initialization']['abc_warmstart_checkpoint'] = str(args.checkpoint.resolve())
         base['training']['epochs'] = args.epochs
-        base['training']['radar_train_mode'] = 'full'
+        base['training']['radar_train_mode'] = args.train_mode
+        base['efficiency'] = {'enabled': args.efficiency}
         base['data']['num_workers'] = args.num_workers
         # Primary endpoint is fixed before looking at any results.
         base['checkpoint'] = {'monitor': 'val/success_1m', 'mode': 'max', 'filename': 'best'}
@@ -98,6 +104,10 @@ def main():
                 folder = root/f'{name}_seed{seed}'
                 folder.mkdir()
                 rcfg = ablation_config(radar, name)
+                if args.train_mode == 'lora':
+                    rcfg['model']['lora'] = {'enabled': True, 'rank': args.lora_rank,
+                                             'alpha': args.lora_alpha, 'dropout': 0., 'seed': seed,
+                                             'targets': [r'encoder[12]\.blocks\.\d+\.(qkv|proj)']}
                 rpath = folder/'radar.yaml'; rpath.write_text(yaml.safe_dump(rcfg, sort_keys=False))
                 cfg = copy.deepcopy(base)
                 cfg['initialization']['lidar_config'] = str(rpath)
@@ -115,14 +125,14 @@ def main():
                     'warmstart': str(args.checkpoint.resolve()), 'warmstart_sha256': sha256(args.checkpoint),
                     'split_file': str(split), 'split_sha256': sha256(split),
                     'primary_metric': 'success_1m', 'checkpoint_selection': base['checkpoint'],
-                    'epochs': args.epochs, 'runs': runs}
+                    'epochs': args.epochs, 'train_mode': args.train_mode, 'runs': runs}
         manifest_path.write_text(json.dumps(manifest, indent=2))
     manifest = json.loads(manifest_path.read_text())
     if sha256(Path(manifest['split_file'])) != manifest['split_sha256']:
         raise ValueError('split changed since suite preparation')
     for path, expected in manifest.get('dependencies_sha256', {}).items():
         if sha256(Path(path)) != expected: raise ValueError(f'dependency changed: {path}')
-    if args.action in ('gate', 'train', 'all') and sha256(Path(manifest['warmstart'])) != manifest['warmstart_sha256']:
+    if args.action in ('gate', 'benchmark', 'train', 'all') and sha256(Path(manifest['warmstart'])) != manifest['warmstart_sha256']:
         raise ValueError('warmstart checkpoint changed')
     for run in manifest['runs']:
         if run['name'] not in args.variants or run['seed'] not in args.seeds: continue
@@ -137,6 +147,9 @@ def main():
         commands = []
         if args.action in ('gate', 'all'):
             commands.append(train + ['--output', str(folder/'gate'), '--max-updates','2','--train-limit','32','--val-limit','32'])
+        if args.action == 'benchmark':
+            if args.benchmark_updates < 2: raise ValueError('benchmark-updates must be >=2')
+            commands.append(train + ['--output', str(folder/'benchmark'), '--max-updates', str(args.benchmark_updates)])
         if args.action in ('train', 'all'):
             cmd = train + ['--output', str(folder/'train')]
             if args.resume: cmd += ['--resume','auto']

@@ -167,6 +167,11 @@ def main():
             early_stop.best_score = torch.tensor(args.early_stopping_baseline)
         callbacks.append(early_stop)
 
+    if cfg.get("efficiency", {}).get("enabled", False):
+        if stage != "B0":
+            raise ValueError("efficiency pilot currently measures B0 only")
+        from rdq_uav.multimodal_v2.efficiency import EfficiencyRecorder
+        callbacks.append(EfficiencyRecorder(output / "efficiency"))
     callbacks.append(StageProgressBar(refresh_rate=1))
     logger = False if args.fast_dev_run else [
         CSVLogger(output / "logs", name="csv"), TensorBoardLogger(output / "logs", name="tensorboard")

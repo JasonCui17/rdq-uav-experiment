@@ -11,7 +11,7 @@ def load_experiment_warmstart(detector, checkpoint):
     if not selected:
         raise ValueError('ABC warmstart requires network.lidar.detector.* in an A2 Lightning checkpoint')
     own = detector.state_dict()
-    allowed = {k for k in own if k.startswith(('quality_head.', 'query_decoder.', 'metadata_proj.'))}
+    allowed = {k for k in own if k.startswith(('quality_head.', 'query_decoder.', 'metadata_proj.')) or k.endswith(('.lora_A', '.lora_B'))}
     missing, extra = set(own) - set(selected), set(selected) - set(own)
     mismatch = [k for k in set(own) & set(selected) if own[k].shape != selected[k].shape]
     if missing != allowed or extra or mismatch:

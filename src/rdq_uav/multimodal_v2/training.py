@@ -168,10 +168,15 @@ def freeze_for_stage(runtime: V2Runtime, stage: str) -> None:
     if stage == "B0":
         mode = getattr(runtime, "initialization", {}).get("radar_train_mode", "full")
         if mode == "full":
+            if getattr(getattr(runtime, "lidar_detector", None), "lora_targets", []):
+                raise ValueError("LoRA modules require training.radar_train_mode=lora")
             runtime.model.lidar.requires_grad_(True)
             detector = getattr(runtime, "lidar_detector", None)
             if getattr(detector, "query_decoder", None) is not None:
                 detector.head.requires_grad_(False)
+        elif mode in {"heads", "lora"}:
+            from .radar_lora import set_efficient_train_mode
+            set_efficient_train_mode(runtime.lidar_detector, mode)
         else:
             set_radar_train_mode(runtime.lidar_detector, mode)
     if stage == "B1":

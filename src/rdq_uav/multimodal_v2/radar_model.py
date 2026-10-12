@@ -274,6 +274,11 @@ class LiDARUAVDetector(nn.Module):
             self.query_decoder = RadarQueryDecoder(d, query_cfg)
             if self.quality_head is not None:
                 raise ValueError("query decoder and dense quality head are separate experiments")
+        self.lora_targets = []
+        lora_cfg = m.get("lora", {})
+        if lora_cfg.get("enabled", False):
+            from .radar_lora import inject_lora
+            self.lora_targets = inject_lora(self, lora_cfg)
     @staticmethod
     def _init(module):
         if isinstance(module,nn.Linear):
