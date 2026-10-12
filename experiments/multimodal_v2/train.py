@@ -50,6 +50,8 @@ def parse_args():
     parser.add_argument("--ap-every-val-batches", type=int, help="Refresh provisional COCO AP every N validation batches")
 
     parser.add_argument("--early-stopping-patience", type=int)
+
+    parser.add_argument("--early-stopping-baseline", type=float)
     return parser.parse_args()
 
 
@@ -114,9 +116,9 @@ def main():
         ModelCheckpoint(dirpath=output / "checkpoints", save_last=True, save_top_k=0,
                         every_n_epochs=1,
                         save_on_exception=True),
-        ModelCheckpoint(dirpath=output / "checkpoints", filename="best", save_top_k=1,
-                        monitor="val/AP" if stage == "B1" else "val/success_1m",
-                        mode="max", every_n_epochs=1),
+        ModelCheckpoint(dirpath=output / "checkpoints", filename="best_rmse" if stage == "B0" else "best", save_top_k=1,
+                        monitor="val/rmse_3d_m" if stage == "B0" else ("val/AP" if stage == "B1" else "val/success_1m"),
+                        mode="min" if stage == "B0" else "max", every_n_epochs=1),
         LearningRateMonitor(logging_interval="step"),
     ]
 
@@ -128,10 +130,10 @@ def main():
         if args.max_updates is not None:
             raise ValueError("early stopping requires validation; remove --max-updates")
 
-        monitor = "val/AP" if stage == "B1" else "val/success_1m"
+        monitor = "val/rmse_3d_m" if stage == "B0" else ("val/AP" if stage == "B1" else "val/success_1m")
         early_stop = EarlyStopping(
             monitor=monitor,
-            mode="max",
+            mode="min" if stage == "B0" else "max",
             patience=args.early_stopping_patience,
             min_delta=0.0,
             check_on_train_epoch_end=False,
@@ -151,8 +153,14 @@ def main():
             ]
             if scores:
                 early_stop.best_score = torch.tensor(
-                    max(float(score) for score in scores)
+                    (min if stage == "B0" else max)(float(score) for score in scores)
                 )
+
+        if args.early_stopping_baseline is not None:
+            import math
+            if not math.isfinite(args.early_stopping_baseline):
+                raise ValueError("early-stopping-baseline must be finite")
+            early_stop.best_score = torch.tensor(args.early_stopping_baseline)
         callbacks.append(early_stop)
 
     callbacks.append(StageProgressBar(refresh_rate=1))
