@@ -48,6 +48,8 @@ def parse_args():
     parser.add_argument("--resume", nargs="?", const="auto")
     parser.add_argument("--val-check-interval", type=float, help="Validation frequency within each epoch, e.g. 0.25")
     parser.add_argument("--ap-every-val-batches", type=int, help="Refresh provisional COCO AP every N validation batches")
+
+    parser.add_argument("--early-stopping-patience", type=int)
     return parser.parse_args()
 
 
@@ -117,6 +119,42 @@ def main():
                         mode="max", every_n_epochs=1),
         LearningRateMonitor(logging_interval="step"),
     ]
+
+    if args.early_stopping_patience is not None and not args.fast_dev_run:
+        from lightning.pytorch.callbacks import EarlyStopping
+
+        if args.early_stopping_patience < 1:
+            raise ValueError("early-stopping-patience must be positive")
+        if args.max_updates is not None:
+            raise ValueError("early stopping requires validation; remove --max-updates")
+
+        monitor = "val/AP" if stage == "B1" else "val/success_1m"
+        early_stop = EarlyStopping(
+            monitor=monitor,
+            mode="max",
+            patience=args.early_stopping_patience,
+            min_delta=0.0,
+            check_on_train_epoch_end=False,
+            verbose=True,
+        )
+
+        # 首次添加早停时，从恢复 checkpoint 中读取已有最佳成绩。
+        # 如果 checkpoint 已有 EarlyStopping 状态，Lightning 会恢复该状态。
+        if ckpt is not None:
+            previous = torch.load(ckpt, map_location="cpu", weights_only=False)
+            scores = [
+                state["best_model_score"]
+                for key, state in previous.get("callbacks", {}).items()
+                if "ModelCheckpoint" in str(key)
+                and monitor in str(key)
+                and state.get("best_model_score") is not None
+            ]
+            if scores:
+                early_stop.best_score = torch.tensor(
+                    max(float(score) for score in scores)
+                )
+        callbacks.append(early_stop)
+
     callbacks.append(StageProgressBar(refresh_rate=1))
     logger = False if args.fast_dev_run else [
         CSVLogger(output / "logs", name="csv"), TensorBoardLogger(output / "logs", name="tensorboard")
