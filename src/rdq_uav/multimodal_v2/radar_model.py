@@ -259,6 +259,21 @@ class LiDARUAVDetector(nn.Module):
         if self.motion_enabled:
             for module in (self.voxel_embed,self.merge01,self.merge12):
                 nn.init.zeros_(module.motion_proj.weight)
+        # Opt-in heads are constructed AFTER baseline initialization so adding
+        # them does not perturb the original backbone's RNG sequence.
+        quality_cfg = m.get("quality_head", {})
+        self.quality_head = (nn.Sequential(nn.LayerNorm(d), nn.Linear(d, 64), nn.GELU(), nn.Linear(64, 1))
+                             if quality_cfg.get("enabled", False) else None)
+        self.metadata_proj = nn.Linear(2, d, bias=False) if m.get("head_metadata", False) else None
+        if self.metadata_proj is not None:
+            nn.init.zeros_(self.metadata_proj.weight)
+        query_cfg = m.get("query_decoder", {})
+        self.query_decoder = None
+        if query_cfg.get("enabled", False):
+            from .radar_query_decoder import RadarQueryDecoder
+            self.query_decoder = RadarQueryDecoder(d, query_cfg)
+            if self.quality_head is not None:
+                raise ValueError("query decoder and dense quality head are separate experiments")
     @staticmethod
     def _init(module):
         if isinstance(module,nn.Linear):
@@ -273,14 +288,24 @@ class LiDARUAVDetector(nn.Module):
         f0=self.encoder0(embedding,l0)
         f1=self.encoder1(self.merge01(f0,l0,l1,h.parent_l0_to_l1,motion[1]),l1)
         f2=self.encoder2(self.merge12(f1,l1,l2,h.parent_l1_to_l2,motion[2]),l2)
-        d1=self.up21(f1,f2,h.parent_l1_to_l2); q=self.final_norm(self.up10(f0,d1,h.parent_l0_to_l1)); logits,residual,pred=self.head(q,l0.centers)
-        return {"logits":logits,"residual_xyz":residual,"pred_xyz":pred,"fine_features":q,"voxel_centers":l0.centers,
+        d1=self.up21(f1,f2,h.parent_l1_to_l2); q=self.final_norm(self.up10(f0,d1,h.parent_l0_to_l1))
+        if self.metadata_proj is not None:
+            metadata=torch.stack((torch.log1p(torch.linalg.vector_norm(l0.centers.float(),dim=1)),
+                                  torch.log1p(l0.point_count.float())),1)
+            q=q+self.metadata_proj(metadata.to(q.dtype))
+        logits,residual,pred=self.head(q,l0.centers)
+        output = {"logits":logits,"residual_xyz":residual,"pred_xyz":pred,"fine_features":q,"voxel_centers":l0.centers,
                 "source_token_id":torch.arange(len(q),device=q.device),"batch_index":l0.batch_index,"layouts":h,"motion_features":motion if self.motion_enabled else None,"temporal_stats":temporal_stats,
                 "aux_stats":{"token_counts":[len(x.coords) for x in h.levels],"num_samples":int(batch["num_samples"]),"attention_backend":"explicit_pytorch_scaled_dot_product_with_additive_axis_bias"}}
 
+        if self.quality_head is not None:
+            output["quality_logits"] = self.quality_head(q).squeeze(-1)
+        return output
+
     def forward(self,batch):
-        """Packed query points -> dense spatial candidate fields."""
-        return self.spatial_forward(batch)
+        """Packed query points -> dense candidates or opt-in set predictions."""
+        dense = self.spatial_forward(batch)
+        return self.query_decoder(dense) if self.query_decoder is not None else dense
 
     def load_pre_sbe_weights(self,state_dict):
         """Load all downstream spatial weights; skip only legacy voxel_embed.*.

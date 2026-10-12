@@ -10,15 +10,28 @@ class CandidateSelector:
     def _order(scores,ids):
         # stable preserves ascending source id as tie break after its pre-sort.
         base=torch.argsort(ids,stable=True); return base[torch.argsort(scores[base],descending=True,stable=True)]
+    @staticmethod
+    def ranking_scores(o):
+        score = torch.sigmoid(o["logits"].float())
+        if "quality_logits" in o:
+            score = score * torch.sigmoid(o["quality_logits"].float())
+        return score
+
     def _gather(self,o,idx):
-        return {"xyz":o["pred_xyz"][idx],"score":torch.sigmoid(o["logits"][idx].float()),"feature":o["fine_features"][idx],"source_token_id":o["source_token_id"][idx]}
+        return {"xyz":o["pred_xyz"][idx],"score":self.ranking_scores(o)[idx],"feature":o["fine_features"][idx],"source_token_id":o["source_token_id"][idx]}
     def __call__(self,o):
         results=[]
         for b in range(int(o.get("aux_stats",{}).get("num_samples",int(o["batch_index"].max())+1 if len(o["batch_index"]) else 1))):
             ids=torch.nonzero(o["batch_index"]==b).flatten()
-            rank_logits=o["logits"][ids].float()
+            # Baseline keeps logit order exactly (no sigmoid saturation ties).
+            rank_logits=(self.ranking_scores(o)[ids] if "quality_logits" in o else o["logits"][ids].float())
             order=ids[self._order(rank_logits,o["source_token_id"][ids])]
             raw=order[:self.raw_topk]; pool=order[:self.pre]
+            if o.get("prediction_kind") == "query":
+                # One-to-one set predictions use no radius NMS. All K queries
+                # participate before the final reporting cap.
+                results.append({"raw":self._gather(o,raw), "nms":self._gather(o,order[:self.final])})
+                continue
             # Compute the exact legacy radius predicate in one device region,
             # then transfer only the <=100 x <=100 boolean matrix once. The
             # greedy stable-order loop remains identical, without one host

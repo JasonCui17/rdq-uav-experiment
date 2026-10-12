@@ -9,6 +9,7 @@ class CandidateLoss(nn.Module):
     def __init__(self,cfg):
         super().__init__(); c=cfg["loss"] if "loss" in cfg else cfg
         self.alpha=float(c["focal_alpha"]); self.gamma=float(c["focal_gamma"]); self.beta=float(c["smooth_l1_beta"]); self.reg_weight=float(c["reg_weight"])
+        self.ablation = dict(c.get("ablation", {}))
     def labels(self,outputs,batch):
         if 'target_xyz' not in batch:
             n=len(outputs['logits']);mask=torch.zeros(n,dtype=torch.bool,device=outputs['logits'].device)
@@ -22,6 +23,12 @@ class CandidateLoss(nn.Module):
         valid=spatial_valid[outputs['batch_index']]
         return positive&valid,ignore&valid,negative&valid,encode_residual(gt,outputs["voxel_centers"],1.0)
     def forward(self,outputs,batch):
+        if outputs.get("prediction_kind") == "query":
+            from .radar_experiment_loss import query_loss
+            return query_loss(self, outputs, batch)
+        if self.ablation.get("enabled", False):
+            from .radar_experiment_loss import dense_loss
+            return dense_loss(self, outputs, batch)
         pos,ignore,neg,target=self.labels(outputs,batch);spatial_n=int(batch['num_samples'])
         spatial_valid=batch['target_valid'];zero=outputs["logits"].sum()*0
         sample_total=outputs['logits'].new_zeros(spatial_n,dtype=torch.float32)

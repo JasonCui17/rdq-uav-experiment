@@ -79,6 +79,12 @@ def build_runtime(config: Mapping[str, Any], root: Path, device: torch.device,
     if stage != "B1":
         lidar_detector = LiDARUAVDetector(lidar_cfg).to(device)
         lidar = LiDARCandidateModel(lidar_detector, CandidateSelector(candidate_cfg["candidate"]["radar"]))
+        if stage == "B0" and initialize_from_baselines and init.get("abc_warmstart_checkpoint"):
+            if init.get("b0_warmstart_checkpoint"):
+                raise ValueError("Choose ABC or MTCE warmstart, not both")
+            from .radar_experiment_init import load_experiment_warmstart
+            report = load_experiment_warmstart(lidar_detector, _resolve(root, init["abc_warmstart_checkpoint"]))
+            print("Loaded ABC A2 warmstart:", report)
         if stage == "B0" and initialize_from_baselines and init.get("b0_warmstart_checkpoint"):
             report = load_a2_warmstart(lidar_detector, _resolve(root, init["b0_warmstart_checkpoint"]))
             print("Loaded A2 MTCE warmstart:", report)
@@ -163,6 +169,9 @@ def freeze_for_stage(runtime: V2Runtime, stage: str) -> None:
         mode = getattr(runtime, "initialization", {}).get("radar_train_mode", "full")
         if mode == "full":
             runtime.model.lidar.requires_grad_(True)
+            detector = getattr(runtime, "lidar_detector", None)
+            if getattr(detector, "query_decoder", None) is not None:
+                detector.head.requires_grad_(False)
         else:
             set_radar_train_mode(runtime.lidar_detector, mode)
     if stage == "B1":
@@ -251,6 +260,11 @@ def forward_step(runtime: V2Runtime, batch: Mapping[str, Any], device: torch.dev
         result["loss_components"] = {} if radar_loss is None else {
             "cls": radar_loss["loss_cls"].detach(),
             "reg": (runtime.lidar_loss.reg_weight * radar_loss["loss_reg"]).detach(),
+            "quality": (float(runtime.lidar_loss.ablation.get("quality_loss_weight", 1.)) *
+                        radar_loss.get("loss_quality", radar_loss["loss"] * 0)).detach(),
+        }
+        result["radar_loss_stats"] = {} if radar_loss is None else {
+            key: value for key, value in radar_loss.items() if key.startswith("num_")
         }
     elif stage == "B1":
         ids = lidar_batch["vision_batch_index"]
@@ -479,6 +493,9 @@ if L is not None:
             self._train_loss_sum += float(loss.detach())*batch_size
             self._train_loss_samples += batch_size
             self.live_progress["loss_avg"] = self._train_loss_sum/self._train_loss_samples
+            for key, value in values.get("radar_loss_stats", {}).items():
+                self.log(f"train/{key}", float(value), on_step=False, on_epoch=True,
+                         reduce_fx="sum", batch_size=1)
             for key, value in values.get("loss_components", {}).items():
                 self.log(f"train/native_{key}", value, on_step=True, on_epoch=True, batch_size=batch_size)
             self.log_dict({

@@ -103,7 +103,7 @@ def main():
         val_data = Subset(val_data, args.val_indices)
     if args.train_limit is not None: train_data = Subset(train_data, range(min(args.train_limit, len(train_data))))
     if args.val_limit is not None: val_data = Subset(val_data, range(min(args.val_limit, len(val_data))))
-    runtime = build_runtime(cfg, ROOT, torch.device("cpu"))
+    runtime = build_runtime(cfg, ROOT, torch.device("cpu"), initialize_from_baselines=ckpt is None)
     module = MultimodalV2LightningModule(runtime, cfg)
     data = MultimodalV2DataModule(
         train_data, val_data, batch_size=int(cfg["training"]["batch_size"]),
@@ -112,13 +112,18 @@ def main():
         seed=int(cfg["experiment"]["seed"]),
     )
     output.mkdir(parents=True, exist_ok=True)
+    checkpoint_cfg = cfg.get("checkpoint", {})
+    monitor = checkpoint_cfg.get("monitor", "val/rmse_3d_m" if stage == "B0" else ("val/AP" if stage == "B1" else "val/success_1m"))
+    monitor_mode = checkpoint_cfg.get("mode", "min" if stage == "B0" else "max")
+    filename = checkpoint_cfg.get("filename", "best_rmse" if stage == "B0" else "best")
+    if monitor_mode not in {"min", "max"}:
+        raise ValueError("checkpoint.mode must be min or max")
     callbacks = [] if args.fast_dev_run else [
         ModelCheckpoint(dirpath=output / "checkpoints", save_last=True, save_top_k=0,
                         every_n_epochs=1,
                         save_on_exception=True),
-        ModelCheckpoint(dirpath=output / "checkpoints", filename="best_rmse" if stage == "B0" else "best", save_top_k=1,
-                        monitor="val/rmse_3d_m" if stage == "B0" else ("val/AP" if stage == "B1" else "val/success_1m"),
-                        mode="min" if stage == "B0" else "max", every_n_epochs=1),
+        ModelCheckpoint(dirpath=output / "checkpoints", filename=filename, save_top_k=1,
+                        monitor=monitor, mode=monitor_mode, every_n_epochs=1),
         LearningRateMonitor(logging_interval="step"),
     ]
 
@@ -130,10 +135,9 @@ def main():
         if args.max_updates is not None:
             raise ValueError("early stopping requires validation; remove --max-updates")
 
-        monitor = "val/rmse_3d_m" if stage == "B0" else ("val/AP" if stage == "B1" else "val/success_1m")
         early_stop = EarlyStopping(
             monitor=monitor,
-            mode="min" if stage == "B0" else "max",
+            mode=monitor_mode,
             patience=args.early_stopping_patience,
             min_delta=0.0,
             check_on_train_epoch_end=False,
@@ -153,7 +157,7 @@ def main():
             ]
             if scores:
                 early_stop.best_score = torch.tensor(
-                    (min if stage == "B0" else max)(float(score) for score in scores)
+                    (min if monitor_mode == "min" else max)(float(score) for score in scores)
                 )
 
         if args.early_stopping_baseline is not None:

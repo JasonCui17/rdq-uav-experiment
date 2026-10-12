@@ -83,7 +83,7 @@ def main():
     if args.limit is not None: dataset = Subset(dataset, range(min(args.limit, len(dataset))))
     loader = DataLoader(dataset, batch_size=1, shuffle=False, num_workers=args.num_workers,
                         collate_fn=collate_multimodal_v2)
-    runtime = build_runtime(cfg, ROOT, torch.device("cpu"))
+    runtime = build_runtime(cfg, ROOT, torch.device("cpu"), initialize_from_baselines=False)
     checkpoint_info = None
     if args.checkpoint:
         checkpoint_info = load_network(runtime.model, resolve(args.checkpoint))
@@ -135,7 +135,22 @@ def main():
         if len(after_ids): top_type_counts[int(output.hypothesis_type[after_ids[0]])] += 1
         association = output.diagnostics["association_per_query"][0]
         rv_pairs = list(output.diagnostics["association_rv_pairs"])
+        raw_diagnostics = {}
+        raw = output.diagnostics.get("lidar_raw")
+        if has_gt3d and raw is not None and len(raw["logits"]):
+            from rdq_uav.multimodal_v2.radar_selector import CandidateSelector
+            raw_scores = (CandidateSelector.ranking_scores(raw) if "quality_logits" in raw else raw["logits"].float())
+            order = torch.argsort(raw_scores, descending=True, stable=True)
+            distance = torch.linalg.vector_norm(raw["pred_xyz"].float() - gt, dim=1)
+            pre = runtime.model.lidar.builder.selector.pre
+            raw_diagnostics = {
+                "prediction_kind": raw.get("prediction_kind", "dense"),
+                "raw_candidate_count": len(distance),
+                "raw_oracle_error_m": float(distance.min()),
+                "preselection_oracle_error_m": float(distance[order[:pre]].min()),
+            }
         rows.append({
+            **raw_diagnostics,
             "sequence_id": batch["sequence_id"][0], "sample_id": batch["sample_id"][0],
             "query_time": float(batch["query_time"][0]),
             "image_path": batch["left_image_path"][0],
