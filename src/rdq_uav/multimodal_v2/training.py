@@ -34,6 +34,8 @@ from .data import prepare_model_batch
 from .interaction import CandidateCrossAttention
 from .lidar import LiDARCandidateModel
 from .loss import CandidateRankingLoss
+from .pair_fusion import CandidatePairFusion
+from .pair_loss import JointPairLoss
 from .model import MultimodalV2
 from .scoring import CandidateScoring
 from .vision import VisionCandidateModel
@@ -44,7 +46,7 @@ class V2Runtime:
     model: MultimodalV2
     lidar_detector: nn.Module
     dino_detector: nn.Module
-    ranking_loss: CandidateRankingLoss
+    ranking_loss: CandidateRankingLoss | JointPairLoss
     lidar_loss: CandidateLoss
     projection_base: Any
     camera_config: Path
@@ -70,15 +72,22 @@ def build_runtime(config: Mapping[str, Any], root: Path, device: torch.device,
                   *, initialize_from_baselines: bool = True) -> V2Runtime:
     init, model_cfg = config["initialization"], config["model"]
     stage = str(config["experiment"]["stage"])
-    if stage not in {"B0", "B1", "B2", "B3"}:
+    if stage not in {"B0", "B1", "B2", "B3", "B4"}:
         raise ValueError(f"unknown V2 stage {stage}")
+    is_pair = stage == "B4"
+    pair_cfg = dict(model_cfg.get("pair_fusion", {}))
+    pair_topk = int(pair_cfg.get("topk", 50))
     candidate_cfg = yaml.safe_load(_resolve(root, init["candidate_config"]).read_text())
     lidar_cfg = yaml.safe_load(_resolve(root, init["lidar_config"]).read_text())
     lidar_detector: nn.Module = nn.Identity()
     lidar: nn.Module = nn.Identity()
     if stage != "B1":
         lidar_detector = LiDARUAVDetector(lidar_cfg).to(device)
-        lidar = LiDARCandidateModel(lidar_detector, CandidateSelector(candidate_cfg["candidate"]["radar"]))
+        selector_cfg = dict(candidate_cfg["candidate"]["radar"])
+        if is_pair:
+            selector_cfg.update(raw_topk=pair_topk, pre_nms_topk=pair_topk, final_topk=pair_topk)
+        lidar = LiDARCandidateModel(lidar_detector, CandidateSelector(selector_cfg, raw_only=is_pair),
+                                    use_raw=is_pair)
         if stage == "B0" and initialize_from_baselines and init.get("abc_warmstart_checkpoint"):
             if init.get("b0_warmstart_checkpoint"):
                 raise ValueError("Choose ABC or MTCE warmstart, not both")
@@ -88,7 +97,7 @@ def build_runtime(config: Mapping[str, Any], root: Path, device: torch.device,
         if stage == "B0" and initialize_from_baselines and init.get("b0_warmstart_checkpoint"):
             report = load_a2_warmstart(lidar_detector, _resolve(root, init["b0_warmstart_checkpoint"]))
             print("Loaded A2 MTCE warmstart:", report)
-        if stage in {"B2", "B3"} and initialize_from_baselines:
+        if stage in {"B2", "B3", "B4"} and initialize_from_baselines:
             _load_trained_branch(lidar_detector, _resolve(root, init["b0_checkpoint"]), "network.lidar.detector.")
 
     dino_initialization = None
@@ -111,38 +120,44 @@ def build_runtime(config: Mapping[str, Any], root: Path, device: torch.device,
         adapt_dino_class_head_to_single_uav(dino_detector)
         vision = VisionCandidateModel(
             dino_detector,
-            pre_topk=int(candidate_cfg["candidate"]["rgb"]["pre_topk"]),
-            final_topk=int(candidate_cfg["candidate"]["rgb"]["final_topk"]),
-            nms_iou=float(candidate_cfg["candidate"]["rgb"]["nms_iou"]),
+            pre_topk=pair_topk if is_pair else int(candidate_cfg["candidate"]["rgb"]["pre_topk"]),
+            final_topk=pair_topk if is_pair else int(candidate_cfg["candidate"]["rgb"]["final_topk"]),
+            nms_iou=float(candidate_cfg["candidate"]["rgb"]["nms_iou"]), apply_nms=not is_pair,
         )
-        if stage in {"B2", "B3"} and initialize_from_baselines:
+        if stage in {"B2", "B3", "B4"} and initialize_from_baselines:
             checkpoint = _resolve(root, init["b1_checkpoint"])
             _load_trained_branch(dino_detector, checkpoint, "network.vision.dino.detector.")
             _load_trained_branch(vision.builder.feature_proj, checkpoint, "network.vision.builder.feature_proj.")
 
-    interaction = CandidateCrossAttention(
-        visual_radius=int(model_cfg["visual_radius_cells"]),
-        lidar_neighbors=int(model_cfg["lidar_neighbors"]),
-        geometry_gate=model_cfg["geometry_gate"],
-    )
-    scoring = CandidateScoring(
-        geometry_gate=model_cfg["geometry_gate"],
-        max_abs_delta_logit=float(model_cfg["max_abs_delta_logit"]),
-    )
+    if is_pair:
+        interaction, scoring = nn.Identity(), nn.Identity()
+        pair_fusion = CandidatePairFusion(geometry_gate=model_cfg.get("geometry_gate"), **pair_cfg)
+    else:
+        interaction = CandidateCrossAttention(
+            visual_radius=int(model_cfg["visual_radius_cells"]),
+            lidar_neighbors=int(model_cfg["lidar_neighbors"]), geometry_gate=model_cfg["geometry_gate"],
+        )
+        scoring = CandidateScoring(geometry_gate=model_cfg["geometry_gate"],
+                                   max_abs_delta_logit=float(model_cfg["max_abs_delta_logit"]))
+        pair_fusion = None
     model = MultimodalV2(
         lidar, vision, interaction, scoring,
-        interaction_enabled=bool(model_cfg["interaction_enabled"]),
-        vision_reads_radar=bool(model_cfg["vision_reads_radar"]),
-        vision_scoring_enabled=bool(model_cfg["vision_scoring_enabled"]),
+        interaction_enabled=False if is_pair else bool(model_cfg["interaction_enabled"]),
+        vision_reads_radar=False if is_pair else bool(model_cfg["vision_reads_radar"]),
+        vision_scoring_enabled=False if is_pair else bool(model_cfg["vision_scoring_enabled"]),
+        pair_fusion=pair_fusion,
     ).to(device)
     loss_cfg = config["loss"]
-    ranking = CandidateRankingLoss(
-        focal_alpha=float(loss_cfg["focal_alpha"]), focal_gamma=float(loss_cfg["focal_gamma"]),
-        xyz_positive_m=float(loss_cfg["xyz_positive_m"]), xyz_ignore_m=float(loss_cfg["xyz_ignore_m"]),
-        box_positive_iou=float(loss_cfg["box_positive_iou"]), box_ignore_iou=float(loss_cfg["box_ignore_iou"]),
-        lambda_3d=float(loss_cfg["lambda_rank_3d"]), lambda_2d=float(loss_cfg["lambda_rank_2d"]),
-        negative_only_weight=float(loss_cfg.get("negative_only_weight", 0.25)),
-    )
+    if is_pair:
+        ranking = JointPairLoss(**loss_cfg)
+    else:
+        ranking = CandidateRankingLoss(
+            focal_alpha=float(loss_cfg["focal_alpha"]), focal_gamma=float(loss_cfg["focal_gamma"]),
+            xyz_positive_m=float(loss_cfg["xyz_positive_m"]), xyz_ignore_m=float(loss_cfg["xyz_ignore_m"]),
+            box_positive_iou=float(loss_cfg["box_positive_iou"]), box_ignore_iou=float(loss_cfg["box_ignore_iou"]),
+            lambda_3d=float(loss_cfg["lambda_rank_3d"]), lambda_2d=float(loss_cfg["lambda_rank_2d"]),
+            negative_only_weight=float(loss_cfg.get("negative_only_weight", 0.25)),
+        )
     data_cfg = config["data"]
     camera_path = _resolve(root, data_cfg["camera_config"])
     geometry_path = _resolve(root, data_cfg["geometry_calibration"])
@@ -162,9 +177,13 @@ def build_runtime(config: Mapping[str, Any], root: Path, device: torch.device,
 
 
 def freeze_for_stage(runtime: V2Runtime, stage: str) -> None:
-    if stage not in {"B0", "B1", "B2", "B3"}:
+    if stage not in {"B0", "B1", "B2", "B3", "B4"}:
         raise ValueError(f"unknown V2 stage {stage}")
     runtime.model.requires_grad_(False)
+    if stage == "B4":
+        runtime.model.pair_fusion.requires_grad_(True)
+        runtime.model.vision.builder.feature_proj.requires_grad_(True)
+        return
     if stage == "B0":
         mode = getattr(runtime, "initialization", {}).get("radar_train_mode", "full")
         if mode == "full":
@@ -287,11 +306,11 @@ def forward_step(runtime: V2Runtime, batch: Mapping[str, Any], device: torch.dev
         lidar_raw = output.diagnostics["lidar_raw"]
         result["loss_lidar_frozen"] = (
             runtime.lidar_loss(lidar_raw, output.diagnostics["lidar_batch"])["loss"]
-            if stage in {"B2", "B3"} and lidar_raw is not None else zero
+            if stage in {"B2", "B3", "B4"} and lidar_raw is not None else zero
         )
         vision_raw = output.diagnostics["vision_raw"]
         vision, count = zero, 0
-        if stage in {"B2", "B3"} and vision_raw is not None:
+        if stage in {"B2", "B3", "B4"} and vision_raw is not None:
             ids = lidar_batch["vision_batch_index"]
             vision, _, count = supervised_dino_loss(
                 runtime.dino_detector, vision_raw,
@@ -299,7 +318,7 @@ def forward_step(runtime: V2Runtime, batch: Mapping[str, Any], device: torch.dev
                 gt_2d_valid=targets.has_box[ids], transforms=transforms,
             )
         result["loss_vision_frozen"] = vision
-        if stage in {"B2", "B3"}:
+        if stage in {"B2", "B3", "B4"}:
             result["vision_supervised"] = count
     return result
 
@@ -321,6 +340,29 @@ def summarize_3d(rows: list[dict[str, Any]]) -> dict[str, float | int]:
         result[f"error_{name}_m"] = float(function(finite)) if len(finite) else float("inf")
     result["correct_candidate_top1_rate"] = result["success_1m"]
     return result
+
+
+@torch.no_grad()
+def joint_validation_rows(output: Any, targets: Any) -> list[dict[str, bool]]:
+    """Joint success requires the same RV row to win both tasks and be correct."""
+    from .loss import box_iou_aligned
+    count = len(targets.has_xyz)
+    top3, top2 = output.top3d_indices(count), output.top2d_indices(count)
+    rows = []
+    for batch in range(count):
+        if not bool(targets.has_xyz[batch] & targets.has_box[batch]):
+            continue
+        paired = torch.nonzero((output.batch_index == batch) & output.association_valid).flatten()
+        good = ((output.xyz_m[paired].float()-targets.xyz_m[batch].float()).norm(dim=1) <= 1.)
+        good &= box_iou_aligned(output.box_xyxy_px[paired].float(), targets.box_xyxy_px[batch].float()) >= .5
+        wins = (len(top3[batch]) > 0 and len(top2[batch]) > 0
+                and int(top3[batch][0]) == int(top2[batch][0]))
+        success = False
+        if wins:
+            winner = int(top3[batch][0])
+            success = bool(good[paired == winner].any())
+        rows.append(dict(success=success, oracle=bool(good.any())))
+    return rows
 
 
 @torch.no_grad()
@@ -392,6 +434,7 @@ if L is not None:
             self._val_rows: list[dict[str, Any]] = []
             self._val_2d: list[float] = []
             self._val_visual: list[dict[str, Any]] = []
+            self._val_joint: list[dict[str, bool]] = []
             self._train_position = RunningLocalization()
             self._val_position = RunningLocalization()
             self.live_progress = {}
@@ -425,7 +468,7 @@ if L is not None:
             self._in_validation = False
             # B2/B3 keep both pretrained candidate generators frozen and in
             # deterministic eval mode; only candidate interaction/scoring train.
-            if self.runtime.initialization["stage"] in {"B2", "B3"}:
+            if self.runtime.initialization["stage"] in {"B2", "B3", "B4"}:
                 self.runtime.lidar_detector.eval()
                 self.runtime.dino_detector.eval()
             else:
@@ -465,9 +508,17 @@ if L is not None:
             for key in component_names:
                 value = values.get("loss_components", {}).get(key)
                 self.live_progress[key] = float(value) if value is not None else 0.0
-            if self.runtime.initialization["stage"] in {"B2", "B3"}:
+            if self.runtime.initialization["stage"] in {"B2", "B3", "B4"}:
                 self.live_progress.update(rank3d=float(values["loss_rank_3d"].detach()),
                                           rank2d=float(values["loss_rank_2d"].detach()))
+            if self.runtime.initialization["stage"] == "B4":
+                for name in ("loss_joint_cls", "loss_align", "loss_joint_rank"):
+                    self.live_progress[name] = float(values[name].detach())
+                    self.log(f"train/{name}", values[name], on_step=True, on_epoch=True, batch_size=batch_size)
+                for name, value in values.items():
+                    if name.startswith(("n_pair_", "n_alignment_", "n_joint_")):
+                        self.log(f"train/{name}", float(value), on_step=False, on_epoch=True,
+                                 reduce_fx="sum", batch_size=batch_size)
             if self.device.type == "cuda":
                 self.live_progress["mem"] = torch.cuda.max_memory_reserved()/1024**3
             if self._trainer is not None and self.trainer.optimizers:
@@ -537,6 +588,7 @@ if L is not None:
             self._val_rows.clear()
             self._val_2d.clear()
             self._val_visual.clear()
+            self._val_joint.clear()
             self._val_position = RunningLocalization()
             self.live_progress = {}
             if self.runtime.initialization["stage"] != "B0":
@@ -567,6 +619,8 @@ if L is not None:
                 values["output"], values["targets"], batch["sample_id"], batch["sequence_id"]
             )
             self._val_rows.extend(rows)
+            if self.runtime.initialization["stage"] == "B4":
+                self._val_joint.extend(joint_validation_rows(values["output"], values["targets"]))
             if self.runtime.initialization["stage"] != "B1":
                 self._val_position.update(rows)
                 self.live_progress.update(localization_display(self._val_position.compute(), "V~"))
@@ -583,11 +637,21 @@ if L is not None:
                 iou = box_iou_aligned(values["output"].box_xyxy_px[ids[:1]].float(),
                                       values["targets"].box_xyxy_px[index].float()) if len(ids) else []
                 self._val_2d.append(float(iou[0]) if len(iou) else 0.0)
+            if self.runtime.initialization["stage"] == "B4":
+                for name in ("loss_joint_cls", "loss_align", "loss_joint_rank"):
+                    self.log(f"val/{name}", values[name], on_epoch=True, batch_size=len(batch["m_R"]))
             self.log("val/loss", values["loss"].float(), on_epoch=True,
                      batch_size=len(batch["m_R"]))
 
         def on_validation_epoch_end(self) -> None:
             metrics = summarize_3d(self._val_rows)
+            if self.runtime.initialization["stage"] == "B4":
+                n = len(self._val_joint)
+                if n == 0 and not self.trainer.sanity_checking:
+                    raise RuntimeError("B4 validation has no queries with both 3D and 2D GT; choose labeled validation indices/split")
+                self.log("val/joint_labeled_queries", float(n))
+                self.log("val/joint_success", sum(r["success"] for r in self._val_joint)/n if n else 0.)
+                self.log("val/joint_oracle", sum(r["oracle"] for r in self._val_joint)/n if n else 0.)
             if self.runtime.initialization["stage"] != "B1":
                 position = localization_metrics(self._val_rows)
                 for key in ("rmse_x_m", "rmse_y_m", "rmse_z_m", "rmse_3d_m"):

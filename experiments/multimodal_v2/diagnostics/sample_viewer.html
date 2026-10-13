@@ -1,0 +1,148 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Multimodal V2 · Sample Viewer</title>
+  <style>
+    :root{font:14px/1.5 system-ui,-apple-system,"Segoe UI",sans-serif;color:#e9f0f3;background:#0c151c}
+    *{box-sizing:border-box}body{margin:0}header{padding:16px 22px;background:#172630;border-bottom:1px solid #354956;display:flex;align-items:center;justify-content:space-between;gap:14px;flex-wrap:wrap}
+    h1{font-size:19px;margin:0}.subtitle,.muted{color:#9fb5c0}.subtitle{font-size:12px}.toolbar{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+    select,input,button{font:inherit;color:inherit;background:#213541;border:1px solid #49616e;border-radius:6px;padding:7px 10px}button{cursor:pointer}button:hover{background:#36515f}button:disabled{opacity:.45;cursor:default}
+    input[type=number]{width:88px}input[type=range]{padding:0;accent-color:#49c7a3}.pill{border-radius:5px;padding:4px 8px;background:#304653;color:#c9dae1;font-size:12px}
+    main{max-width:1900px;margin:auto;padding:16px;display:grid;grid-template-columns:minmax(0,1.2fr) minmax(370px,.8fr);gap:14px}
+    .panel{background:#17252e;border:1px solid #344955;border-radius:10px;padding:14px;min-width:0}.panel h2{font-size:15px;margin:0 0 10px}.wide{grid-column:1/-1}
+    #cloud{display:block;width:100%;height:560px;background:#071118;border-radius:7px;touch-action:none;cursor:grab}#cloud:active{cursor:grabbing}
+    .tools{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin:0 0 10px}.tools label{display:flex;align-items:center;gap:5px}.tools input[type=range]{width:130px}
+    .legend{display:flex;gap:15px;flex-wrap:wrap;margin:9px 0;color:#c4d5dc;font-size:12px}.dot{display:inline-block;width:9px;height:9px;border-radius:50%;margin-right:5px}
+    .image-stage{position:relative;max-width:100%;background:#071118;border-radius:7px;overflow:hidden}.image-stage img{display:block;width:100%;height:auto}.image-stage svg{position:absolute;inset:0;width:100%;height:100%;pointer-events:none}
+    .empty{padding:70px 15px;text-align:center;color:#8ca5b2}.details{display:grid;grid-template-columns:max-content minmax(0,1fr);gap:4px 12px;margin-top:10px;font-size:12px;overflow-wrap:anywhere}.details dt{color:#9fb5c0}.details dd{margin:0}
+    .point-inputs{display:flex;gap:7px;align-items:end;flex-wrap:wrap}.point-inputs label{font-size:12px;color:#a9c1cc}.point-inputs input{display:block;color:#eef5f6;margin-top:4px}
+    #pointResult,#status{min-height:21px;font-size:12px}.error{color:#ffb2a5}.event-list{max-height:230px;overflow:auto;margin:0;padding-left:20px;font:12px/1.8 ui-monospace,monospace;color:#c4d7df}.event-list li{padding-right:8px}
+    .hint{font-size:12px;color:#a6bdc8;margin:8px 0 0}#sampleNumber{width:74px}.check{font-size:12px;display:flex;align-items:center;gap:4px}.check input{accent-color:#43c99d}
+    @media(max-width:1050px){main{grid-template-columns:1fr}.wide{grid-column:auto}#cloud{height:450px}}
+  </style>
+</head>
+<body>
+<header>
+  <div><h1>Multimodal V2 · 样本查看器</h1><div class="subtitle">真实 Dataset Sample · 只读 · 雷达 XYZ 单位为米</div></div>
+  <div class="toolbar">
+    <label>Sequence <select id="sequence"></select></label>
+    <span id="split" class="pill">—</span>
+    <button id="prev">← 上一个</button><input id="sampleNumber" type="number" min="1" value="1" aria-label="样本序号"><span id="total">/ —</span><button id="next">下一个 →</button>
+  </div>
+</header>
+<main>
+  <section class="panel">
+    <h2>双雷达点云 · 3D 视图</h2>
+    <div class="tools">
+      <button id="fit">适配全部点</button><button id="focusGt">以 GT 为中心</button>
+      <label>历史 <input id="history" type="range" min="0.05" max="1" step="0.05" value="1"><span id="historyValue">1.00s</span></label>
+      <label class="check"><input type="checkbox" id="showAvia" checked>Avia</label>
+      <label class="check"><input type="checkbox" id="showMid" checked>Mid360</label>
+    </div>
+    <canvas id="cloud"></canvas>
+    <div class="legend"><span><i class="dot" style="background:#48c8f0"></i>Avia <b id="aviaCount">0</b></span><span><i class="dot" style="background:#ffad65"></i>Mid360 <b id="midCount">0</b></span><span><i class="dot" style="background:#f7e86d"></i>3D GT</span><span><i class="dot" style="background:#fa6eae"></i>输入坐标</span></div>
+    <p class="hint">拖动旋转 · 滚轮缩放 · Shift＋拖动平移。点云按传感器着色；网页显示点数可能采样，Sample 统计始终基于全部点。</p>
+  </section>
+  <section class="panel">
+    <h2>选中的左目图像与 YOLO bbox</h2>
+    <div id="imageStage" class="image-stage"><div class="empty">加载中</div></div>
+    <dl class="details" id="imageDetails"></dl>
+    <h2 style="margin-top:20px">输入一个 3D 点</h2>
+    <div class="point-inputs"><label>X（米）<input id="pointX" type="number" step="any" placeholder="x"></label><label>Y（米）<input id="pointY" type="number" step="any" placeholder="y"></label><label>Z（米）<input id="pointZ" type="number" step="any" placeholder="z"></label><button id="showPoint">显示点</button><button id="useGt">填入 GT</button><button id="clearPoint">清除</button></div>
+    <p class="hint">坐标与 V2 雷达点、3D GT 使用同一 XYZ 米制坐标系；输入只在本页绘制，不会写入数据。</p>
+    <div id="pointResult" class="muted"></div>
+    <h2 style="margin-top:19px">当前 Sample</h2><dl class="details" id="sampleDetails"></dl>
+    <div id="status" class="error"></div>
+  </section>
+  <section class="panel wide"><h2>1 秒历史窗口内的雷达文件</h2><ol id="events" class="event-list"></ol></section>
+</main>
+<script>
+'use strict';
+const $=id=>document.getElementById(id), canvas=$('cloud'), ctx=canvas.getContext('2d');
+let data=null, custom=null, yaw=-0.72, pitch=0.47, zoom=12, center=[0,0,0], pan=[0,0], drag=null, requestId=0;
+function fmt(value,digits=3){return value==null?'—':Number(value).toFixed(digits)}
+function escapeHtml(value){return String(value).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]))}
+function setStatus(message){$('status').textContent=message||''}
+function row(label,value){return `<dt>${escapeHtml(label)}</dt><dd>${escapeHtml(value)}</dd>`}
+async function fetchJson(url){const response=await fetch(url);const body=await response.json();if(!response.ok)throw Error(body.error||response.statusText);return body}
+function sequence(){return $('sequence').value}
+function dimensions(){const ratio=Math.min(window.devicePixelRatio||1,2),width=canvas.clientWidth,height=canvas.clientHeight;canvas.width=Math.max(1,Math.round(width*ratio));canvas.height=Math.max(1,Math.round(height*ratio));ctx.setTransform(ratio,0,0,ratio,0,0);return [width,height]}
+function project(point,w,h){const x=point[0]-center[0],y=point[1]-center[1],z=point[2]-center[2],c=Math.cos(yaw),s=Math.sin(yaw),cp=Math.cos(pitch),sp=Math.sin(pitch);const side=c*x-s*y,depth=s*x+c*y;return [w/2+pan[0]+side*zoom,h/2+pan[1]-(sp*depth+cp*z)*zoom,cp*depth-sp*z]}
+function line(a,b,color,w,h,width=1){const p=project(a,w,h),q=project(b,w,h);ctx.strokeStyle=color;ctx.lineWidth=width;ctx.beginPath();ctx.moveTo(p[0],p[1]);ctx.lineTo(q[0],q[1]);ctx.stroke()}
+function marker(point,color,label,w,h){const [x,y]=project(point,w,h);if(x<0||x>w||y<0||y>h)return;ctx.fillStyle=color;ctx.strokeStyle='#091219';ctx.lineWidth=2;ctx.beginPath();ctx.arc(x,y,7,0,Math.PI*2);ctx.fill();ctx.stroke();ctx.font='bold 12px system-ui';ctx.fillText(label,x+11,y-10)}
+function render(){
+  const [w,h]=dimensions();ctx.fillStyle='#071118';ctx.fillRect(0,0,w,h);if(!data)return;
+  const step=zoom>13?5:zoom>6?10:20,grid=step*4,z=0;
+  for(let n=-grid;n<=grid;n+=step){line([-grid,n,z],[grid,n,z],'#19303a',w,h);line([n,-grid,z],[n,grid,z],'#19303a',w,h)}
+  const ageLimit=-Number($('history').value);
+  for(const [key,color,toggle] of [['Avia','#48c8f0','showAvia'],['Mid360','#ffad65','showMid']]){
+    if(!$(toggle).checked)continue;ctx.fillStyle=color;
+    for(const point of data.radar.clouds[key].points){if(point[3]<ageLimit-0.0001)continue;const [x,y]=project(point,w,h);if(x>=0&&x<w&&y>=0&&y<h)ctx.fillRect(x,y,1.6,1.6)}
+  }
+  line([0,0,0],[10,0,0],'#ff686e',w,h,2);line([0,0,0],[0,10,0],'#65d594',w,h,2);line([0,0,0],[0,0,10],'#769cff',w,h,2);
+  for(const [point,color,label] of [[[10,0,0],'#ff686e','X'],[[0,10,0],'#65d594','Y'],[[0,0,10],'#769cff','Z']]){const [x,y]=project(point,w,h);ctx.fillStyle=color;ctx.fillText(label,x+4,y-4)}
+  if(data.gt.valid)marker(data.gt.xyz_m,'#f7e86d','GT',w,h);
+  if(custom)marker(custom,'#fa6eae','输入点',w,h);
+}
+function fit(all=true){
+  if(!data)return;const points=[];
+  for(const key of ['Avia','Mid360'])for(const row of data.radar.clouds[key].points)points.push(row);
+  if(data.gt.valid)points.push(data.gt.xyz_m);if(custom)points.push(custom);
+  if(all&&points.length){const low=[Infinity,Infinity,Infinity],high=[-Infinity,-Infinity,-Infinity];for(const p of points)for(let i=0;i<3;i++){low[i]=Math.min(low[i],p[i]);high[i]=Math.max(high[i],p[i])}center=low.map((v,i)=>(v+high[i])/2)}
+  else center=data.gt.valid?data.gt.xyz_m.slice():[0,0,0];
+  let radius=10;for(const p of points)radius=Math.max(radius,Math.abs(p[0]-center[0]),Math.abs(p[1]-center[1]),Math.abs(p[2]-center[2]));
+  zoom=Math.min(canvas.clientWidth,canvas.clientHeight)/(radius*2.5);pan=[0,0];render();
+}
+function pointInfo(){
+  if(!custom){$('pointResult').textContent='';return}
+  let text=`输入点 [${custom.map(x=>fmt(x,3)).join(', ')}] m`;
+  if(data?.gt.valid){const d=Math.hypot(...custom.map((v,i)=>v-data.gt.xyz_m[i]));text+=` · 距 GT ${fmt(d,3)} m`}
+  $('pointResult').textContent=text;
+}
+function updateImage(){
+  const stage=$('imageStage'),im=data.image;
+  if(!im.valid){stage.innerHTML='<div class="empty">此 Sample 没有有效历史图像</div>';}
+  else{
+    stage.innerHTML='<img id="sampleImage" alt="当前 Sample 的左目图像"><svg id="boxOverlay" aria-label="YOLO bbox"></svg>';
+    $('sampleImage').src=im.url;
+    const svg=$('boxOverlay');svg.setAttribute('viewBox',`0 0 ${im.view_wh[0]} ${im.view_wh[1]}`);
+    if(im.bbox_view_xyxy){const [x1,y1,x2,y2]=im.bbox_view_xyxy;const rect=document.createElementNS('http://www.w3.org/2000/svg','rect');for(const [k,v] of Object.entries({x:x1,y:y1,width:x2-x1,height:y2-y1,fill:'none',stroke:'#f5ec57','stroke-width':Math.max(2,im.view_wh[0]/500)}))rect.setAttribute(k,v);svg.append(rect)}
+  }
+  $('imageDetails').innerHTML=row('图像文件',im.file||'无')+row('时间 / 相对时间',im.valid?`${fmt(im.time,6)} / ${fmt(im.delta_t,3)} s`:'—')+row('左目源尺寸 / Sample 尺寸',im.valid?`${im.source_wh.join('×')} / ${im.view_wh.join('×')}`:'—')+row('YOLO 标签文件',im.label_file||'无')+row('YOLO 内容',im.label_text==null?'文件不存在':im.label_text||'空标签')+row('bbox（源像素 xyxy）',im.bbox_source_xyxy?im.bbox_source_xyxy.map(x=>fmt(x,1)).join(', '):'无有效 bbox');
+}
+function updateDetails(){
+  $('sampleDetails').innerHTML=row('Sample ID',data.sample_id)+row('Query 时间',fmt(data.query_time,6))+row('3D GT',data.gt.valid?data.gt.xyz_m.map(x=>fmt(x,3)).join(', ')+' m':'无有效 GT')+row('GT 文件',data.gt.file||'无')+row('雷达历史',`[t-${fmt(data.radar.history_s,2)}s, t]`)+row('雷达有效点 / 显示点',`${data.radar.total_points} / ${data.radar.display_points}`)+row('有效模态',`${data.radar.valid?'雷达':'无雷达'} · ${data.image.valid?'图像':'无图像'}`);
+  $('aviaCount').textContent=`${data.radar.clouds.Avia.total_points}（显示 ${data.radar.clouds.Avia.display_points}）`;
+  $('midCount').textContent=`${data.radar.clouds.Mid360.total_points}（显示 ${data.radar.clouds.Mid360.display_points}）`;
+  $('events').innerHTML=data.radar.events.length?data.radar.events.map(e=>`<li>${escapeHtml(e.sensor)} · ${escapeHtml(e.file)} · Δt ${fmt(e.delta_t,3)}s</li>`).join(''):'<li>窗口内没有雷达文件</li>';
+  $('total').textContent=`/ ${data.total_samples}`;$('sampleNumber').value=data.index+1;$('sampleNumber').max=data.total_samples;
+  $('prev').disabled=data.index===0;$('next').disabled=data.index>=data.total_samples-1;
+  $('split').textContent=data.split;
+  $('history').max=data.radar.history_s;$('history').value=data.radar.history_s;$('historyValue').textContent=`${fmt(data.radar.history_s,2)}s`;
+  updateImage();pointInfo();fit();
+}
+async function loadSample(index){
+  const id=++requestId;setStatus('加载 Sample…');
+  try{const result=await fetchJson(`/api/sample?sequence=${encodeURIComponent(sequence())}&index=${index}`);if(id!==requestId)return;data=result;updateDetails();setStatus('');localStorage.setItem('v2_sample_sequence',result.sequence);localStorage.setItem('v2_sample_index',String(index))}
+  catch(error){if(id===requestId)setStatus(String(error))}
+}
+function move(delta){if(data)loadSample(Math.max(0,Math.min(data.total_samples-1,data.index+delta)))}
+function showPoint(){const fields=['pointX','pointY','pointZ'].map(id=>$(id).value.trim());if(fields.some(x=>x==='')){setStatus('请填写 X、Y、Z 三个坐标');return}const values=fields.map(Number);if(values.some(x=>!Number.isFinite(x))){setStatus('坐标必须是有限数字');return}custom=values;setStatus('');pointInfo();fit(true)}
+$('showPoint').onclick=showPoint;$('useGt').onclick=()=>{if(!data?.gt.valid){setStatus('此 Sample 没有有效 3D GT');return}data.gt.xyz_m.forEach((v,i)=>$( ['pointX','pointY','pointZ'][i]).value=fmt(v,4));showPoint()};
+$('clearPoint').onclick=()=>{custom=null;for(const id of ['pointX','pointY','pointZ'])$(id).value='';pointInfo();render()};
+$('prev').onclick=()=>move(-1);$('next').onclick=()=>move(1);$('sampleNumber').onchange=()=>{const value=Number($('sampleNumber').value);if(data&&Number.isInteger(value)&&value>=1&&value<=data.total_samples)loadSample(value-1);else setStatus('样本序号超出范围')};
+$('sequence').onchange=()=>loadSample(0);$('fit').onclick=()=>fit(true);$('focusGt').onclick=()=>fit(false);
+$('history').oninput=()=>{$('historyValue').textContent=`${fmt($('history').value,2)}s`;render()};
+for(const id of ['showAvia','showMid'])$(id).onchange=render;
+canvas.addEventListener('pointerdown',e=>{canvas.setPointerCapture(e.pointerId);drag={x:e.clientX,y:e.clientY,shift:e.shiftKey,yaw,pitch,pan:pan.slice()}});
+canvas.addEventListener('pointermove',e=>{if(!drag)return;const dx=e.clientX-drag.x,dy=e.clientY-drag.y;if(drag.shift){pan=[drag.pan[0]+dx,drag.pan[1]+dy]}else{yaw=drag.yaw+dx*.008;pitch=Math.max(-1.45,Math.min(1.45,drag.pitch+dy*.008))}render()});
+canvas.addEventListener('pointerup',()=>drag=null);canvas.addEventListener('pointercancel',()=>drag=null);
+canvas.addEventListener('wheel',e=>{e.preventDefault();zoom=Math.max(.15,Math.min(1000,zoom*(e.deltaY<0?1.12:1/1.12)));render()},{passive:false});
+document.addEventListener('keydown',e=>{if(e.target.closest('input,select,button'))return;if(e.key==='ArrowLeft'||e.key.toLowerCase()==='a')move(-1);if(e.key==='ArrowRight'||e.key.toLowerCase()==='d')move(1)});
+new ResizeObserver(render).observe(canvas);
+(async()=>{try{const result=await fetchJson('/api/sequences');const grouped={};for(const entry of result.sequences)(grouped[entry.split]??=[]).push(entry);$('sequence').innerHTML=Object.entries(grouped).map(([split,entries])=>`<optgroup label="${escapeHtml(split)}">${entries.map(e=>`<option value="${escapeHtml(e.sequence)}">${escapeHtml(e.sequence)} (${e.count})</option>`).join('')}</optgroup>`).join('');if(!result.sequences.length){setStatus('没有可用的 QueryRecord');return}const previous=localStorage.getItem('v2_sample_sequence'),selected=result.sequences.find(e=>e.sequence===previous)||result.sequences[0];$('sequence').value=selected.sequence;const last=Number(localStorage.getItem('v2_sample_index'));loadSample(Number.isInteger(last)&&last>=0&&last<selected.count?last:0)}catch(error){setStatus(String(error))}})();
+</script>
+</body>
+</html>

@@ -162,6 +162,8 @@ class MultimodalOutput:
     radar_candidates: CandidateBatch
     vision_candidates: CandidateBatch
     diagnostics: Mapping[str, Any]
+    joint_logit: torch.Tensor | None = None
+    pair_similarity: torch.Tensor | None = None
 
     def __post_init__(self) -> None:
         n = int(self.score_3d_after.numel())
@@ -179,6 +181,10 @@ class MultimodalOutput:
         for name, shape in shapes.items():
             if tuple(getattr(self, name).shape) != shape:
                 raise ValueError(f"{name} must be {shape}")
+        for name in ("joint_logit", "pair_similarity"):
+            value = getattr(self, name)
+            if value is not None and (value.shape != (n,) or not bool(torch.isfinite(value).all())):
+                raise ValueError(f"{name} must be finite [{n}]")
         if n:
             v_only = self.hypothesis_type == 2
             if bool(self.has_xyz[v_only].any()):
@@ -208,12 +214,16 @@ class MultimodalOutput:
         self, num_samples: int, *, before_interaction: bool = False
     ) -> list[torch.Tensor]:
         scores = self.score_3d_before if before_interaction else self.score_3d_after
+        joint = self.joint_logit is not None and not before_interaction
+        if joint:
+            scores = self.joint_logit
         result = []
         for batch_idx in range(num_samples):
             valid = self.has_xyz & (self.batch_index == batch_idx)
             indices = torch.nonzero(valid, as_tuple=False).flatten()
             if len(indices):
-                indices = self._rank_task(indices, scores, self.radar_source_index)
+                tie_ids = torch.arange(len(scores), device=scores.device) if joint else self.radar_source_index
+                indices = self._rank_task(indices, scores, tie_ids)
             result.append(indices)
         return result
 
@@ -221,12 +231,16 @@ class MultimodalOutput:
         self, num_samples: int, *, before_interaction: bool = False
     ) -> list[torch.Tensor]:
         scores = self.score_2d_before if before_interaction else self.score_2d_after
+        joint = self.joint_logit is not None and not before_interaction
+        if joint:
+            scores = self.joint_logit
         result = []
         for batch_idx in range(num_samples):
             valid = self.has_box & (self.batch_index == batch_idx)
             indices = torch.nonzero(valid, as_tuple=False).flatten()
             if len(indices):
-                indices = self._rank_task(indices, scores, self.vision_source_index)
+                tie_ids = torch.arange(len(scores), device=scores.device) if joint else self.vision_source_index
+                indices = self._rank_task(indices, scores, tie_ids)
             result.append(indices)
         return result
 

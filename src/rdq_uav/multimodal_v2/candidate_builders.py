@@ -40,14 +40,15 @@ def _cxcywh_norm_to_source_xyxy(
 
 
 class RadarCandidateBuilder:
-    def __init__(self, selector: Any) -> None:
+    def __init__(self, selector: Any, *, use_raw: bool = False) -> None:
         self.selector=selector
+        self.use_raw = bool(use_raw)
 
     def __call__(self, radar_output: dict[str, Any]) -> CandidateBatch:
         per_batch=self.selector(radar_output)
         chunks=[]
         for b,result in enumerate(per_batch):
-            cand=result['nms']
+            cand=result['raw' if self.use_raw else 'nms']
             n=len(cand['score'])
             if not n: continue
             chunks.append((b,cand))
@@ -68,10 +69,11 @@ class RadarCandidateBuilder:
 
 
 class RGBCandidateBuilder(nn.Module):
-    def __init__(self, query_dim: int=256, feature_dim: int=128, pre_topk: int=50, final_topk: int=10, nms_iou: float=.7) -> None:
+    def __init__(self, query_dim: int=256, feature_dim: int=128, pre_topk: int=50, final_topk: int=10, nms_iou: float=.7, apply_nms: bool=True) -> None:
         super().__init__()
         self.feature_proj=nn.Linear(query_dim,feature_dim)
         self.pre_topk=int(pre_topk); self.final_topk=int(final_topk); self.nms_iou=float(nms_iou)
+        self.apply_nms=bool(apply_nms)
 
     def forward(self, dino_output: dict[str,torch.Tensor], source_image_size_wh: torch.Tensor) -> CandidateBatch:
         logits=dino_output['pred_logits']; boxes=dino_output['pred_boxes']; query=dino_output['decoder_query_features']
@@ -89,7 +91,8 @@ class RGBCandidateBuilder(nn.Module):
         out=[]
         for b in range(logits.shape[0]):
             order=torch.argsort(score[b],descending=True,stable=True)[:self.pre_topk]
-            kept_local=_nms_xyxy(source_boxes[b,order],score[b,order],self.nms_iou)[:self.final_topk]
+            kept_local=(_nms_xyxy(source_boxes[b,order],score[b,order],self.nms_iou)[:self.final_topk]
+                        if self.apply_nms else torch.arange(min(len(order), self.final_topk), device=query.device))
             keep=order[kept_local]
             if len(keep): out.append((b,keep))
         if not out:

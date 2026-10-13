@@ -77,7 +77,7 @@ def main():
         if args.ap_every_val_batches < 1:
             raise ValueError("ap-every-val-batches must be positive")
         cfg["logging"]["ap_every_val_batches"] = args.ap_every_val_batches
-    if stage not in {"B0", "B1", "B2", "B3"}:
+    if stage not in {"B0", "B1", "B2", "B3", "B4"}:
         raise ValueError(f"unknown training stage {stage}")
     accelerator = args.accelerator or cfg["lightning"]["accelerator"]
     precision = args.precision or cfg["lightning"]["precision"]

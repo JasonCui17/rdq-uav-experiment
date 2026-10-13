@@ -4,7 +4,8 @@ import torch
 
 class CandidateSelector:
     VERSION="stable_topk100_radius1m_v1"
-    def __init__(self,cfg):
+    def __init__(self,cfg, *, raw_only=False):
+        self.raw_only=bool(raw_only)
         c=cfg["selector"] if "selector" in cfg else cfg; self.raw_topk=int(c["raw_topk"]); self.pre=int(c["pre_nms_topk"]); self.radius=float(c["nms_radius_m"]); self.final=int(c["final_topk"]); self.trace_observer=None
     @staticmethod
     def _order(scores,ids):
@@ -27,6 +28,9 @@ class CandidateSelector:
             rank_logits=(self.ranking_scores(o)[ids] if "quality_logits" in o else o["logits"][ids].float())
             order=ids[self._order(rank_logits,o["source_token_id"][ids])]
             raw=order[:self.raw_topk]; pool=order[:self.pre]
+            if self.raw_only:
+                results.append({"raw":self._gather(o,raw), "nms":self._gather(o,raw)})
+                continue
             if o.get("prediction_kind") == "query":
                 # One-to-one set predictions use no radius NMS. All K queries
                 # participate before the final reporting cap.

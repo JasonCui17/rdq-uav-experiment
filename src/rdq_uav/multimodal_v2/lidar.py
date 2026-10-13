@@ -15,10 +15,10 @@ from .contracts import CandidateBatch
 
 
 class LiDARCandidateModel(nn.Module):
-    def __init__(self, detector: LiDARUAVDetector, selector: CandidateSelector) -> None:
+    def __init__(self, detector: LiDARUAVDetector, selector: CandidateSelector, *, use_raw: bool = False) -> None:
         super().__init__()
         self.detector = detector
-        self.builder = RadarCandidateBuilder(selector)
+        self.builder = RadarCandidateBuilder(selector, use_raw=use_raw)
 
     def forward(self, batch: Mapping[str, Any]) -> tuple[dict[str, Any], CandidateBatch]:
         raw = self.detector(batch)

@@ -1,5 +1,14 @@
 # Multimodal V2
 
+## B4: aligned candidate pairs
+
+New optional stage B4 independently adapts pre-NMS Top50 R/V candidates, builds
+a 50x50 cosine matrix, performs geometry/semantic Hungarian assignment and
+predicts fresh joint logits without original confidence inputs or residual
+corrections. See [B4_ALIGNED_PAIRS.md](B4_ALIGNED_PAIRS.md) for supervision,
+missing-label behavior, checkpoint configuration, metrics and commands.
+B0–B3 keep their existing defaults.
+
 V2's own data, radar SBE/backbone, candidate builders, Swin/DINO adapters, geometry, interaction, scoring, losses and training code live in `src/rdq_uav/multimodal_v2`. Detrex/DINO/Swin remain third-party code under `third_party/detrex`.
 
 ## Stages

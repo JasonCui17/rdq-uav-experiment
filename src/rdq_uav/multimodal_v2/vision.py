@@ -15,12 +15,12 @@ from .contracts import CandidateBatch
 
 class VisionCandidateModel(nn.Module):
     def __init__(self, detector: nn.Module, *, pre_topk: int = 50,
-                 final_topk: int = 10, nms_iou: float = 0.7) -> None:
+                 final_topk: int = 10, nms_iou: float = 0.7, apply_nms: bool = True) -> None:
         super().__init__()
         self.dino = DINOAdapter(detector)
         self.builder = RGBCandidateBuilder(
             query_dim=256, feature_dim=128, pre_topk=pre_topk,
-            final_topk=final_topk, nms_iou=nms_iou,
+            final_topk=final_topk, nms_iou=nms_iou, apply_nms=apply_nms,
         )
 
     def forward(self, images: torch.Tensor, image_masks: torch.Tensor,

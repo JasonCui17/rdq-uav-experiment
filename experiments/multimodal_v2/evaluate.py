@@ -20,7 +20,7 @@ import yaml
 
 from rdq_uav.runtime_paths import apply_runtime_path_overrides, resolve_project_path
 from rdq_uav.multimodal_v2.data import build_split_dataset, collate_multimodal_v2, prepare_model_batch
-from rdq_uav.multimodal_v2.training import build_runtime, summarize_3d, synchronize_dino_device, _stage_batch
+from rdq_uav.multimodal_v2.training import build_runtime, summarize_3d, synchronize_dino_device, _stage_batch, joint_validation_rows
 from rdq_uav.multimodal_v2.loss import box_iou_aligned
 from rdq_uav.multimodal_v2.paper_metrics import paper_report, write_paper_csv
 
@@ -28,7 +28,7 @@ from rdq_uav.multimodal_v2.paper_metrics import paper_report, write_paper_csv
 def parse_args():
     p = argparse.ArgumentParser()
     p.add_argument("--config", type=Path, required=True)
-    p.add_argument("--mode", choices=("B0", "B1", "B2", "B3"), required=True)
+    p.add_argument("--mode", choices=("B0", "B1", "B2", "B3", "B4"), required=True)
     p.add_argument("--split", choices=("validation_sub", "heldout_test_sub"), default="validation_sub")
     p.add_argument("--checkpoint", type=Path)
     p.add_argument("--output", type=Path, required=True)
@@ -178,6 +178,12 @@ def main():
             "score_2d_changed_count": int(torch.count_nonzero(output.delta_2d)),
             "association": association,
             "rv_pairs": rv_pairs,
+            "scoring_mode": output.diagnostics.get("scoring_mode", "bounded_residual"),
+            "joint_logits": None if output.joint_logit is None else output.joint_logit.cpu().tolist(),
+            "joint_similarity": None if output.pair_similarity is None else output.pair_similarity.cpu().tolist(),
+            "joint_labels": loss_values["joint_labels"].cpu().tolist() if "joint_labels" in loss_values else None,
+            "joint_metrics": joint_validation_rows(output, targets)[0]
+                if bool(targets.has_xyz[0] & targets.has_box[0]) and output.joint_logit is not None else None,
         })
     metric_rows = [row for row in rows if row["has_gt3d"]]
     demoted = sum(
@@ -217,6 +223,12 @@ def main():
         "loss_query_counts": dict(loss_counts),
         "vision_2d": vision_metrics,
     }
+    if args.mode == "B4":
+        joint = [row["joint_metrics"] for row in rows if row["joint_metrics"] is not None]
+        n = len(joint)
+        report["joint"] = dict(labeled_queries=n,
+                               top1_success=sum(r["success"] for r in joint)/n if n else None,
+                               paired_oracle_recall=sum(r["oracle"] for r in joint)/n if n else None)
     args.output.mkdir(parents=True, exist_ok=True)
     (args.output / "summary.json").write_text(json.dumps(report, indent=2, allow_nan=True))
     with (args.output / "per_query.jsonl").open("w") as handle:
@@ -229,7 +241,7 @@ def main():
                  geometry_calibration=str(resolve(cfg["data"]["geometry_calibration"])))
     (args.output / "paper_metrics.json").write_text(json.dumps(paper, indent=2, allow_nan=False))
     write_paper_csv(paper, args.output / "paper_metrics.csv", method=args.method or args.mode,
-                    modality={"B0": "LiDAR", "B1": "RGB", "B2": "LiDAR+RGB", "B3": "LiDAR+RGB"}[args.mode],
+                    modality={"B0": "LiDAR", "B1": "RGB", "B2": "LiDAR+RGB", "B3": "LiDAR+RGB", "B4": "LiDAR+RGB"}[args.mode],
                     bandwidth=args.bandwidth)
     print(json.dumps(report, indent=2, allow_nan=True))
 

@@ -23,12 +23,13 @@ class MultimodalV2(nn.Module):
                  interaction: CandidateCrossAttention, scoring: CandidateScoring,
                  *, interaction_enabled: bool = True,
                  vision_reads_radar: bool = False,
-                 vision_scoring_enabled: bool = False) -> None:
+                 vision_scoring_enabled: bool = False, pair_fusion: nn.Module | None = None) -> None:
         super().__init__()
         self.lidar = lidar
         self.vision = vision
         self.interaction = interaction
         self.scoring = scoring
+        self.pair_fusion = pair_fusion
         self.interaction_enabled = bool(interaction_enabled)
         self.vision_reads_radar = bool(vision_reads_radar)
         self.vision_scoring_enabled = bool(vision_scoring_enabled)
@@ -74,6 +75,11 @@ class MultimodalV2(nn.Module):
             radar.xyz_m.float(), radar.batch_index, projection,
             trace_observer=self.trace_projection_observer)
         radar = radar.with_projection(projected, projection_valid)
+        if self.pair_fusion is not None:
+            return self.pair_fusion(radar, visual, num_samples=int(batch["num_samples"]),
+                                    diagnostics={"lidar_raw": lidar_raw, "vision_raw": vision_raw,
+                                                 "lidar_batch": lidar_batch, "radar_batch_index": radar_ids,
+                                                 "vision_batch_index": vision_ids})
         radar_evidence = replace(_zero_evidence(radar), projected_xy_px=projected)
         vision_evidence = _zero_evidence(visual)
         # Feature pyramids use compact visual indices. Only dual-modality
