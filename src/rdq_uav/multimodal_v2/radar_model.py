@@ -7,7 +7,7 @@ from torch import nn
 from .radar_sbe import SBELiteVoxelEmbed
 from .lidar_legacy import LegacyVoxelEmbed
 from .lidar_learned_sbe import LearnedSBEVoxelEmbed
-from .radar_temporal_centroid import TemporalCentroidFeatures
+from .radar_temporal_centroid import TemporalCentroidFeatures, GatedTemporalMotion
 
 
 def build_voxel_embedding(model_cfg):
@@ -20,7 +20,8 @@ def build_voxel_embedding(model_cfg):
         return LegacyVoxelEmbed(dim, 32, 64, size)
     if name == 'learned_sbe':
         return LearnedSBEVoxelEmbed(dim, size, int(voxel.get('learned_sbe', {}).get('point_dim', 32)),
-                                   motion_enabled=bool(voxel.get("motion_centroid", {}).get("enabled", False)))
+                                   motion_enabled=bool(voxel.get("motion_centroid", {}).get("enabled", False))
+                                   and voxel.get("motion_centroid", {}).get("mode", "legacy") == "legacy")
     raise ValueError(f'Unknown voxel embedding: {name}')
 from .radar_geometry import HierarchyBuilder, SparseHierarchy, SparseLevel, decode_residual
 
@@ -227,8 +228,12 @@ class LiDARUAVDetector(nn.Module):
         else:
             self.voxel_embed = build_voxel_embedding(m)
         motion_cfg=m["voxel"].get("motion_centroid",{})
-        self.motion_enabled=bool(motion_cfg.get("enabled",False))
-        if self.motion_enabled and (m["voxel"].get("embedding") != "learned_sbe" or d != 128):
+        motion_requested=bool(motion_cfg.get("enabled",False))
+        motion_mode=motion_cfg.get("mode", "legacy")
+        if motion_requested and motion_mode not in {"legacy", "gated_velocity"}:
+            raise ValueError(f"Unknown motion mode: {motion_mode}")
+        self.motion_enabled=motion_requested and motion_mode == "legacy"
+        if motion_requested and (m["voxel"].get("embedding") != "learned_sbe" or d != 128):
             raise ValueError("MTCE-3 requires Learned-SBE with dim=128")
         if self.motion_enabled and (motion_cfg.get("injection","pre_norm_residual") != "pre_norm_residual" or not motion_cfg.get("zero_init",True)):
             raise ValueError("MTCE-3 requires pre_norm_residual and zero_init=true")
@@ -270,10 +275,18 @@ class LiDARUAVDetector(nn.Module):
         query_cfg = m.get("query_decoder", {})
         self.query_decoder = None
         if query_cfg.get("enabled", False):
+            if motion_requested and motion_mode == "gated_velocity":
+                raise ValueError("gated_velocity is a dense A2 experiment; do not combine with query decoder")
             from .radar_query_decoder import RadarQueryDecoder
             self.query_decoder = RadarQueryDecoder(d, query_cfg)
             if self.quality_head is not None:
                 raise ValueError("query decoder and dense quality head are separate experiments")
+        # One owner for the new motion path. Spatial encoders/mergers stay pure.
+        self.temporal_motion = None
+        if motion_requested and motion_mode == "gated_velocity":
+            with torch.random.fork_rng(devices=[]):
+                torch.manual_seed(int(motion_cfg.get("seed", 42)))
+                self.temporal_motion = GatedTemporalMotion(motion_cfg, d)
         self.lora_targets = []
         lora_cfg = m.get("lora", {})
         if lora_cfg.get("enabled", False):
@@ -289,22 +302,43 @@ class LiDARUAVDetector(nn.Module):
         h=self.hierarchy(batch["points"],batch["point_batch_index"]); l0,l1,l2=h.levels
         if self.trace_observer is not None: self.trace_observer(h)
         motion,temporal_stats=self.temporal_centroid(batch,h) if self.motion_enabled else ([None]*3,[])
+        contexts = None
+        if self.temporal_motion is not None:
+            contexts, temporal_stats = self.temporal_motion(batch, h)
+        def condition(feature, level):
+            return (self.temporal_motion.condition(feature, contexts[level], level)
+                    if contexts is not None else feature)
         embedding=self.voxel_embed(batch,h,motion_features=motion[0]) if self.motion_enabled else self.voxel_embed(batch,h)
-        f0=self.encoder0(embedding,l0)
-        f1=self.encoder1(self.merge01(f0,l0,l1,h.parent_l0_to_l1,motion[1]),l1)
-        f2=self.encoder2(self.merge12(f1,l1,l2,h.parent_l1_to_l2,motion[2]),l2)
+        f0=self.encoder0(condition(embedding,0),l0)
+        f1=self.encoder1(condition(self.merge01(f0,l0,l1,h.parent_l0_to_l1,motion[1]),1),l1)
+        f2=self.encoder2(condition(self.merge12(f1,l1,l2,h.parent_l1_to_l2,motion[2]),2),l2)
         d1=self.up21(f1,f2,h.parent_l1_to_l2); q=self.final_norm(self.up10(f0,d1,h.parent_l0_to_l1))
         if self.metadata_proj is not None:
             metadata=torch.stack((torch.log1p(torch.linalg.vector_norm(l0.centers.float(),dim=1)),
                                   torch.log1p(l0.point_count.float())),1)
             q=q+self.metadata_proj(metadata.to(q.dtype))
         logits,residual,pred=self.head(q,l0.centers)
+        motion_offset = None
+        if contexts is not None:
+            motion_offset = self.temporal_motion.offset(q, contexts[0])
+            # Loss and inference MUST see exactly the same total residual.
+            residual = residual.float() + motion_offset
+            pred = decode_residual(residual, l0.centers, self.head.residual_scale_m)
         output = {"logits":logits,"residual_xyz":residual,"pred_xyz":pred,"fine_features":q,"voxel_centers":l0.centers,
                 "source_token_id":torch.arange(len(q),device=q.device),"batch_index":l0.batch_index,"layouts":h,"motion_features":motion if self.motion_enabled else None,"temporal_stats":temporal_stats,
                 "aux_stats":{"token_counts":[len(x.coords) for x in h.levels],"num_samples":int(batch["num_samples"]),"attention_backend":"explicit_pytorch_scaled_dot_product_with_additive_axis_bias"}}
 
         if self.quality_head is not None:
             output["quality_logits"] = self.quality_head(q).squeeze(-1)
+        if contexts is not None:
+            output["motion_diagnostics"] = {
+                "velocity_xyz": contexts[0].velocity_xyz,
+                "valid": contexts[0].valid, "dynamic": contexts[0].dynamic,
+                "reliability": contexts[0].reliability,
+                "reference_dt": contexts[0].reference_dt,
+                "fit_error_m": contexts[0].fit_error_m,
+                "offset_xyz": motion_offset,
+            }
         return output
 
     def forward(self,batch):

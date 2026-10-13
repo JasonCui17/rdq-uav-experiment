@@ -70,7 +70,7 @@ def set_efficient_train_mode(detector, mode):
         detector.head.requires_grad_(True)
     else:
         detector.query_decoder.requires_grad_(True)
-    for name in ('quality_head', 'metadata_proj'):
+    for name in ('quality_head', 'metadata_proj', 'temporal_motion'):
         module = getattr(detector, name, None)
         if module is not None:
             module.requires_grad_(True)

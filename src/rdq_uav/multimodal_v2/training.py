@@ -302,6 +302,17 @@ def forward_step(runtime: V2Runtime, batch: Mapping[str, Any], device: torch.dev
         result["radar_loss_stats"] = {} if radar_loss is None else {
             key: value for key, value in radar_loss.items() if key.startswith("num_")
         }
+        if raw is not None and "motion_diagnostics" in raw:
+            motion = raw["motion_diagnostics"]
+            # Separate target-support and background counts: all-voxel dynamic
+            # rates alone hide the failure of sparse target motion estimation.
+            positive, _, negative, _ = runtime.lidar_loss.labels(raw, output.diagnostics["lidar_batch"])
+            for name, mask in (("all", torch.ones_like(motion["valid"])),
+                               ("positive", positive), ("negative", negative)):
+                for status in ("valid", "dynamic"):
+                    result["radar_loss_stats"][f"num_motion_{name}_{status}"] = (mask & motion[status]).sum().detach()
+                result["radar_loss_stats"][f"num_motion_{name}_voxels"] = mask.sum().detach()
+            result["radar_loss_stats"]["num_motion_nonzero_offsets"] = (motion["offset_xyz"].detach().norm(dim=1) > 0).sum()
     elif stage == "B1":
         ids = lidar_batch["vision_batch_index"]
         raw = output.diagnostics["vision_raw"]
@@ -565,7 +576,7 @@ if L is not None:
             self._train_loss_samples += batch_size
             self.live_progress["loss_avg"] = self._train_loss_sum/self._train_loss_samples
             for key, value in values.get("radar_loss_stats", {}).items():
-                self.log(f"train/{key}", float(value), on_step=False, on_epoch=True,
+                self.log(f"train/{key}", value.float() if torch.is_tensor(value) else float(value), on_step=False, on_epoch=True,
                          reduce_fx="sum", batch_size=1)
             for key, value in values.get("loss_components", {}).items():
                 self.log(f"train/native_{key}", value, on_step=True, on_epoch=True, batch_size=batch_size)

@@ -39,9 +39,12 @@ def checkpoint_summary(payload):
     point_mlp = state.get("voxel_embed.point_mlp.0.weight")
     projection = state.get("voxel_embed.proj.weight")
     learned = point_mlp is not None and projection is not None and projection.shape[1] in (288, 544)
-    norms = {key: float(state[key].float().norm()) if key in state else None for key in MOTION_KEYS}
+    gated = any(key.startswith("temporal_motion.conditioners.") for key in state)
+    keys = [key for key in state if key.startswith("temporal_motion.") and ".2." in key] if gated else MOTION_KEYS
+    norms = {key: float(state[key].float().norm()) if key in state else None for key in keys}
     return {"epoch": payload.get("epoch"), "global_step": payload.get("global_step"),
-            "learned_sbe_weights": learned, "mtce_projection_norms": norms}
+            "learned_sbe_weights": learned, "motion_mode": "gated_velocity" if gated else "legacy",
+            "mtce_projection_norms": norms}
 
 
 def audit_current(config, root):

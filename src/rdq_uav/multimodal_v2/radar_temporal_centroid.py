@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import math
+from dataclasses import dataclass
 import torch
 from torch import nn
 
@@ -76,12 +77,177 @@ class TemporalCentroidFeatures(nn.Module):
                               "valid_pair_count": pairs.sum(),
                               "voxels_with_motion_support": (pairs > 0).sum()}
                 if return_debug:
+                    sensor_sum = points.new_zeros(n * self.num_bins).index_add_(
+                        0, index, batch["sensor_id"].float())
                     diagnostic.update(bin_count=count, bin_centroid=centroid,
                                       bin_mean_time=mean_time, pair_valid=valid,
                                       pair_gap_s=gap, pair_speed_mps=speed,
+                                      bin_sensor_ratio=sensor_sum.reshape(n, self.num_bins) / denom,
                                       motion=motion)
                 diagnostics.append(diagnostic)
         return features, diagnostics
+
+
+@dataclass(frozen=True)
+class MotionContext:
+    """GT-free, fixed-voxel observation motion; all physical values are FP32.
+
+    This is not object velocity or pointwise instance segmentation. A missing
+    fit is unknown, not static. No observations are associated across voxels.
+    """
+    descriptor: torch.Tensor       # [N, 11], dimensionless network input
+    velocity_xyz: torch.Tensor     # [N, 3], meters/second
+    reference_dt: torch.Tensor     # [N], weighted observation time relative to query
+    reliability: torch.Tensor      # [N], [0, 1]
+    valid: torch.Tensor            # [N], accepted continuous fit
+    dynamic: torch.Tensor          # [N], reliable speed above configured noise threshold
+    fit_error_m: torch.Tensor      # [N], weighted centroid RMS residual
+
+
+class GatedTemporalMotion(nn.Module):
+    """One motion context drives multiscale conditioning and L0-only offsets.
+
+    The legacy MTCE bin engine is reused once per forward. Geometry/statistics
+    have no gradient; conditioners and offset acceptance are trainable.
+    """
+    DESCRIPTOR_DIM = 11
+
+    def __init__(self, config, dim=128):
+        super().__init__()
+        self.statistics = TemporalCentroidFeatures(config)
+        self.feature_gate = bool(config.get("feature_gate", True))
+        self.velocity_guidance = bool(config.get("velocity_guidance", True))
+        self.min_bins = int(config.get("min_consecutive_bins", 3))
+        self.min_points = int(config.get("min_points_per_bin", 2))
+        self.count_cap = float(config.get("count_weight_cap", 8.))
+        self.min_span = float(config.get("min_span_s", .3))
+        self.error_scale = float(config.get("fit_error_scale_m", .05))
+        self.max_error = float(config.get("max_fit_error_m", .1))
+        self.max_sensor_change = float(config.get("max_sensor_ratio_change", .5))
+        self.min_reliability = float(config.get("min_reliability", .25))
+        self.dynamic_speed = float(config.get("dynamic_speed_mps", .15))
+        self.max_speed = float(config.get("max_speed_mps", 15.))
+        self.max_age = float(config.get("max_latest_age_s", .3))
+        self.max_offset = float(config.get("max_offset_m", .5))
+        if not 3 <= self.min_bins <= self.statistics.num_bins or self.min_points < 1:
+            raise ValueError("motion fit requires 3..5 consecutive bins and positive point support")
+        positive = (self.count_cap, self.min_span, self.error_scale, self.max_error,
+                    self.dynamic_speed, self.max_speed, self.max_age, self.max_offset)
+        if any(not math.isfinite(x) or x <= 0 for x in positive):
+            raise ValueError("motion scales and thresholds must be finite and positive")
+        if not 0 <= self.max_sensor_change <= 1 or not 0 < self.min_reliability <= 1:
+            raise ValueError("invalid sensor-change/reliability threshold")
+        if self.dynamic_speed >= self.max_speed:
+            raise ValueError("dynamic threshold must be below maximum accepted speed")
+        if config.get("reliability_only", False):
+            raise ValueError("reliability_only belongs to legacy MTCE, not gated_velocity")
+        width = dim + self.DESCRIPTOR_DIM
+        self.conditioners = nn.ModuleList([
+            nn.Sequential(nn.Linear(width, 64), nn.GELU(), nn.Linear(64, 2 * dim))
+            for _ in range(3)
+        ]) if self.feature_gate else nn.ModuleList()
+        self.offset_gate = (nn.Sequential(nn.Linear(width, 64), nn.GELU(), nn.Linear(64, 1))
+                            if self.velocity_guidance else None)
+        self.reset_identity()
+
+    def reset_identity(self):
+        # Zero only the final projections: original A2 forward is exactly kept.
+        for block in list(self.conditioners) + ([self.offset_gate] if self.offset_gate is not None else []):
+            nn.init.zeros_(block[-1].weight)
+            nn.init.zeros_(block[-1].bias)
+
+    @torch.no_grad()
+    def _fit(self, debug):
+        count, c, t = debug["bin_count"], debug["bin_centroid"], debug["bin_mean_time"]
+        n, bins = count.shape
+        supported = count >= self.min_points
+        # Choose longest consecutive run, newest on ties; never bridge a hole
+        # or a too-small timestamp gap. Loop is over five bins, not voxels.
+        run = torch.zeros(n, device=count.device, dtype=torch.long)
+        best = run.clone(); end = run.clone()
+        for k in range(bins):
+            connected = debug["pair_valid"][:, k-1] if k else torch.zeros_like(supported[:, 0])
+            run = torch.where(supported[:, k], torch.where(connected, run + 1, 1), 0)
+            replace = (run > 0) & (run >= best)
+            best = torch.where(replace, run, best)
+            end = torch.where(replace, k, end)
+        positions = torch.arange(bins, device=count.device)[None]
+        mask = (positions <= end[:, None]) & (positions > (end-best)[:, None])
+        weight = count.float().clamp(max=self.count_cap).sqrt() * mask
+        total = weight.sum(1).clamp_min(1.)
+        tref = (weight*t).sum(1) / total
+        cref = (weight[..., None]*c).sum(1) / total[:, None]
+        tau = t-tref[:, None]
+        time_var = (weight*tau.square()).sum(1)
+        velocity = (weight[..., None]*tau[..., None]*(c-cref[:, None])).sum(1) / time_var.clamp_min(1e-8)[:, None]
+        fitted = cref[:, None] + tau[..., None]*velocity[:, None]
+        error = ((weight*(c-fitted).square().sum(-1)).sum(1)/total).clamp_min(0).sqrt()
+        tmin = t.masked_fill(~mask, float("inf")).amin(1)
+        tmax = t.masked_fill(~mask, -float("inf")).amax(1)
+        span = torch.where(best > 0, tmax-tmin, 0.)
+        age = torch.where(best > 0, -tmax, self.statistics.history_s)
+        ratio = debug["bin_sensor_ratio"]
+        sensor_change = (ratio.masked_fill(~mask, -float("inf")).amax(1)
+                         - ratio.masked_fill(~mask, float("inf")).amin(1))
+        sensor_change = torch.where(best > 0, sensor_change, 0.)
+        speed = velocity.norm(dim=1)
+        valid = ((best >= self.min_bins) & (span >= self.min_span)
+                 & (error <= self.max_error) & (speed <= self.max_speed)
+                 & (age <= self.max_age) & (sensor_change <= self.max_sensor_change)
+                 & torch.isfinite(velocity).all(1) & torch.isfinite(error))
+        reliability = ((best.float()/bins) * (span/(2*self.min_span)).clamp(0, 1)
+                       * torch.exp(-error/self.error_scale) * (1-sensor_change))
+        reliability = torch.where(valid, reliability.clamp(0, 1), 0.)
+        dynamic = valid & (reliability >= self.min_reliability) & (speed >= self.dynamic_speed)
+        velocity = torch.where(valid[:, None], velocity, 0.)
+        speed = velocity.norm(dim=1)
+        # Dimensionless, bounded/log-scaled descriptors; distinguish unknown
+        # fits from reliable zero speed using explicit validity and reliability.
+        reference = self.statistics.reference
+        descriptor = torch.cat((
+            torch.sign(velocity)*torch.log1p(velocity.abs()/reference),
+            torch.stack((torch.log1p(speed/reference), best.float()/bins,
+                         torch.log1p((count.float()*mask).sum(1)),
+                         (error/self.error_scale).clamp(max=10),
+                         age.clamp(0, self.statistics.history_s)/self.statistics.history_s,
+                         sensor_change, reliability, valid.float()), dim=1)), dim=1)
+        if not torch.isfinite(descriptor).all():
+            raise FloatingPointError("non-finite gated MTCE context")
+        return MotionContext(descriptor, velocity, tref, reliability, valid, dynamic, error)
+
+    def forward(self, batch, hierarchy):
+        _, bins = self.statistics(batch, hierarchy, return_debug=True)
+        with torch.autocast(device_type=batch["points"].device.type, enabled=False):
+            contexts = [self._fit(item) for item in bins]
+        diagnostics = []
+        for context, item in zip(contexts, bins):
+            diagnostics.append({key: value for key, value in item.items() if key in (
+                "valid_pair_count", "voxels_with_motion_support", "rejected_small_gap_count")})
+            diagnostics[-1].update(valid_fit_count=context.valid.sum(),
+                                   dynamic_count=context.dynamic.sum(),
+                                   voxel_count=context.valid.new_tensor(len(context.valid), dtype=torch.long))
+        return contexts, diagnostics
+
+    def condition(self, feature, context, level):
+        if not self.feature_gate:
+            return feature
+        inputs = torch.cat((feature, context.descriptor.to(feature.dtype)), 1)
+        gamma, beta = self.conditioners[level](inputs).chunk(2, dim=1)
+        delta = torch.tanh(gamma)*feature + beta
+        return feature + context.reliability[:, None].to(feature.dtype)*delta
+
+    def offset(self, feature, context):
+        if self.offset_gate is None:
+            return feature.new_zeros((len(feature), 3), dtype=torch.float32)
+        coefficient = torch.tanh(self.offset_gate(torch.cat(
+            (feature, context.descriptor.to(feature.dtype)), 1))[:, 0].float())
+        with torch.autocast(device_type=feature.device.type, enabled=False):
+            prior = context.velocity_xyz*(-context.reference_dt).clamp(0, self.statistics.history_s)[:, None]
+            offset = coefficient[:, None]*context.reliability[:, None]*prior
+            # Bound displacement magnitude, not each axis separately.
+            norm = offset.norm(dim=1, keepdim=True).clamp_min(1e-8)
+            offset = offset*(self.max_offset/norm).clamp(max=1.)
+            return torch.where(context.dynamic[:, None], offset, 0.)
 
 
 def load_a2_warmstart(detector, checkpoint):
