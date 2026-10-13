@@ -23,6 +23,7 @@ from .radar_loss import CandidateLoss
 from .radar_model import LiDARUAVDetector
 from .radar_temporal_centroid import load_a2_warmstart, set_radar_train_mode
 from .radar_selector import CandidateSelector
+from .radar_architecture import validate_b4_radar_config, confirm_b4_radar
 from rdq_uav.multimodal_v2.geometry import load_left_projection_context
 from .dino_supervision import build_dino_targets, supervised_dino_loss
 from .paper_metrics import localization_metrics, coco_bbox_metrics
@@ -79,6 +80,8 @@ def build_runtime(config: Mapping[str, Any], root: Path, device: torch.device,
     pair_topk = int(pair_cfg.get("topk", 50))
     candidate_cfg = yaml.safe_load(_resolve(root, init["candidate_config"]).read_text())
     lidar_cfg = yaml.safe_load(_resolve(root, init["lidar_config"]).read_text())
+    radar_architecture = (validate_b4_radar_config(lidar_cfg, config["data"]["radar_history_s"])
+                          if is_pair else None)
     lidar_detector: nn.Module = nn.Identity()
     lidar: nn.Module = nn.Identity()
     if stage != "B1":
@@ -99,6 +102,11 @@ def build_runtime(config: Mapping[str, Any], root: Path, device: torch.device,
             print("Loaded A2 MTCE warmstart:", report)
         if stage in {"B2", "B3", "B4"} and initialize_from_baselines:
             _load_trained_branch(lidar_detector, _resolve(root, init["b0_checkpoint"]), "network.lidar.detector.")
+            if is_pair:
+                # Fail before constructing DINO if the frozen MTCE branch is
+                # absent or still a zero-initialized no-op.
+                from .radar_architecture import audit_b4_radar_detector
+                audit_b4_radar_detector(lidar_detector)
 
     dino_initialization = None
     dino_detector: nn.Module = nn.Identity()
@@ -124,6 +132,7 @@ def build_runtime(config: Mapping[str, Any], root: Path, device: torch.device,
             final_topk=pair_topk if is_pair else int(candidate_cfg["candidate"]["rgb"]["final_topk"]),
             nms_iou=float(candidate_cfg["candidate"]["rgb"]["nms_iou"]), apply_nms=not is_pair,
         )
+        vision.builder.projection_fp32 = is_pair
         if stage in {"B2", "B3", "B4"} and initialize_from_baselines:
             checkpoint = _resolve(root, init["b1_checkpoint"])
             _load_trained_branch(dino_detector, checkpoint, "network.vision.dino.detector.")
@@ -170,9 +179,12 @@ def build_runtime(config: Mapping[str, Any], root: Path, device: torch.device,
         projection, camera_path, geometry_path,
         {"stage": stage, "b0_checkpoint": init.get("b0_checkpoint"), "b1_checkpoint": init.get("b1_checkpoint"),
          "dino_pretrained": dino_initialization,
+         "radar_architecture": radar_architecture,
          "radar_train_mode": config.get("training", {}).get("radar_train_mode", "full")},
     )
     freeze_for_stage(runtime, str(config["experiment"]["stage"]))
+    if is_pair and initialize_from_baselines:
+        confirm_b4_radar(runtime)
     return runtime
 
 
@@ -458,6 +470,9 @@ if L is not None:
             )
 
         def on_fit_start(self) -> None:
+            # Lightning has restored full checkpoint weights at this point.
+            if self.runtime.initialization.get("radar_architecture") is not None:
+                confirm_b4_radar(self.runtime)
             self._refresh_external_device()
 
         def on_train_epoch_start(self) -> None:
@@ -488,7 +503,7 @@ if L is not None:
             values = forward_step(self.runtime, batch, self.device, compute_frozen_losses=True)
             loss = values["loss"]
             batch_size = len(batch["m_R"])
-            if self.runtime.initialization["stage"] == "B0":
+            if self.runtime.initialization["stage"] in {"B0", "B4"}:
                 raw = getattr(values["output"], "diagnostics", {}).get("lidar_raw")
                 for level, stats in enumerate((raw or {}).get("temporal_stats", [])):
                     for key, value in stats.items():
@@ -562,17 +577,49 @@ if L is not None:
             }, on_step=True, on_epoch=True, batch_size=batch_size)
             return loss
 
+        def _active_gradient_scaler(self):
+            if self._trainer is None:
+                return None
+            return getattr(self.trainer.precision_plugin, "scaler", None)
+
         def on_after_backward(self) -> None:
+            # Under FP16 these gradients are still scaled, including partial
+            # accumulation. GradScaler must be allowed to detect and skip an
+            # overflow at the optimizer boundary, not be interrupted here.
+            if self._active_gradient_scaler() is None:
+                self._check_unscaled_gradients()
+
+        def on_before_optimizer_step(self, optimizer) -> None:
+            scaler = self._active_gradient_scaler()
+            if scaler is not None:
+                self.log("train/amp_scale", float(scaler.get_scale()), on_step=True, on_epoch=False)
+                self._check_unscaled_gradients(allow_amp_skip=True)
+
+        def _check_unscaled_gradients(self, *, allow_amp_skip: bool = False) -> None:
             finite = True
             nonzero = False
-            for parameter in self.network.parameters():
+            offending = []
+            for name, parameter in self.network.named_parameters():
                 if not parameter.requires_grad or parameter.grad is None:
                     continue
                 gradient = parameter.grad.detach().float()
-                finite = finite and bool(torch.isfinite(gradient).all())
+                good = bool(torch.isfinite(gradient).all())
+                finite = finite and good
+                if not good:
+                    offending.append(name)
                 nonzero = nonzero or bool(torch.count_nonzero(gradient))
+            if allow_amp_skip:
+                self.log("train/amp_nonfinite_step", float(not finite),
+                         on_step=True, on_epoch=True)
             if not finite:
-                raise FloatingPointError("non-finite gradient in Multimodal V2 trainable path")
+                if allow_amp_skip:
+                    # scaler.unscale_ has already recorded found_inf. The
+                    # precision plugin will skip optimizer.step and reduce
+                    # the loss scale. Do not zero, sanitize, or mutate grads.
+                    self.log("train/has_nonzero_gradient", 0., on_step=True, on_epoch=False)
+                    return
+                raise FloatingPointError("non-finite unscaled gradient in Multimodal V2: "
+                                         + ", ".join(offending[:8]))
             if self.runtime.initialization.get("radar_train_mode") == "motion_only":
                 detector = self.runtime.lidar_detector
                 for level, module in enumerate((detector.voxel_embed, detector.merge01, detector.merge12)):

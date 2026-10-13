@@ -23,6 +23,7 @@ from rdq_uav.multimodal_v2.data import build_split_dataset, collate_multimodal_v
 from rdq_uav.multimodal_v2.training import build_runtime, summarize_3d, synchronize_dino_device, _stage_batch, joint_validation_rows
 from rdq_uav.multimodal_v2.loss import box_iou_aligned
 from rdq_uav.multimodal_v2.paper_metrics import paper_report, write_paper_csv
+from rdq_uav.multimodal_v2.radar_architecture import confirm_b4_radar
 
 
 def parse_args():
@@ -87,6 +88,7 @@ def main():
     checkpoint_info = None
     if args.checkpoint:
         checkpoint_info = load_network(runtime.model, resolve(args.checkpoint))
+        confirm_b4_radar(runtime)
     runtime.model.to(device).eval(); synchronize_dino_device(runtime, device)
     from rdq_uav.multimodal_v2.geometry import load_left_projection_context
     runtime.projection_base = load_left_projection_context(

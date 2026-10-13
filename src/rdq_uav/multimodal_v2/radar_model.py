@@ -1,4 +1,4 @@
-"""LiDAR UAV V2 spatial candidate model with SBE-Lite voxel embedding."""
+"""V2 spatial detector: Learned-SBE, optional three-scale MTCE and historical frontends."""
 from __future__ import annotations
 import math
 from typing import Any
@@ -12,7 +12,7 @@ from .radar_temporal_centroid import TemporalCentroidFeatures
 
 def build_voxel_embedding(model_cfg):
     voxel = model_cfg['voxel']
-    name = voxel.get('embedding', 'sbe_lite')
+    name = voxel.get('embedding', 'learned_sbe')
     dim, size = model_cfg['dim'], voxel['scales'][0]
     if name == 'sbe_lite':
         return SBELiteVoxelEmbed(dim, size, voxel.get('sbe'))

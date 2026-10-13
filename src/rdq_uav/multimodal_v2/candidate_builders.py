@@ -74,6 +74,7 @@ class RGBCandidateBuilder(nn.Module):
         self.feature_proj=nn.Linear(query_dim,feature_dim)
         self.pre_topk=int(pre_topk); self.final_topk=int(final_topk); self.nms_iou=float(nms_iou)
         self.apply_nms=bool(apply_nms)
+        self.projection_fp32=False
 
     def forward(self, dino_output: dict[str,torch.Tensor], source_image_size_wh: torch.Tensor) -> CandidateBatch:
         logits=dino_output['pred_logits']; boxes=dino_output['pred_boxes']; query=dino_output['decoder_query_features']
@@ -87,7 +88,13 @@ class RGBCandidateBuilder(nn.Module):
             raise ValueError(f'RGB candidates require 1-class UAV logits, got C={logits.shape[-1]}')
         score=torch.sigmoid(logits[...,0].float()).to(query.dtype)
         source_boxes=_cxcywh_norm_to_source_xyxy(boxes,source_image_size_wh.to(boxes.dtype))
-        projected=self.feature_proj(query)
+        if self.projection_fp32:
+            # B4's only trainable visual layer must not send loss-scaled
+            # gradients through an FP16 activation boundary.
+            with torch.autocast(device_type=query.device.type, enabled=False):
+                projected=self.feature_proj(query.float())
+        else:
+            projected=self.feature_proj(query)
         out=[]
         for b in range(logits.shape[0]):
             order=torch.argsort(score[b],descending=True,stable=True)[:self.pre_topk]

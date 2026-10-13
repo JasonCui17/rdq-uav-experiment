@@ -193,6 +193,7 @@ def main():
         "framework": "lightning", "train_queries": len(train_data), "val_queries": len(val_data),
         "precision": precision, "accelerator": accelerator, "devices": devices,
         "max_updates": args.max_updates,
+        "radar_architecture": runtime.initialization.get("radar_architecture"),
     }
     if not args.fast_dev_run:
         (output / "effective_config.yaml").write_text(yaml.safe_dump(cfg, sort_keys=False))

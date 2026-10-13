@@ -71,6 +71,18 @@ class CandidatePairFusion(nn.Module):
 
     def forward(self, radar: CandidateBatch, vision: CandidateBatch, *, num_samples: int,
                 diagnostics: dict | None = None) -> MultimodalOutput:
+        # All B4 trainable layers and their intervening activations stay FP32.
+        # Frozen detector features may arrive in FP16/BF16, but are constants
+        # for this stage. This avoids scaled-gradient FP16 cast overflow.
+        with torch.autocast(device_type=radar.feature.device.type, enabled=False):
+            return self._forward_fp32(
+                replace(radar, feature=radar.feature.float()),
+                replace(vision, feature=vision.feature.float()),
+                num_samples=num_samples, diagnostics=diagnostics,
+            )
+
+    def _forward_fp32(self, radar: CandidateBatch, vision: CandidateBatch, *, num_samples: int,
+                      diagnostics: dict | None = None) -> MultimodalOutput:
         radar = select_topk(radar, num_samples, self.topk)
         vision = select_topk(vision, num_samples, self.topk)
         hr = self.radar_adapter(radar.feature)

@@ -1,0 +1,77 @@
+# LearnSBE + trained MTCE are mandatory. Generate the server config from your existing B4 using diagnostics/prepare_b4_learnsbe_mtce.py.
+experiment:
+  name: b4_learnsbe_mtce_seed42
+  stage: B4
+  seed: 42
+  output_dir: outputs/b4_learnsbe_mtce_seed42
+data:
+  root: data/mmaud_official_train
+  split_file: splits/mmaud_v2_annotated20_seed42.json
+  train_split: train_sub
+  val_split: validation_sub
+  radar_history_s: 1.0
+  max_image_gap_s: 1.0
+  label_directory: 2d_detect
+  camera_config: configs/calibration/mmaud_v1_omni.yaml
+  geometry_calibration: calibration/official_left_p4_current_geometry.json
+  dino_short_edge: 800
+  dino_max_size: 1333
+  num_workers: 2
+  prefetch_factor: 2
+initialization:
+  lidar_config: experiments/multimodal_v2/configs/radar_a2_mtce3.yaml
+  candidate_config: experiments/multimodal_v2/configs/candidates.yaml
+  dino_root: third_party/detrex
+  dino_config: third_party/detrex/projects/dino/configs/dino-swin/dino_swin_tiny_224_4scale_12ep.py
+  b0_checkpoint: outputs/b0_a2_mtce3_seed42/checkpoints/best.ckpt
+  b1_checkpoint: outputs/own_multimodal_research/multimodal_v2/b1_seed42/checkpoints/best.ckpt
+model:
+  geometry_gate:
+    mode: inverse_range
+    min_px: 8.0
+    max_px: 48.0
+    reference_range_m: 20.0
+    reference_margin_px: 16.0
+  pair_fusion:
+    topk: 50
+    geometry_weight: 1.0
+    similarity_weight: 1.0
+    center_weight: 0.01
+    reject_outside_gate: false
+loss:
+  xyz_positive_m: 1.0
+  box_positive_iou: 0.5
+  xyz_boundary_m: 0.05
+  iou_boundary: 0.02
+  hard_negative_weight: 2.0
+  ordinary_negative_weight: 1.0
+  lambda_cls: 1.0
+  lambda_align: 1.0
+  lambda_rank: 0.5
+  negative_similarity_margin: 0.2
+  ranking_margin: 1.0
+training:
+  epochs: 12
+  batch_size: 1
+  accumulate: 4
+  learning_rate: 0.0001
+  final_lr_ratio: 0.01
+  warmup_fraction: 0.05
+  weight_decay: 0.0001
+  betas:
+  - 0.9
+  - 0.999
+  eps: 1.0e-08
+  grad_clip_norm: 1.0
+logging:
+  every_updates: 20
+lightning:
+  accelerator: gpu
+  devices: 1
+  precision: 16-mixed
+  num_sanity_val_steps: 1
+  deterministic: warn
+checkpoint:
+  monitor: val/joint_success
+  mode: max
+  filename: best_joint
