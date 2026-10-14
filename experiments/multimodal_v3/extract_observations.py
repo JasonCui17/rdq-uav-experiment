@@ -66,7 +66,7 @@ def main():
     cache.mkdir(parents=True);(cache/'frames').mkdir()
     (cache/'effective_config.yaml').write_text(yaml.safe_dump(cfg,sort_keys=False))
     selector=runtime.model.lidar.builder.selector
-    manifest=dict(schema_version=1,complete=False,checkpoint=str(checkpoint),checkpoint_sha256=sha(checkpoint),
+    manifest=dict(schema_version=2,complete=False,checkpoint=str(checkpoint),checkpoint_sha256=sha(checkpoint),
                   checkpoint_info=info,config=str(config),config_sha256=sha(config),
                   lidar_config_sha256=sha(radar_path),candidate_config_sha256=sha(resolve(Path(cfg['initialization']['candidate_config']))),
                   split_file_sha256=sha(resolve(Path(cfg['data']['split_file']))),
@@ -76,6 +76,9 @@ def main():
                   selector={'raw_topk':selector.raw_topk,'pre_nms_topk':selector.pre,'final_topk':selector.final,'nms_radius_m':selector.radius},
                   protocol='existing GT-timestamp query schedule, not continuous raw sensor tracking',
                   independent_reference_checked=reference is not None,
+                  evidence_fields=['dense_point_count','dense_motion_valid','dense_motion_dynamic',
+                                   'dense_motion_reliability','dense_motion_speed_mps'],
+                  background_evidence_note='Raw L0 count and optional GT-free motion diagnostics; invalid motion is unknown',
                   smoke_test=args.limit is not None)
     (cache/'manifest.json').write_text(json.dumps(manifest,indent=2))
     started=time.monotonic()
@@ -93,9 +96,30 @@ def main():
                 dense_xyz=cpu(raw['pred_xyz'].float());dense_score=cpu(CandidateSelector.ranking_scores(raw))
                 dense_rank=cpu(CandidateSelector.ranking_scores(raw) if 'quality_logits' in raw else raw['logits'].float())
                 tokens=cpu(raw['source_token_id'])
+                point_count=cpu(raw['layouts'].levels[0].point_count).astype(np.int64)
+                motion=raw.get('motion_diagnostics')
+                if motion is not None:
+                    motion_valid=cpu(motion['valid']).astype(np.bool_)
+                    motion_dynamic=cpu(motion['dynamic']).astype(np.bool_)
+                    motion_reliability=cpu(motion['reliability']).astype(np.float32)
+                    motion_speed=cpu(torch.linalg.vector_norm(motion['velocity_xyz'].float(),dim=1)).astype(np.float32)
+                else:
+                    motion_valid=np.zeros(len(tokens),dtype=np.bool_)
+                    motion_dynamic=np.zeros(len(tokens),dtype=np.bool_)
+                    motion_reliability=np.zeros(len(tokens),dtype=np.float32)
+                    motion_speed=np.zeros(len(tokens),dtype=np.float32)
+                if any(len(x)!=len(tokens) for x in (point_count,motion_valid,motion_dynamic,
+                                                       motion_reliability,motion_speed)):
+                    raise ValueError('Dense motion diagnostics must align with source tokens')
             else:dense_xyz=np.empty((0,3),np.float32);dense_score=dense_rank=np.empty(0,np.float32);tokens=np.empty(0,np.int64)
+            if raw is None:
+                point_count=np.empty(0,np.int64);motion_valid=motion_dynamic=np.empty(0,np.bool_)
+                motion_reliability=motion_speed=np.empty(0,np.float32)
             top=output.top3d_indices(1)[0]
             arrays=dict(dense_xyz=dense_xyz,dense_score=dense_score,dense_rank=dense_rank,dense_token_id=tokens,
+                        dense_point_count=point_count,dense_motion_valid=motion_valid,
+                        dense_motion_dynamic=motion_dynamic,dense_motion_reliability=motion_reliability,
+                        dense_motion_speed_mps=motion_speed,
                         global_xyz=cpu(radar.xyz_m.float()),global_score=cpu(radar.score.float()),global_token_id=cpu(radar.source_index),
                         baseline_xyz=cpu(output.xyz_m[top].float()),baseline_score=cpu(output.score_3d_after[top].float()),
                         baseline_token_id=cpu(output.radar_source_index[top]),gt_xyz=cpu(targets.xyz_m[0].float()),
