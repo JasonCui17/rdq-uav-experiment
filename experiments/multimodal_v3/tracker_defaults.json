@@ -1,0 +1,21 @@
+{
+  "measurement_std_m": 0.5,
+  "process_noise_density": 4.0,
+  "initial_position_std_m": 0.75,
+  "initial_velocity_std_mps": 5.0,
+  "mahalanobis_gate_sq": 11.34,
+  "max_innovation_m": 4.0,
+  "max_speed_mps": 20.0,
+  "quality_weight": 0.5,
+  "min_score": 0.0,
+  "local_radius_min_m": 1.0,
+  "local_radius_max_m": 4.0,
+  "local_pre_topk": 100,
+  "local_final_topk": 20,
+  "local_nms_radius_m": 0.3,
+  "confirm_hits": 3,
+  "confirmation_window_s": 1.0,
+  "max_prediction_age_s": 0.5,
+  "max_tentative_age_s": 0.35,
+  "reset_gap_s": 2.0
+}
