@@ -119,7 +119,10 @@ class CandidatePairFusion(nn.Module):
                 feasible = feasible & (dbox <= margin[:, None])
             selected = solve_assignment(cost, feasible)
             alignment.append(dict(radar_index=rids, vision_index=vids,
-                                  similarity=sim, valid_edges=valid_edges))
+                                  similarity=sim, valid_edges=valid_edges,
+                                  matching_cost=cost.detach(), d_box_px=dbox.detach(),
+                                  d_center_normalized=dcenter.detach(),
+                                  geometry_scale_px=margin.detach(), matching_feasible=feasible.detach()))
             used_r, used_v = set(), set()
             for ri, vi in selected:
                 r, v = int(rids[ri]), int(vids[vi])

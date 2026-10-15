@@ -6,6 +6,7 @@ from __future__ import annotations
 import argparse
 import json
 import sys
+import time
 from collections import Counter
 from pathlib import Path
 
@@ -24,13 +25,14 @@ from rdq_uav.multimodal_v2.training import build_runtime, summarize_3d, synchron
 from rdq_uav.multimodal_v2.loss import box_iou_aligned
 from rdq_uav.multimodal_v2.paper_metrics import paper_report, write_paper_csv
 from rdq_uav.multimodal_v2.radar_architecture import confirm_b4_radar
+from rdq_uav.multimodal_v2.diagnostic_export import candidate_evidence, append_evidence, save_feature_evidence
 
 
 def parse_args():
     p = argparse.ArgumentParser()
     p.add_argument("--config", type=Path, required=True)
     p.add_argument("--mode", choices=("B0", "B1", "B2", "B3", "B4"), required=True)
-    p.add_argument("--split", choices=("validation_sub", "heldout_test_sub"), default="validation_sub")
+    p.add_argument("--split", choices=("train_sub", "validation_sub", "heldout_test_sub"), default="validation_sub")
     p.add_argument("--checkpoint", type=Path)
     p.add_argument("--output", type=Path, required=True)
     p.add_argument("--device", default="cuda:0")
@@ -41,6 +43,8 @@ def parse_args():
     p.add_argument("--skip-coco", action="store_true", help="Explicitly disable standard image-level AP")
     p.add_argument("--method", help="Method name for paper_metrics.csv")
     p.add_argument("--bandwidth", default="", help="Measured sensor bandwidth, with units; never inferred")
+    p.add_argument("--dump-candidates", action="store_true", help="B4: export all retained candidates and joint evidence rows")
+    p.add_argument("--dump-features", action="store_true", help="B4: also save per-query raw/mapped features and similarity NPZ; use a small --indices subset")
     return p.parse_args()
 
 
@@ -70,13 +74,15 @@ def main():
     args = parse_args(); device = torch.device(args.device)
     if args.checkpoint is None:
         raise ValueError("evaluation requires a trained --checkpoint")
+    if (args.dump_candidates or args.dump_features) and args.mode != "B4":
+        raise ValueError("Candidate and feature diagnostic export currently requires B4")
     cfg = apply_runtime_path_overrides(yaml.safe_load(resolve(args.config).read_text()))
     if cfg["experiment"]["stage"] != args.mode:
         raise ValueError("--mode must match experiment.stage in --config")
     cfg["model"]["interaction_enabled"] = args.mode in {"B2", "B3"}
     cfg["model"]["vision_reads_radar"] = args.mode == "B3"
     cfg["model"]["vision_scoring_enabled"] = args.mode == "B3"
-    dataset = build_split_dataset(cfg, ROOT, args.split)
+    dataset = build_split_dataset(cfg, ROOT, args.split, filter_empty=args.split == "train_sub")
     if args.indices is not None:
         if args.limit is not None or any(i < 0 or i >= len(dataset) for i in args.indices):
             raise ValueError("--indices must be in range and cannot be combined with --limit")
@@ -98,7 +104,11 @@ def main():
     rows, type_counts, top_type_counts = [], Counter(), Counter()
     visual_ious = []
     loss_counts = Counter()
-    for batch in loader:
+    inference_start = time.perf_counter()
+    if args.dump_candidates or args.dump_features:
+        args.output.mkdir(parents=True, exist_ok=True)
+        (args.output / "b4_candidates.jsonl").write_text("")
+    for loader_index, batch in enumerate(loader):
         batch = _stage_batch(batch, args.mode)
         lidar, images, masks, projection, targets, _ = prepare_model_batch(
             batch, runtime.dino_detector, runtime.projection_base, device
@@ -106,6 +116,15 @@ def main():
         with torch.autocast(device_type=device.type, enabled=False):
             output = runtime.model(lidar, images, masks, projection)
         loss_values = runtime.ranking_loss(output, targets)
+        dataset_index = args.indices[loader_index] if args.indices is not None else loader_index
+        if args.dump_candidates or args.dump_features:
+            evidence = candidate_evidence(output, targets, loss_values, runtime.ranking_loss)
+            evidence.update(dataset_index=dataset_index, sample_id=batch["sample_id"][0],
+                            sequence_id=batch["sequence_id"][0], query_time=float(batch["query_time"][0]))
+            append_evidence(args.output / "b4_candidates.jsonl", evidence)
+            if args.dump_features:
+                save_feature_evidence(args.output / "features" / f"query_{dataset_index:06d}.npz",
+                                      output, runtime.model.pair_fusion)
         for index in range(len(targets.has_box)):
             if not bool(targets.has_box[index]):
                 continue
@@ -154,6 +173,7 @@ def main():
         rows.append({
             **raw_diagnostics,
             "sequence_id": batch["sequence_id"][0], "sample_id": batch["sample_id"][0],
+            "dataset_index": dataset_index,
             "query_time": float(batch["query_time"][0]),
             "image_path": batch["left_image_path"][0],
             "image_time": float(batch["image_time"][0]) if bool(batch["m_V"][0]) else None,
@@ -187,6 +207,9 @@ def main():
             "joint_metrics": joint_validation_rows(output, targets)[0]
                 if bool(targets.has_xyz[0] & targets.has_box[0]) and output.joint_logit is not None else None,
         })
+        if loader_index == 0 or (loader_index+1) % 100 == 0:
+            print(f"Evaluation {args.mode}/{args.split}: {loader_index+1}/{len(dataset)} queries; "
+                  f"elapsed={time.perf_counter()-inference_start:.1f}s", flush=True)
     metric_rows = [row for row in rows if row["has_gt3d"]]
     demoted = sum(
         row["before_error"] is not None and row["before_error"] <= 1.0
@@ -212,6 +235,7 @@ def main():
         "mode": args.mode, "split": args.split,
         "checkpoint": None if not args.checkpoint else str(resolve(args.checkpoint)),
         "checkpoint_info": checkpoint_info, "evaluation_precision": "fp32", "queries": len(rows),
+        "inference_seconds": time.perf_counter()-inference_start,
         "evaluated_gt3d_queries": len(metric_rows),
         "metrics": {"vision_2d": vision_metrics} if args.mode == "B1" else metrics(rows),
         "hypothesis_counts": {"RV": type_counts[0], "R": type_counts[1], "V": type_counts[2]},
