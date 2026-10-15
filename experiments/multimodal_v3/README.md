@@ -1,5 +1,7 @@
 # Multimodal V3：候选关联与 6D Kalman 跟踪
 
+当前固定版本为 [target_kf_v1_20261015](releases/target_kf_v1_20261015/README.md)，保留实时因果方案和最多0.5秒未来窗口平滑方案。固定配置、源码校验、两种运行命令及参考指标见版本说明；优化过程见 [OPTIMIZATION_LOG.md](OPTIMIZATION_LOG.md)。
+
 新增的 Stone Soup 多候选轨迹方法、评分配置、缓存 v1/v2 兼容性和五组手动运行命令见 [MULTI_TRACK_DESIGN.md](MULTI_TRACK_DESIGN.md)。本页保留原三组实验的使用方式；`evaluate_tracking.py` 默认仍运行原三组，显式 `--methods all` 才运行五组。
 
 本分支从 `mmv2-b4-aligned-pairs` 创建。V3 保留 V2 的数据、雷达网络、checkpoint、候选选择器和训练代码；新增的跟踪层位于 `src/rdq_uav/multimodal_v3/tracking.py`。它只消费冻结 B0 网络的一次前向缓存，不参与网络训练，也不改变候选分数或网络输出。原始实现来自 `KF_Candidate_Tracking_20261014.zip`，已适配仓库路径。

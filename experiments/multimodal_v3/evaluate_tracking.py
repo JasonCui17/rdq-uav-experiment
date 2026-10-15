@@ -40,6 +40,26 @@ def metrics(rows,method):
                 severe_gt10m=sum(e>10 for e in es),missing=n-len(es))
 
 
+
+def lifecycle_metrics(rows, events, method):
+    """GT-derived pool diagnostics are evaluation-only, never filter inputs."""
+    labeled = [row for row in rows if row['has_gt']]
+    errors = [row[method+'_confirmed_pool_min_error_m'] for row in labeled]
+    denominator = len(labeled)
+    selected_events = [event for event in events if event['method'] == method]
+    return {
+        'max_active_tracks': max((e['active_track_count'] for e in selected_events), default=0),
+        'max_tentative_tracks': max((e['tentative_track_count'] for e in selected_events), default=0),
+        'max_detection_count': max((e['detection_count'] for e in selected_events), default=0),
+        'births_after_pruning': sum(len(e['new_track_ids']) for e in selected_events),
+        'removal_counts': dict(Counter(item['reason'] for e in selected_events
+                                      for item in e['removed_tracks'])),
+        'confirmed_pool_labeled_queries': denominator,
+        'confirmed_pool_success_1m_count': sum(e is not None and e <= 1 for e in errors),
+        'confirmed_pool_success_1m': (sum(e is not None and e <= 1 for e in errors)
+                                     / denominator if denominator else None),
+    }
+
 def persistent_wrong_queries(rows,method):
     """Count queries in runs of >=2 consecutive >10m errors on one track."""
     runs={}
@@ -63,10 +83,20 @@ def persistent_wrong_queries(rows,method):
 def main():
     p=argparse.ArgumentParser(description=__doc__)
     p.add_argument('--cache',type=Path,required=True);p.add_argument('--output',type=Path,required=True)
+    p.add_argument('--max-queries', type=int, help='Evaluate chronological prefix only; pilot, not full-split metrics')
+    p.add_argument('--progress-every', type=int, default=100)
+    p.add_argument('--shared-multi-bank', action='store_true',
+                   help='Share physical multi-track KF bank; keep independent output selectors')
     p.add_argument('--tracker-config',type=Path)
     p.add_argument('--multi-config',type=Path,default=Path(__file__).with_name('multi_tracker_defaults.json'))
-    p.add_argument('--methods',choices=('original','all'),default='original')
-    args=p.parse_args();cache=args.cache.resolve();out=args.output.resolve()
+    p.add_argument('--methods',choices=('original','all','multi'),default='original',
+                   help='multi: independent Top1 plus two multi-track methods; skip old single-track KFs')
+    args=p.parse_args()
+    if args.max_queries is not None and args.max_queries < 1:
+        p.error('--max-queries must be positive')
+    if args.progress_every < 1:
+        p.error('--progress-every must be positive')
+    cache=args.cache.resolve();out=args.output.resolve()
     if out.exists():raise FileExistsError(f'Use a fresh results directory: {out}')
     manifest=json.loads((cache/'manifest.json').read_text())
     if not manifest.get('complete'):raise ValueError('Incomplete cache')
@@ -74,11 +104,17 @@ def main():
     frames=[json.loads(x) for x in (cache/'index.jsonl').read_text().splitlines()]
     if len(frames)!=manifest['queries'] or len({r['sample_id'] for r in frames})!=len(frames):raise ValueError('Cache index mismatch')
     frames.sort(key=lambda r:(r['sequence_id'],r['query_time']))
+    full_cache_queries = len(frames)
+    if args.max_queries is not None:
+        frames = frames[:args.max_queries]
     cfg=TrackerConfig(**json.loads(args.tracker_config.read_text())) if args.tracker_config else TrackerConfig()
-    top1=SequenceTrackers(cfg,'top1');candidate=SequenceTrackers(cfg,'candidate')
-    selected_methods=METHODS if args.methods=='all' else ORIGINAL_METHODS
+    run_original=args.methods in ('original','all')
+    top1=SequenceTrackers(cfg,'top1') if run_original else None
+    candidate=SequenceTrackers(cfg,'candidate') if run_original else None
+    selected_methods=(METHODS if args.methods=='all' else
+                      ('independent_top1',)+MULTI_METHODS if args.methods=='multi' else ORIGINAL_METHODS)
     multi=None
-    if args.methods=='all':
+    if args.methods in ('all','multi'):
         from rdq_uav.multimodal_v3.stone_tracker import MultiFilterConfig, SequenceMultiTrackers
         from rdq_uav.multimodal_v3.track_selection import SelectionConfig
         multi_config=json.loads(args.multi_config.read_text())
@@ -86,8 +122,11 @@ def main():
             raise ValueError('Multi config requires filter and selection sections')
         filter_config=MultiFilterConfig(**multi_config['filter'])
         selection_config=SelectionConfig(**multi_config['selection'])
-        multi={MULTI_METHODS[0]:SequenceMultiTrackers(filter_config,selection_config,select_evidence=False),
-               MULTI_METHODS[1]:SequenceMultiTrackers(filter_config,selection_config,select_evidence=True)}
+        bank = SequenceMultiTrackers(filter_config,selection_config,select_evidence=False)
+        multi={MULTI_METHODS[0]:bank,
+               MULTI_METHODS[1]:SequenceMultiTrackers(
+                   filter_config,selection_config,select_evidence=True,
+                   shared_bank=bank if args.shared_multi_bank else None)}
     out.mkdir(parents=True);rows=[];events=[];started=time.monotonic()
     (out/'tracker_config.json').write_text(json.dumps(asdict(cfg),indent=2))
     if multi is not None:
@@ -104,7 +143,8 @@ def main():
                 dense,glob,baseline=(candidate_frame.dense,candidate_frame.global_pool,
                                      candidate_frame.baseline)
                 t=frame['query_time'];seq=frame['sequence_id']
-                tracks={'top1_kf':top1.step(seq,t,dense,glob,baseline),'candidate_kf':candidate.step(seq,t,dense,glob,baseline)}
+                tracks=({'top1_kf':top1.step(seq,t,dense,glob,baseline),
+                         'candidate_kf':candidate.step(seq,t,dense,glob,baseline)} if run_original else {})
                 if multi is not None:
                     tracks.update({name:manager.step(seq,t,candidate_frame) for name,manager in multi.items()})
                 # GT is read only after both state updates, exclusively for scoring.
@@ -122,9 +162,22 @@ def main():
                 for key in ('status','event','output_kind','track_id','selected_token_id','innovation_m','measurement_age_s'):
                     r[name+'_'+key]=track.get(key)
                 if name in MULTI_METHODS:
+                    # Track state and observation positions are scored only after
+                    # all trackers have stepped; GT never reaches association.
+                    confirmed = [state for state in track['track_states']
+                                 if state['status'] == 'confirmed']
+                    pool_errors = ([float(np.linalg.norm(np.asarray(state['xyz'])-gt))
+                                    for state in confirmed] if has_gt else [])
+                    r[name+'_confirmed_pool_min_error_m'] = min(pool_errors, default=None)
+                    r[name+'_active_track_count'] = track['active_track_count']
+                    r[name+'_tentative_track_count'] = track['tentative_track_count']
+                    r[name+'_observation_xyz'] = track['observation_xyz']
+                    r[name+'_observation_error_m'] = (float(np.linalg.norm(
+                        np.asarray(track['observation_xyz'])-gt))
+                        if has_gt and track['observation_xyz'] is not None else None)
                     r[name+'_selection_score']=track['selection_score']
                     r[name+'_switch_reason']=track['switch_reason']
-                    for number,score in track['track_scores'].items():
+                    for number,score in sorted(track['track_scores'].items()):
                         score_rows.append(dict(sequence_id=seq,sample_id=r['sample_id'],query_time=t,
                                                method=name,track_id=int(number),**score))
                     for state in track['track_states']:
@@ -138,11 +191,14 @@ def main():
                                                                          and track['reacquisition']),
                                                           error_m=error,wrong_lock_over_2m=error is not None and error>2))
             qfile.write(json.dumps(r,allow_nan=False)+'\n');qfile.flush();efile.flush();rows.append(r)
-            if (idx+1)%100==0 or idx+1==len(frames):print(f'tracking {idx+1}/{len(frames)} elapsed={time.monotonic()-started:.1f}s',flush=True)
+            if (idx+1)%args.progress_every==0 or idx+1==len(frames):print(f'tracking {idx+1}/{len(frames)} elapsed={time.monotonic()-started:.1f}s',flush=True)
     summary={name:metrics(rows,name) for name in selected_methods}
     summary['runtime']={'offline_tracking_wall_s':time.monotonic()-started,'cache_queries':len(rows),
                         'note':'Includes cache loading and event output; excludes frozen network inference'}
-    summary['protocol']={'smoke_test':manifest.get('smoke_test',False),'query_schedule':manifest['protocol'],
+    summary['protocol']={'partial_cache_evaluation': len(frames) < full_cache_queries,
+                         'full_cache_queries': full_cache_queries,
+                         'evaluated_queries': len(frames),
+                         'smoke_test':manifest.get('smoke_test',False),'query_schedule':manifest['protocol'],
                          'cache_schema_version':schema_version,'methods':selected_methods,
                          'metric_denominators':{
                              'success_0_5m_success_1m_success_2m_coverage':'all queries with valid 3D GT; missing output is failure',
@@ -153,6 +209,18 @@ def main():
                          'warmup_tentative_outputs':'suppressed, counted missing',
                          'prediction_only_outputs':'separately reported; included in fused tracking metric',
                          'GT_used_for_association':False,'parameter_status':'initial defaults, not calibrated on this validation set'}
+    if multi is not None:
+        summary['protocol']['multi_track_lifecycle'] = {
+            'mode': filter_config.lifecycle_mode,
+            'use_kdtree': filter_config.use_kdtree,
+            'shared_multi_bank': args.shared_multi_bank,
+            'min_hits': (filter_config.min_hits if filter_config.lifecycle_mode == 'ab3dmot'
+                         else filter_config.confirm_hits),
+            'max_age_queries': (filter_config.max_age if filter_config.lifecycle_mode == 'ab3dmot'
+                                else None),
+            'startup_output_exception': False,
+            'note': 'AB3DMOT mode counts missed queries, not seconds or raw sensor frames; '
+                    'legacy second-based timeouts are inactive in this mode.'}
     starts=[];byid={r['sample_id']:r for r in rows}
     for name in selected_methods[1:]:
         es=[e for e in events if e['method']==name]
@@ -178,6 +246,9 @@ def main():
             e.get('status')=='uninitialized' and e.get('tentative_track_count',0)==0 for e in es)
         summary[name]['track_switches']=sum(e['event']=='switch_sustained_advantage' for e in es)
         if name in MULTI_METHODS:
+            summary[name]['lifecycle'] = lifecycle_metrics(rows, events, name)
+            summary[name]['updated_metrics'] = metrics(updated, name) if any(r['has_gt'] for r in updated) else None
+            summary[name]['prediction_only_metrics'] = metrics(predicted, name) if any(r['has_gt'] for r in predicted) else None
             summary[name]['wrong_confirmations_over_2m']=sum(
                 row['wrong_lock_over_2m'] for row in confirmation_rows if row['method']==name)
             continue
@@ -228,6 +299,16 @@ def main():
     sequence_metrics=[dict(sequence_id=seq,method=name,**metrics([r for r in rows if r['sequence_id']==seq],name))
                       for seq in sorted({r['sequence_id'] for r in rows}) for name in selected_methods]
     write_csv(out/'sequence_metrics.csv',sequence_metrics)
+    if multi is not None:
+        sequence_lifecycle = []
+        for seq in sorted({r['sequence_id'] for r in rows}):
+            seq_rows = [r for r in rows if r['sequence_id'] == seq]
+            seq_events = [e for e in events if e['sequence_id'] == seq]
+            for name in MULTI_METHODS:
+                values = lifecycle_metrics(seq_rows, seq_events, name)
+                values['removal_counts'] = json.dumps(values['removal_counts'], sort_keys=True)
+                sequence_lifecycle.append(dict(sequence_id=seq, method=name, **values))
+        write_csv(out/'sequence_lifecycle.csv', sequence_lifecycle)
     if multi is not None:
         with (out/'all_track_history.jsonl').open('w') as handle:
             for name,manager in multi.items():

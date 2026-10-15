@@ -1,0 +1,172 @@
+{
+  "independent_top1": {
+    "queries": 1200,
+    "outputs": 1196,
+    "coverage": 0.9966666666666667,
+    "success_0_5m": 0.5116666666666667,
+    "success_1m": 0.9116666666666666,
+    "success_2m": 0.9633333333333334,
+    "rmse_3d_m": 5.4268299775005175,
+    "mean_error_m": 1.4553915401746327,
+    "median_error_m": 0.49176338133853115,
+    "severe_gt10m": 40,
+    "missing": 4
+  },
+  "target": {
+    "queries": 1200,
+    "outputs": 1190,
+    "coverage": 0.9916666666666667,
+    "success_0_5m": 0.5258333333333334,
+    "success_1m": 0.935,
+    "success_2m": 0.9916666666666667,
+    "rmse_3d_m": 0.5928363410569163,
+    "mean_error_m": 0.5285830225366154,
+    "median_error_m": 0.48009199330655494,
+    "severe_gt10m": 0,
+    "missing": 10
+  },
+  "lagged": {
+    "queries": 1200,
+    "outputs": 1200,
+    "coverage": 1.0,
+    "success_0_5m": 0.6008333333333333,
+    "success_1m": 0.9791666666666666,
+    "success_2m": 1.0,
+    "rmse_3d_m": 0.5330810887901923,
+    "mean_error_m": 0.48055420128194765,
+    "median_error_m": 0.44164326027275536,
+    "severe_gt10m": 0,
+    "missing": 0
+  },
+  "lagged_sequences": {
+    "seq0020": {
+      "queries": 400,
+      "outputs": 400,
+      "coverage": 1.0,
+      "success_0_5m": 0.8575,
+      "success_1m": 1.0,
+      "success_2m": 1.0,
+      "rmse_3d_m": 0.36994415333725,
+      "mean_error_m": 0.3333735107920846,
+      "median_error_m": 0.31692087880280084,
+      "severe_gt10m": 0,
+      "missing": 0
+    },
+    "seq0026": {
+      "queries": 400,
+      "outputs": 400,
+      "coverage": 1.0,
+      "success_0_5m": 0.4925,
+      "success_1m": 0.965,
+      "success_2m": 1.0,
+      "rmse_3d_m": 0.573753374213062,
+      "mean_error_m": 0.52423938009952,
+      "median_error_m": 0.5045657370191285,
+      "severe_gt10m": 0,
+      "missing": 0
+    },
+    "seq0079": {
+      "queries": 400,
+      "outputs": 400,
+      "coverage": 1.0,
+      "success_0_5m": 0.4525,
+      "success_1m": 0.9725,
+      "success_2m": 1.0,
+      "rmse_3d_m": 0.6216709183063995,
+      "mean_error_m": 0.584049712954238,
+      "median_error_m": 0.5225586290736766,
+      "severe_gt10m": 0,
+      "missing": 0
+    }
+  },
+  "lagged_events": {
+    "startup_backfill": 10,
+    "smoothed": 1190
+  },
+  "sequences": {
+    "seq0020": {
+      "queries": 400,
+      "outputs": 393,
+      "coverage": 0.9825,
+      "success_0_5m": 0.7225,
+      "success_1m": 0.9675,
+      "success_2m": 0.9825,
+      "rmse_3d_m": 0.4593161710427874,
+      "mean_error_m": 0.40624304478306966,
+      "median_error_m": 0.36732301510526677,
+      "severe_gt10m": 0,
+      "missing": 7
+    },
+    "seq0026": {
+      "queries": 400,
+      "outputs": 399,
+      "coverage": 0.9975,
+      "success_0_5m": 0.4475,
+      "success_1m": 0.9475,
+      "success_2m": 0.9975,
+      "rmse_3d_m": 0.6291588989183883,
+      "mean_error_m": 0.563937135175986,
+      "median_error_m": 0.5246694166153469,
+      "severe_gt10m": 0,
+      "missing": 1
+    },
+    "seq0079": {
+      "queries": 400,
+      "outputs": 398,
+      "coverage": 0.995,
+      "success_0_5m": 0.4075,
+      "success_1m": 0.89,
+      "success_2m": 0.995,
+      "rmse_3d_m": 0.6675897880018279,
+      "mean_error_m": 0.6139431238281594,
+      "median_error_m": 0.5639268758523729,
+      "severe_gt10m": 0,
+      "missing": 2
+    }
+  },
+  "events": {
+    "warmup": 10,
+    "birth": 3,
+    "high_update": 1150,
+    "low_update": 37
+  },
+  "protocol": {
+    "target_causal": true,
+    "GT_used_for_inference": false,
+    "split": "validation_sub",
+    "schedule": "existing GT-timestamp query schedule, not continuous raw sensor tracking",
+    "validation_tuned": true,
+    "held_out_test": false,
+    "lagged": {
+      "causal": false,
+      "max_lookahead_s": 0.5,
+      "batch_evaluation": true,
+      "startup_completion": "bounded backward extrapolation, not radar detection"
+    }
+  },
+  "runtime_s": 17.663841931000206,
+  "reproducibility": {
+    "argv": [
+      "experiments/multimodal_v3/evaluate_target.py",
+      "--cache",
+      "outputs/kf_v3_multi_run/cache",
+      "--config",
+      "experiments/multimodal_v3/target_tracker_rank.json",
+      "--lag-s",
+      "0.5",
+      "--output",
+      "outputs/kf_optimization_20261015/final_verified"
+    ],
+    "python": "3.10.21 | packaged by conda-forge | (main, Aug 21 2026, 22:42:31) [GCC 14.4.0]",
+    "numpy": "1.26.4",
+    "source_sha256": {
+      "experiments/multimodal_v3/evaluate_target.py": "b5a8ee710fc1f212f6479fba4e0efb7e92c2e8a37a814d75d9fc7fcd6472116e",
+      "src/rdq_uav/multimodal_v3/target_tracker.py": "6a76768ace47d37ef302f08bbd26caec502f01c882fc3ed4b94844f752240e62",
+      "src/rdq_uav/multimodal_v3/target_smoothing.py": "3ce800b10144ec36fd0cad99ac9f0eeb8a5e65e0addad0c4c6a5259087a70f44",
+      "src/rdq_uav/multimodal_v3/tracking.py": "6576dc7334edfb9437c144a9ca37787e2c0f614de5a670aff87fa49c876b17f8",
+      "src/rdq_uav/multimodal_v3/candidate_adapter.py": "9003c078a6a26b8b5bdac68e4bf623e6c23704f830887eade84fb7131f4fed4c",
+      "experiments/multimodal_v3/evaluate_tracking.py": "c32ce4a61d8a28bb844c8536928c855f2bc944470f54d126319634ede1d811ed"
+    },
+    "cache_index_sha256": "4a62f43a235cad6d2006e3350f47f05559ab7157202d141c2bbba6c12c5badb7"
+  }
+}
