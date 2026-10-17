@@ -1,0 +1,241 @@
+#!/usr/bin/env python3
+"""One frozen B0 inference pass. Cache all dense positions without GT filtering."""
+from __future__ import annotations
+import argparse
+import hashlib
+import json
+import os
+from pathlib import Path
+import subprocess
+import sys
+import time
+
+def sha(path):
+    h=hashlib.sha256()
+    with Path(path).open('rb') as f:
+        for block in iter(lambda:f.read(4*1024*1024),b''):h.update(block)
+    return h.hexdigest()
+
+def image_sample_metadata(batch):
+    """Export image identity/labels for scoring only, before B0 strips vision.
+
+    The extractor always has batch_size=1. No exported field is fed to radar
+    candidate selection or used to filter the query schedule.
+    """
+    if int(batch['num_samples']) != 1:
+        raise ValueError('Extraction metadata requires batch_size=1')
+    has_image = bool(batch['m_V'][0])
+    box = batch['gt_box_xyxy_px'][0].tolist()
+    return dict(sample_id=batch['sample_id'][0], sequence_id=batch['sequence_id'][0],
+                query_time=float(batch['query_time'][0]), has_image=has_image,
+                image_time=float(batch['image_time'][0]) if has_image else None,
+                image_path=batch['left_image_path'][0] if has_image else None,
+                image_source_wh=batch['image_source_wh'][0].tolist() if has_image else None,
+                has_gt2d=bool(batch['gt_2d_valid'][0]),
+                gt_box_xyxy_px=box, gt_box_width_px=box[2]-box[0], gt_box_height_px=box[3]-box[1])
+
+def load_validation_reference(config, split):
+    # A validation reference must never be applied to a different split.
+    path = config.parent/'eval_best/per_query.jsonl'
+    if split != 'validation_sub' or not path.is_file():
+        return None
+    return {r['sample_id']: r for r in map(json.loads, path.read_text().splitlines())}
+
+def main():
+    p=argparse.ArgumentParser(description=__doc__)
+    p.add_argument('--repo',type=Path,required=True)
+    p.add_argument('--config',type=Path,required=True)
+    p.add_argument('--checkpoint',type=Path,required=True)
+    p.add_argument('--vision-checkpoint',type=Path,
+                   help='Optional original trained image model; cache ALL available full views, including unlabeled images')
+    p.add_argument('--cache',type=Path,required=True)
+    p.add_argument('--data-root',type=Path)
+    p.add_argument('--split', choices=('validation_sub', 'heldout_test_sub'), default='validation_sub')
+    p.add_argument('--device',default='cuda:0')
+    p.add_argument('--num-workers',type=int,default=2)
+    p.add_argument('--limit',type=int,help='Smoke test only')
+    p.add_argument('--sequence',help='One sequence for independent complete inference')
+    p.add_argument('--schedule',choices=('benchmark','sensor'),default='benchmark')
+    args=p.parse_args();root=args.repo.resolve();os.chdir(root)
+    sys.path[:0]=[str(root),str(root/'src')]
+    def resolve(path):return path.resolve() if path.is_absolute() else (root/path).resolve()
+    config,checkpoint,cache=map(resolve,(args.config,args.checkpoint,args.cache))
+    if cache.exists():raise FileExistsError(f'Use a fresh cache directory: {cache}')
+    import numpy as np
+    import torch
+    import yaml
+    from torch.utils.data import DataLoader,Subset
+    from rdq_uav.multimodal_v3.modeling.training import build_runtime,_stage_batch,synchronize_dino_device
+    from rdq_uav.multimodal_v3.modeling.data import build_split_dataset,collate_multimodal_v2,prepare_model_batch
+    from rdq_uav.multimodal_v3.modeling.geometry import load_left_projection_context
+    from rdq_uav.multimodal_v3.modeling.radar_selector import CandidateSelector
+    from rdq_uav.multimodal_v3.runtime_paths import apply_runtime_path_overrides
+    from rdq_uav.multimodal_v3.training.checkpoints import load_network
+    device=torch.device(args.device)
+    if device.type=='cuda' and not torch.cuda.is_available():raise RuntimeError('CUDA unavailable')
+    cfg=apply_runtime_path_overrides(yaml.safe_load(config.read_text()))
+    reference=None if args.sequence else load_validation_reference(config, args.split)
+    if cfg['experiment']['stage']!='B0':raise ValueError('This first version only supports radar-only B0')
+    if args.data_root:cfg['data']['root']=str(resolve(args.data_root))
+    cfg['model'].update(interaction_enabled=False,vision_reads_radar=False,vision_scoring_enabled=False)
+    radar_path=resolve(Path(cfg['initialization']['lidar_config']))
+    if not radar_path.is_file():radar_path=config.parent/'radar.yaml'
+    cfg['initialization']['lidar_config']=str(radar_path)
+    runtime=build_runtime(cfg,root,torch.device('cpu'),initialize_from_baselines=False)
+    info=load_network(runtime.model,checkpoint)
+    runtime.model.to(device).eval().requires_grad_(False);synchronize_dino_device(runtime,device)
+    vision_runtime = None
+    if args.vision_checkpoint is not None:
+        from rdq_uav.multimodal_v3.training.train_image import build_image_runtime
+        from rdq_uav.multimodal_v3.image_detection import detect_view
+        vision_config = apply_runtime_path_overrides(yaml.safe_load(
+            (root/'configs/final/vision_train.yaml').read_text()))
+        args.vision_checkpoint = resolve(args.vision_checkpoint)
+        vision_runtime = build_image_runtime(vision_config, root, device, warmstart=args.vision_checkpoint)
+        vision_runtime.model.eval().requires_grad_(False)
+        synchronize_dino_device(vision_runtime, device)
+        image_config = {'short_edge': cfg['data']['dino_short_edge'],
+                        'max_size': cfg['data']['dino_max_size'], 'topk': 100}
+    runtime.projection_base=load_left_projection_context(runtime.camera_config,runtime.geometry_calibration,
+        image_scale_xy=torch.ones((1,2),device=device),device=device)
+    cfg['data']['val_split']=args.split
+    if args.sequence:
+        from rdq_uav.multimodal_v3.modeling.data import MultimodalV2Dataset, QueryRecord, query_records_from_3d_gt, build_3d_target_index
+        seq=args.sequence
+        if Path(seq).name!=seq or not (Path(cfg['data']['root'])/seq).is_dir():raise ValueError('Unknown sequence')
+        data_root=Path(cfg['data']['root'])
+        camera=yaml.safe_load((root/cfg['data']['camera_config']).read_text())
+        if args.schedule=='sensor':
+            # No GT files/labels enter inference inputs or the sensor timeline.
+            times=sorted({float(p.stem) for directory,extension in [('Image','png'),('livox_avia','npy'),('lidar_360','npy')] for p in (data_root/seq/directory).glob('*.'+extension)})
+            queries=[QueryRecord(seq,t,f'{seq}_sensor_{t:.9f}') for t in times]
+            targets={};labels='.__rdq_inference_no_labels'
+            if (data_root/seq/labels).exists():raise ValueError('Reserved no-label directory exists')
+        else:
+            queries=query_records_from_3d_gt(data_root,[seq]);targets=build_3d_target_index(data_root,[seq]);labels=cfg['data'].get('label_directory','2d_detect')
+        dataset=MultimodalV2Dataset(data_root,queries,target_3d_index=targets,camera_wh=tuple(camera['cameras']['left']['resolution']),short_edge=cfg['data']['dino_short_edge'],max_size=cfg['data']['dino_max_size'],radar_history_s=cfg['data'].get('radar_history_s',1.),max_image_gap_s=cfg['data'].get('max_image_gap_s',1.),filter_empty=False,label_directory=labels)
+    else:
+        if args.schedule=='sensor':raise ValueError('Sensor schedule requires --sequence')
+        dataset=build_split_dataset(cfg,root,args.split)
+    # Explicitly process chronological observations. No labels used to select queries.
+    order=sorted(range(len(dataset)),key=lambda i:(dataset.query_records[i].sequence_id,dataset.query_records[i].query_time))
+    if args.limit is not None:order=order[:args.limit]
+    if not order:raise ValueError('Empty dataset')
+    loader=DataLoader(Subset(dataset,order),batch_size=1,shuffle=False,num_workers=args.num_workers,collate_fn=collate_multimodal_v2)
+    cache.mkdir(parents=True);(cache/'frames').mkdir()
+    (cache/'effective_config.yaml').write_text(yaml.safe_dump(cfg,sort_keys=False))
+    selector=runtime.model.lidar.builder.selector
+    manifest=dict(schema_version=2,complete=False,checkpoint=str(checkpoint),checkpoint_sha256=sha(checkpoint),
+                  checkpoint_info=info,config=str(config),config_sha256=sha(config),
+                  lidar_config_sha256=sha(radar_path),candidate_config_sha256=sha(resolve(Path(cfg['initialization']['candidate_config']))),
+                  split_file_sha256=sha(resolve(Path(cfg['data']['split_file']))),
+                  data_root=cfg['data']['root'],split=args.split,queries=len(order),
+                  extractor_sha256=sha(Path(__file__).resolve()),
+                  torch=torch.__version__,precision='fp32',
+                  code_commit=subprocess.run(['git','rev-parse','HEAD'],capture_output=True,text=True).stdout.strip(),
+                  selector={'raw_topk':selector.raw_topk,'pre_nms_topk':selector.pre,'final_topk':selector.final,'nms_radius_m':selector.radius},
+                  protocol=('sensor timestamp union: Image + livox_avia + lidar_360; no GT query schedule' if args.schedule=='sensor' else 'existing GT-timestamp query schedule, not continuous raw sensor tracking'),
+                  independent_reference_checked=reference is not None,
+                  evidence_fields=['dense_point_count','dense_motion_valid','dense_motion_dynamic',
+                                   'dense_motion_reliability','dense_motion_speed_mps'],
+                  background_evidence_note='Raw L0 count and optional GT-free motion diagnostics; invalid motion is unknown',
+                  smoke_test=args.limit is not None)
+    if vision_runtime is not None:
+        manifest.update(vision_cache_scope='all_available_images_no_label_filter',
+                        vision_checkpoint=str(args.vision_checkpoint),
+                        vision_checkpoint_sha256=sha(args.vision_checkpoint),
+                        vision_runtime_config=vision_config, image_config=image_config,
+                        vision_dino_config_sha256=sha(resolve(Path(vision_config['initialization']['dino_config']))),
+                        vision_source_sha256={name:sha(root/name) for name in (
+                            'src/rdq_uav/multimodal_v3/training/train_image.py',
+                            'src/rdq_uav/multimodal_v3/image_detection.py',
+                            'src/rdq_uav/multimodal_v3/modeling/training.py',
+                            'src/rdq_uav/multimodal_v3/modeling/dino_adapter.py',
+                            'src/rdq_uav/multimodal_v3/modeling/swin_adapter.py',
+                            'src/rdq_uav/multimodal_v3/modeling/uav_dino.py')})
+    (cache/'manifest.json').write_text(json.dumps(manifest,indent=2))
+    started=time.monotonic()
+    seen_images = set()
+    with (cache/'index.jsonl').open('w') as index_file, \
+            (cache/'image_samples.jsonl').open('w') as samples_file, \
+            (cache/'raw_view_cache.jsonl').open('w') as visual_file,torch.no_grad():
+        for idx,batch in enumerate(loader):
+            metadata=image_sample_metadata(batch)
+            if vision_runtime is not None and metadata['has_image']:
+                image_key=metadata['sequence_id']+'/Image/'+Path(metadata['image_path']).name
+                if image_key not in seen_images:
+                    from PIL import Image
+                    with Image.open(metadata['image_path']) as image:
+                        width,height=metadata['image_source_wh']
+                        if image.width < width or image.height < height:
+                            raise ValueError('Image smaller than calibrated left view')
+                        full=detect_view(vision_runtime.model.vision,
+                            image.convert('RGB').crop((0,0,width,height)),device,image_config)
+                    visual_file.write(json.dumps({'image_path':image_key,'image_time':metadata['image_time'],
+                                                  'views':{'full':full}},allow_nan=False)+'\n')
+                    visual_file.flush();seen_images.add(image_key)
+            batch=_stage_batch(batch,'B0')
+            moved,images,masks,projection,targets,_=prepare_model_batch(batch,runtime.dino_detector,runtime.projection_base,device)
+            with torch.autocast(device_type=device.type,enabled=False):output=runtime.model(moved,images,masks,projection)
+            if output.vision_candidates.n or bool((output.hypothesis_type!=1).any()):raise RuntimeError('Unexpected non-R hypothesis')
+            torch.testing.assert_close(output.score_3d_before,output.score_3d_after,rtol=0,atol=0)
+            raw=output.diagnostics.get('lidar_raw');radar=output.radar_candidates
+            def cpu(x):return x.detach().cpu().numpy()
+            if raw is not None:
+                if raw.get('prediction_kind','dense')!='dense':raise ValueError('Expected dense voxel predictions')
+                dense_xyz=cpu(raw['pred_xyz'].float());dense_score=cpu(CandidateSelector.ranking_scores(raw))
+                dense_rank=cpu(CandidateSelector.ranking_scores(raw) if 'quality_logits' in raw else raw['logits'].float())
+                tokens=cpu(raw['source_token_id'])
+                point_count=cpu(raw['layouts'].levels[0].point_count).astype(np.int64)
+                motion=raw.get('motion_diagnostics')
+                if motion is not None:
+                    motion_valid=cpu(motion['valid']).astype(np.bool_)
+                    motion_dynamic=cpu(motion['dynamic']).astype(np.bool_)
+                    motion_reliability=cpu(motion['reliability']).astype(np.float32)
+                    motion_speed=cpu(torch.linalg.vector_norm(motion['velocity_xyz'].float(),dim=1)).astype(np.float32)
+                else:
+                    motion_valid=np.zeros(len(tokens),dtype=np.bool_)
+                    motion_dynamic=np.zeros(len(tokens),dtype=np.bool_)
+                    motion_reliability=np.zeros(len(tokens),dtype=np.float32)
+                    motion_speed=np.zeros(len(tokens),dtype=np.float32)
+                if any(len(x)!=len(tokens) for x in (point_count,motion_valid,motion_dynamic,
+                                                       motion_reliability,motion_speed)):
+                    raise ValueError('Dense motion diagnostics must align with source tokens')
+            else:dense_xyz=np.empty((0,3),np.float32);dense_score=dense_rank=np.empty(0,np.float32);tokens=np.empty(0,np.int64)
+            if raw is None:
+                point_count=np.empty(0,np.int64);motion_valid=motion_dynamic=np.empty(0,np.bool_)
+                motion_reliability=motion_speed=np.empty(0,np.float32)
+            top=output.top3d_indices(1)[0]
+            arrays=dict(dense_xyz=dense_xyz,dense_score=dense_score,dense_rank=dense_rank,dense_token_id=tokens,
+                        dense_point_count=point_count,dense_motion_valid=motion_valid,
+                        dense_motion_dynamic=motion_dynamic,dense_motion_reliability=motion_reliability,
+                        dense_motion_speed_mps=motion_speed,
+                        global_xyz=cpu(radar.xyz_m.float()),global_score=cpu(radar.score.float()),global_token_id=cpu(radar.source_index),
+                        baseline_xyz=cpu(output.xyz_m[top].float()),baseline_score=cpu(output.score_3d_after[top].float()),
+                        baseline_token_id=cpu(output.radar_source_index[top]),gt_xyz=cpu(targets.xyz_m[0].float()),
+                        has_gt=np.asarray(bool(targets.has_xyz[0])))
+            for key in ('dense_xyz','dense_score','dense_rank','global_xyz','global_score','baseline_xyz'):
+                if not np.isfinite(arrays[key]).all():raise ValueError(f'nonfinite {key}')
+            filename=f'frames/{idx:06d}.npz';np.savez_compressed(cache/filename,**arrays)
+            row=dict(sequence_id=batch['sequence_id'][0],sample_id=batch['sample_id'][0],query_time=float(batch['query_time'][0]),file=filename)
+            if reference is not None:
+                previous=reference.get(row['sample_id'])
+                if previous is None:raise ValueError('Query absent from existing evaluation')
+                error=float(np.linalg.norm(arrays['baseline_xyz'][0]-arrays['gt_xyz'])) if len(top) else None
+                old=previous['final_error']
+                if (error is None)!=(old is None) or (error is not None and abs(error-old)>max(1e-4,1e-5*abs(old))):
+                    raise RuntimeError(f'Independent reference mismatch {row["sample_id"]}: {error} vs {old}')
+            index_file.write(json.dumps(row)+'\n');index_file.flush()
+            samples_file.write(json.dumps(metadata, allow_nan=False)+'\n');samples_file.flush()
+            if (idx+1)%20==0 or idx+1==len(order):
+                elapsed=time.monotonic()-started
+                print(f'extract {idx+1}/{len(order)} elapsed={elapsed/60:.1f}min ETA={elapsed/(idx+1)*(len(order)-idx-1)/60:.1f}min',flush=True)
+    manifest['complete']=True;manifest['extraction_seconds']=time.monotonic()-started
+    manifest['image_samples_sha256']=sha(cache/'image_samples.jsonl')
+    if vision_runtime is not None:
+        manifest['raw_view_cache_sha256']=sha(cache/'raw_view_cache.jsonl')
+        manifest['unique_cached_images']=len(seen_images)
+    (cache/'manifest.json').write_text(json.dumps(manifest,indent=2))
+    print(f'CACHE READY: {cache}',flush=True)
+
+if __name__=='__main__':main()

@@ -1,0 +1,32 @@
+{
+  "root": "/home/jasoncui/projects/rdq-uav-final",
+  "python": "3.10.21 | packaged by conda-forge | (main, Aug 21 2026, 22:42:31) [GCC 14.4.0]",
+  "torch": "2.1.1+cu118",
+  "cuda": false,
+  "GPU": null,
+  "modules": {
+    "rdq_uav": "/home/jasoncui/projects/rdq-uav-final/src/rdq_uav/__init__.py",
+    "detrex": "/home/jasoncui/projects/rdq-uav-final/third_party/detrex/detrex/__init__.py",
+    "detectron2": "/home/jasoncui/projects/rdq-uav-final/third_party/detrex/detectron2/detectron2/__init__.py",
+    "stonesoup": "/home/jasoncui/projects/rdq-uav-final/third_party/stonesoup/stonesoup/__init__.py",
+    "pycocotools": "/home/jasoncui/miniconda3/envs/rdq/lib/python3.10/site-packages/pycocotools/__init__.py"
+  },
+  "weights": {
+    "radar.ckpt": {
+      "sha256": "1c841c4dac463e4910a0e08d99f4fc75fe1bb1c4f02951ec12cc05c2fb5ea023",
+      "state_dict_keys": 216
+    },
+    "radar_warmstart.ckpt": {
+      "sha256": "2edf8b346dd1338dab9dd4341ee8ccecbdceae36ec47985a6791bb99bcb6838d",
+      "state_dict_keys": 184
+    },
+    "vision_full.ckpt": {
+      "sha256": "04b5e587e2710d5137638888b407f754a45b09ce48a060f045daba61cfd58396",
+      "state_dict_keys": 733
+    },
+    "vision_crop.ckpt": {
+      "sha256": "85ba1a7ca899f146c3cdfede2d982f7ee255751dc17093ea7cefa413829df8c9",
+      "state_dict_keys": 594
+    }
+  }
+}

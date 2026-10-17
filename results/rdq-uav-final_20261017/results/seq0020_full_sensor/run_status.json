@@ -1,0 +1,13 @@
+{
+  "complete": true,
+  "sequences": [
+    "seq0020"
+  ],
+  "schedule": "sensor",
+  "GT_used_for_sensor_inference": false,
+  "all_left_images_required": true,
+  "smoke": false,
+  "root": "/home/jasoncui/projects/rdq-uav-final",
+  "data_root": "/home/jasoncui/datasets/MMAUD/official/train",
+  "GPU": "NVIDIA GeForce RTX 3070 Laptop GPU"
+}

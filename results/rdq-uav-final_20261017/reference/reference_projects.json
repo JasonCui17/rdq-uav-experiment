@@ -1,0 +1,12 @@
+{
+  "ByteTrack": {
+    "commit": "d1bf0191adff59bc8fcfeaa0b33d3d1642552a99",
+    "source_directory": "third_party/reference_only/ByteTrack",
+    "runtime_dependency": false
+  },
+  "CenterFusion": {
+    "commit": "3bac5c9b26daf958456a7bbbae5eb5a00a76d98a",
+    "source_directory": "third_party/reference_only/CenterFusion",
+    "runtime_dependency": false
+  }
+}

@@ -1,0 +1,10 @@
+{
+  "trajectory.jsonl": {
+    "records": 12,
+    "identical": true
+  },
+  "bboxes.jsonl": {
+    "records": 8,
+    "identical": true
+  }
+}

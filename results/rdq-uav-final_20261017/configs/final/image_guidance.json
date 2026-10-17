@@ -1,0 +1,12 @@
+{
+  "camera_config": "configs/calibration/mmaud_v1_omni.yaml",
+  "geometry_calibration": "calibration/official_left_p4_current_geometry.json",
+  "crop_side_px": 256,
+  "max_prior_gap_s": 0.25,
+  "short_edge": 800,
+  "max_size": 1333,
+  "topk": 100,
+  "nms_iou": 0.5,
+  "confidence_threshold": 0.25,
+  "radar_box_gate": "crop_only"
+}

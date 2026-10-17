@@ -1,0 +1,130 @@
+{
+  "independent_top1": {
+    "status": "not_scored_no_GT_in_inference_cache",
+    "queries": 0,
+    "outputs": null,
+    "rmse_3d_m": null
+  },
+  "target": {
+    "status": "not_scored_no_GT_in_inference_cache",
+    "queries": 0,
+    "outputs": 916,
+    "rmse_3d_m": null
+  },
+  "lagged": {
+    "status": "not_scored_no_GT_in_inference_cache",
+    "queries": 0,
+    "outputs": 935,
+    "rmse_3d_m": null
+  },
+  "lagged_sequences": {
+    "seq0020": {
+      "status": "not_scored_no_GT_in_inference_cache",
+      "queries": 0,
+      "outputs": 935,
+      "rmse_3d_m": null
+    }
+  },
+  "lagged_events": {
+    "startup_backfill": 19,
+    "smoothed": 916
+  },
+  "sequences": {
+    "seq0020": {
+      "status": "not_scored_no_GT_in_inference_cache",
+      "queries": 0,
+      "outputs": 916,
+      "rmse_3d_m": null
+    }
+  },
+  "events": {
+    "warmup": 19,
+    "birth": 1,
+    "high_update": 869,
+    "low_update": 46
+  },
+  "protocol": {
+    "target_causal": true,
+    "GT_used_for_inference": false,
+    "split": "validation_sub",
+    "schedule": "sensor timestamp union: Image + livox_avia + lidar_360; no GT query schedule",
+    "validation_tuned": true,
+    "held_out_test": false,
+    "lagged": {
+      "causal": false,
+      "max_lookahead_s": 0.5,
+      "batch_evaluation": true,
+      "startup_completion": "bounded backward extrapolation, not radar detection"
+    },
+    "policy": "camera_supported_birth; original_radar_continuation",
+    "GT_used_for_birth": false,
+    "post_test_exploration": false,
+    "diagnostic_cache_subset": false,
+    "missing_cached_image_queries": 0,
+    "camera_cache_scope": "all_available_images_no_label_filter"
+  },
+  "runtime_s": 18.52711195399752,
+  "reproducibility": {
+    "argv": [
+      "/home/jasoncui/projects/rdq-uav-final/experiments/multimodal_v3/evaluate_target.py",
+      "--cache",
+      "/home/jasoncui/projects/rdq-uav-final/runs/seq0020_full_sensor/seq0020/cache",
+      "--config",
+      "configs/final/tracker.json",
+      "--lag-s",
+      "0.5",
+      "--output",
+      "/home/jasoncui/projects/rdq-uav-final/runs/seq0020_full_sensor/seq0020/tracks"
+    ],
+    "python": "3.10.21 | packaged by conda-forge | (main, Aug 21 2026, 22:42:31) [GCC 14.4.0]",
+    "numpy": "1.26.4",
+    "source_sha256": {
+      "experiments/multimodal_v3/evaluate_target.py": "b5a8ee710fc1f212f6479fba4e0efb7e92c2e8a37a814d75d9fc7fcd6472116e",
+      "src/rdq_uav/multimodal_v3/target_tracker.py": "6a76768ace47d37ef302f08bbd26caec502f01c882fc3ed4b94844f752240e62",
+      "src/rdq_uav/multimodal_v3/target_smoothing.py": "3ce800b10144ec36fd0cad99ac9f0eeb8a5e65e0addad0c4c6a5259087a70f44",
+      "src/rdq_uav/multimodal_v3/tracking.py": "6576dc7334edfb9437c144a9ca37787e2c0f614de5a670aff87fa49c876b17f8",
+      "src/rdq_uav/multimodal_v3/candidate_adapter.py": "9003c078a6a26b8b5bdac68e4bf623e6c23704f830887eade84fb7131f4fed4c",
+      "experiments/multimodal_v3/evaluate_tracking.py": "c32ce4a61d8a28bb844c8536928c855f2bc944470f54d126319634ede1d811ed"
+    },
+    "cache_index_sha256": "25087d369c5d27a2535d29d51cc367fd1b012f6398cb6e92f6cf71d2ce53ea35"
+  },
+  "frozen_evaluator_protocol": {
+    "target_causal": true,
+    "GT_used_for_inference": false,
+    "split": "validation_sub",
+    "schedule": "sensor timestamp union: Image + livox_avia + lidar_360; no GT query schedule",
+    "validation_tuned": true,
+    "held_out_test": false,
+    "lagged": {
+      "causal": false,
+      "max_lookahead_s": 0.5,
+      "batch_evaluation": true,
+      "startup_completion": "bounded backward extrapolation, not radar detection"
+    }
+  },
+  "visual_birth_reproducibility": {
+    "argv": [
+      "/home/jasoncui/projects/rdq-uav-final/experiments/multimodal_v3/evaluate_visual_birth.py",
+      "--cache",
+      "/home/jasoncui/projects/rdq-uav-final/runs/seq0020_full_sensor/seq0020/cache",
+      "--samples",
+      "/home/jasoncui/projects/rdq-uav-final/runs/seq0020_full_sensor/seq0020/cache/image_samples.jsonl",
+      "--visual-cache",
+      "/home/jasoncui/projects/rdq-uav-final/runs/seq0020_full_sensor/seq0020/cache/raw_view_cache.jsonl",
+      "--config",
+      "configs/final/tracker.json",
+      "--output",
+      "/home/jasoncui/projects/rdq-uav-final/runs/seq0020_full_sensor/seq0020/tracks"
+    ],
+    "input_sha256": {
+      "/home/jasoncui/projects/rdq-uav-final/runs/seq0020_full_sensor/seq0020/cache/image_samples.jsonl": "656648cdd4c5c31201646b4df6bee0d2ae478613f106428c044d54343cc827e1",
+      "/home/jasoncui/projects/rdq-uav-final/runs/seq0020_full_sensor/seq0020/cache/raw_view_cache.jsonl": "01dc6a46419d49838df91125dac458438b2179e8b2d238ea5b7d0462de990235",
+      "/home/jasoncui/projects/rdq-uav-final/configs/calibration/mmaud_v1_omni.yaml": "efdc380520d35be03c64b33dbd9e8477226b66e0cd381ab4960d11e1ddfc9e14",
+      "/home/jasoncui/projects/rdq-uav-final/calibration/official_left_p4_current_geometry.json": "90182d78a766ec44a7ce10120b7e6b6d4f6001901a6c5000a259c53bfb0fb48c"
+    },
+    "source_sha256": {
+      "experiments/multimodal_v3/evaluate_visual_birth.py": "487b637d8b4c2b6a3ecc4d1f0ffff2fd56c886fade2375072c971f3c3b80d9d4",
+      "src/rdq_uav/multimodal_v3/visual_birth.py": "34ab0787e7d10e8cf38ce4d1d0058f89d233b3679ce76012c685060143548a65"
+    }
+  }
+}

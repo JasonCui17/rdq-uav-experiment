@@ -1,0 +1,13 @@
+# 参考结果的来源说明
+
+本目录保存整理前已完成实验的结果与effective config、模型hash、依赖包版本、原论文参考工程commit。旧绝对工程路径已转为相对身份，避免形成旧工程路径依赖；结果数值与原SHA条目保留。历史outputs路径只说明当时产物身份，不是当前运行读取的文件。
+
+实际运行只读取configs/final、weights、calibration和所携带源码；由根目录run.py统一定位。当前发布文件hash以根目录MANIFEST.json为准。审核导出已移到MMAUD数据目录归档；实际标注只从MMAUD的2d_detect读取。
+
+固定资产：
+
+- radar.ckpt：1c841c4dac463e4910a0e08d99f4fc75fe1bb1c4f02951ec12cc05c2fb5ea023
+- vision_full.ckpt：04b5e587e2710d5137638888b407f754a45b09ce48a060f045daba61cfd58396
+- vision_crop.ckpt：85ba1a7ca899f146c3cdfede2d982f7ee255751dc17093ea7cefa413829df8c9
+
+完整crop checkpoint从已有授权服务器直接取回，未压缩、裁剪或改参数；不是用新的训练权重替代。

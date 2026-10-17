@@ -1,0 +1,417 @@
+RUN: /home/jasoncui/miniconda3/envs/rdq/bin/python -u -m rdq_uav.multimodal_v3.pipeline.extract_observations --repo /home/jasoncui/projects/rdq-uav-final --config configs/final/radar.yaml --checkpoint /home/jasoncui/projects/rdq-uav-final/weights/radar.ckpt --vision-checkpoint /home/jasoncui/projects/rdq-uav-final/weights/vision_full.ckpt --data-root /home/jasoncui/datasets/MMAUD/official/train --split validation_sub --sequence seq0020 --schedule sensor --cache /home/jasoncui/projects/rdq-uav-final/runs/v3_consolidation_smoke/seq0020/cache --device cuda:0 --num-workers 0 --limit 12
+/home/jasoncui/miniconda3/envs/rdq/lib/python3.10/site-packages/timm/models/layers/__init__.py:48: FutureWarning: Importing from timm.models.layers is deprecated, please import via timm.layers
+  warnings.warn(f"Importing from {__name__} is deprecated, please import via timm.layers", FutureWarning)
+/home/jasoncui/projects/rdq-uav-final/third_party/detrex/detectron2/detectron2/config/lazy.py:167: UserWarning: pkg_resources is deprecated as an API. See https://setuptools.pypa.io/en/latest/pkg_resources.html. The pkg_resources package is slated for removal as early as 2025-11-30. Refrain from using this package or pin to Setuptools<81.
+  return old_import(name, globals, locals, fromlist=fromlist, level=level)
+/home/jasoncui/miniconda3/envs/rdq/lib/python3.10/site-packages/torch/functional.py:504: UserWarning: torch.meshgrid: in an upcoming release, it will be required to pass the indexing argument. (Triggered internally at ../aten/src/ATen/native/TensorShape.cpp:3526.)
+  return _VF.meshgrid(tensors, **kwargs)  # type: ignore[attr-defined]
+Loaded trained image branch: {'checkpoint': '/home/jasoncui/projects/rdq-uav-final/weights/vision_full.ckpt', 'sha256': '04b5e587e2710d5137638888b407f754a45b09ce48a060f045daba61cfd58396', 'strict': True, 'optimizer_and_epoch_restored': False}
+/home/jasoncui/miniconda3/envs/rdq/lib/python3.10/site-packages/torch/nn/modules/conv.py:456: UserWarning: Applied workaround for CuDNN issue, install nvrtc.so (Triggered internally at ../aten/src/ATen/native/cudnn/Conv_v8.cpp:80.)
+  return F.conv2d(input, weight, bias, self.stride,
+extract 12/12 elapsed=0.1min ETA=0.0min
+CACHE READY: /home/jasoncui/projects/rdq-uav-final/runs/v3_consolidation_smoke/seq0020/cache
+RUN: /home/jasoncui/miniconda3/envs/rdq/bin/python -u -m rdq_uav.multimodal_v3.pipeline.evaluate_visual_birth --cache /home/jasoncui/projects/rdq-uav-final/runs/v3_consolidation_smoke/seq0020/cache --samples /home/jasoncui/projects/rdq-uav-final/runs/v3_consolidation_smoke/seq0020/cache/image_samples.jsonl --visual-cache /home/jasoncui/projects/rdq-uav-final/runs/v3_consolidation_smoke/seq0020/cache/raw_view_cache.jsonl --config configs/final/tracker.json --output /home/jasoncui/projects/rdq-uav-final/runs/v3_consolidation_smoke/seq0020/tracks
+{
+  "independent_top1": {
+    "status": "not_scored_no_GT_in_inference_cache",
+    "queries": 0,
+    "outputs": null,
+    "rmse_3d_m": null
+  },
+  "target": {
+    "status": "not_scored_no_GT_in_inference_cache",
+    "queries": 0,
+    "outputs": 0,
+    "rmse_3d_m": null
+  },
+  "lagged": {
+    "status": "not_scored_no_GT_in_inference_cache",
+    "queries": 0,
+    "outputs": 0,
+    "rmse_3d_m": null
+  },
+  "lagged_sequences": {
+    "seq0020": {
+      "status": "not_scored_no_GT_in_inference_cache",
+      "queries": 0,
+      "outputs": 0,
+      "rmse_3d_m": null
+    }
+  },
+  "lagged_events": {
+    "unavailable": 12
+  },
+  "sequences": {
+    "seq0020": {
+      "status": "not_scored_no_GT_in_inference_cache",
+      "queries": 0,
+      "outputs": 0,
+      "rmse_3d_m": null
+    }
+  },
+  "events": {
+    "warmup": 12
+  },
+  "protocol": {
+    "target_causal": true,
+    "GT_used_for_inference": false,
+    "split": "validation_sub",
+    "schedule": "sensor timestamp union: Image + livox_avia + lidar_360; no GT query schedule",
+    "validation_tuned": true,
+    "held_out_test": false,
+    "lagged": {
+      "causal": false,
+      "max_lookahead_s": 0.5,
+      "batch_evaluation": true,
+      "startup_completion": "bounded backward extrapolation, not radar detection"
+    }
+  },
+  "runtime_s": 0.318774081999436,
+  "reproducibility": {
+    "argv": [
+      "/home/jasoncui/projects/rdq-uav-final/src/rdq_uav/multimodal_v3/pipeline/evaluate_target.py",
+      "--cache",
+      "/home/jasoncui/projects/rdq-uav-final/runs/v3_consolidation_smoke/seq0020/cache",
+      "--config",
+      "configs/final/tracker.json",
+      "--lag-s",
+      "0.5",
+      "--output",
+      "/home/jasoncui/projects/rdq-uav-final/runs/v3_consolidation_smoke/seq0020/tracks"
+    ],
+    "python": "3.10.21 | packaged by conda-forge | (main, Aug 21 2026, 22:42:31) [GCC 14.4.0]",
+    "numpy": "1.26.4",
+    "source_sha256": {
+      "src/rdq_uav/multimodal_v3/pipeline/evaluate_target.py": "3eb8bc01c1f4c2300431700676d5d757c897b9bffeeccaeb4c9c41ebf14117e6",
+      "src/rdq_uav/multimodal_v3/target_tracker.py": "6a76768ace47d37ef302f08bbd26caec502f01c882fc3ed4b94844f752240e62",
+      "src/rdq_uav/multimodal_v3/target_smoothing.py": "3ce800b10144ec36fd0cad99ac9f0eeb8a5e65e0addad0c4c6a5259087a70f44",
+      "src/rdq_uav/multimodal_v3/tracking.py": "6576dc7334edfb9437c144a9ca37787e2c0f614de5a670aff87fa49c876b17f8",
+      "src/rdq_uav/multimodal_v3/candidate_adapter.py": "9003c078a6a26b8b5bdac68e4bf623e6c23704f830887eade84fb7131f4fed4c",
+      "src/rdq_uav/multimodal_v3/pipeline/tracking_metrics.py": "b0428386ec0b4819eccfad31d629a55edaa457ecc611b9ff8ef050e9aa420c62"
+    },
+    "cache_index_sha256": "2cb1a44d312c1facfe9b0d1278920d8540ed5ddf41d1b16f71f3534a8da58a20"
+  }
+}
+VISUAL BIRTH RESULTS: /home/jasoncui/projects/rdq-uav-final/runs/v3_consolidation_smoke/seq0020/tracks/summary.json
+{
+  "target": {
+    "status": "not_scored_no_GT_in_inference_cache",
+    "queries": 0,
+    "outputs": 0,
+    "rmse_3d_m": null
+  },
+  "lagged": {
+    "status": "not_scored_no_GT_in_inference_cache",
+    "queries": 0,
+    "outputs": 0,
+    "rmse_3d_m": null
+  },
+  "protocol": {
+    "target_causal": true,
+    "GT_used_for_inference": false,
+    "split": "validation_sub",
+    "schedule": "sensor timestamp union: Image + livox_avia + lidar_360; no GT query schedule",
+    "validation_tuned": true,
+    "held_out_test": false,
+    "lagged": {
+      "causal": false,
+      "max_lookahead_s": 0.5,
+      "batch_evaluation": true,
+      "startup_completion": "bounded backward extrapolation, not radar detection"
+    },
+    "policy": "camera_supported_birth; original_radar_continuation",
+    "GT_used_for_birth": false,
+    "post_test_exploration": false,
+    "diagnostic_cache_subset": false,
+    "missing_cached_image_queries": 0,
+    "camera_cache_scope": "all_available_images_no_label_filter"
+  }
+}
+RUN: /home/jasoncui/miniconda3/envs/rdq/bin/python -u -m rdq_uav.multimodal_v3.pipeline.prepare_image_guidance --samples /home/jasoncui/projects/rdq-uav-final/runs/v3_consolidation_smoke/seq0020/cache/image_samples.jsonl --tracks /home/jasoncui/projects/rdq-uav-final/runs/v3_consolidation_smoke/seq0020/tracks/per_query.jsonl --config configs/final/image_guidance.json --all-available-images --output /home/jasoncui/projects/rdq-uav-final/runs/v3_consolidation_smoke/seq0020/priors
+{
+  "queries": 12,
+  "unique_labeled_images": 0,
+  "unique_sensor_images": 8,
+  "all_available_images": true,
+  "image_sequences": {
+    "seq0020": 8
+  },
+  "source_wh": [
+    1280,
+    960
+  ],
+  "config": {
+    "camera_config": "configs/calibration/mmaud_v1_omni.yaml",
+    "geometry_calibration": "calibration/official_left_p4_current_geometry.json",
+    "crop_side_px": 256,
+    "max_prior_gap_s": 0.25,
+    "short_edge": 800,
+    "max_size": 1333,
+    "topk": 100,
+    "nms_iou": 0.5,
+    "confidence_threshold": 0.25,
+    "radar_box_gate": "crop_only"
+  },
+  "GT_used_to_construct_priors": false,
+  "scope": "diagnostic coverage, not measured detection AP improvement",
+  "crop_recall_denominator": "all_unique_labeled_images; unlabeled sensor frames excluded from GT diagnostics",
+  "causal": {
+    "priors": 0,
+    "missing_priors": 0,
+    "center_error_px_quantiles_50_90_95_max": null,
+    "gt_box_fully_in_crop": 0,
+    "crop_recall_all_images": null,
+    "projected_point_inside_gt_box": 0,
+    "max_image_lookahead_s": 0.0
+  },
+  "lag05": {
+    "priors": 0,
+    "missing_priors": 0,
+    "center_error_px_quantiles_50_90_95_max": null,
+    "gt_box_fully_in_crop": 0,
+    "crop_recall_all_images": null,
+    "projected_point_inside_gt_box": 0,
+    "max_image_lookahead_s": 0.0
+  },
+  "box_width_px_quantiles_10_50_90": null,
+  "small_box_fraction_area_lt_32sq": null
+}
+RUN: /home/jasoncui/miniconda3/envs/rdq/bin/python -u -m rdq_uav.multimodal_v3.pipeline.evaluate_image_guidance --checkpoint /home/jasoncui/projects/rdq-uav-final/weights/vision_full.ckpt --crop-checkpoint /home/jasoncui/projects/rdq-uav-final/weights/vision_crop.ckpt --samples /home/jasoncui/projects/rdq-uav-final/runs/v3_consolidation_smoke/seq0020/cache/image_samples.jsonl --priors /home/jasoncui/projects/rdq-uav-final/runs/v3_consolidation_smoke/seq0020/priors/image_priors.jsonl --data-root /home/jasoncui/datasets/MMAUD/official/train --config configs/final/image_guidance.json --all-available-images --output /home/jasoncui/projects/rdq-uav-final/runs/v3_consolidation_smoke/seq0020/image_eval
+/home/jasoncui/miniconda3/envs/rdq/lib/python3.10/site-packages/timm/models/layers/__init__.py:48: FutureWarning: Importing from timm.models.layers is deprecated, please import via timm.layers
+  warnings.warn(f"Importing from {__name__} is deprecated, please import via timm.layers", FutureWarning)
+/home/jasoncui/projects/rdq-uav-final/third_party/detrex/detectron2/detectron2/config/lazy.py:167: UserWarning: pkg_resources is deprecated as an API. See https://setuptools.pypa.io/en/latest/pkg_resources.html. The pkg_resources package is slated for removal as early as 2025-11-30. Refrain from using this package or pin to Setuptools<81.
+  return old_import(name, globals, locals, fromlist=fromlist, level=level)
+/home/jasoncui/miniconda3/envs/rdq/lib/python3.10/site-packages/torch/functional.py:504: UserWarning: torch.meshgrid: in an upcoming release, it will be required to pass the indexing argument. (Triggered internally at ../aten/src/ATen/native/TensorShape.cpp:3526.)
+  return _VF.meshgrid(tensors, **kwargs)  # type: ignore[attr-defined]
+/home/jasoncui/miniconda3/envs/rdq/lib/python3.10/site-packages/torch/nn/modules/conv.py:456: UserWarning: Applied workaround for CuDNN issue, install nvrtc.so (Triggered internally at ../aten/src/ATen/native/cudnn/Conv_v8.cpp:80.)
+  return F.conv2d(input, weight, bias, self.stride,
+image-guidance 8/8 elapsed=3.5s
+{
+  "methods": {
+    "vision_top50": {
+      "labeled_queries": 0,
+      "unique_labeled_images": 0,
+      "deduplication": "closest_query_to_image_time_then_query_time_then_sample_id",
+      "prediction_scope": "frozen_visual_detector_full_and_or_crop_predictions_in_source_left_pixels",
+      "AP": null,
+      "AP50": null,
+      "AP75": null,
+      "AP_small": null,
+      "AR100": null,
+      "status": "not_applicable_no_labeled_images",
+      "mAP50": null,
+      "mAP50_95": null,
+      "Precision": 0.0,
+      "Recall": 0.0,
+      "F1": 0.0,
+      "TP": 0,
+      "FP": 0,
+      "FN": 0,
+      "confidence_threshold": 0.25,
+      "precision_recall_iou_threshold": 0.5,
+      "precision_recall_max_dets": 100,
+      "precision_recall_scope": "one annotated UAV per labeled image; unlabeled images excluded"
+    },
+    "vision_top100": {
+      "labeled_queries": 0,
+      "unique_labeled_images": 0,
+      "deduplication": "closest_query_to_image_time_then_query_time_then_sample_id",
+      "prediction_scope": "frozen_visual_detector_full_and_or_crop_predictions_in_source_left_pixels",
+      "AP": null,
+      "AP50": null,
+      "AP75": null,
+      "AP_small": null,
+      "AR100": null,
+      "status": "not_applicable_no_labeled_images",
+      "mAP50": null,
+      "mAP50_95": null,
+      "Precision": 0.0,
+      "Recall": 0.0,
+      "F1": 0.0,
+      "TP": 0,
+      "FP": 0,
+      "FN": 0,
+      "confidence_threshold": 0.25,
+      "precision_recall_iou_threshold": 0.5,
+      "precision_recall_max_dets": 100,
+      "precision_recall_scope": "one annotated UAV per labeled image; unlabeled images excluded"
+    },
+    "vision_nms": {
+      "labeled_queries": 0,
+      "unique_labeled_images": 0,
+      "deduplication": "closest_query_to_image_time_then_query_time_then_sample_id",
+      "prediction_scope": "frozen_visual_detector_full_and_or_crop_predictions_in_source_left_pixels",
+      "AP": null,
+      "AP50": null,
+      "AP75": null,
+      "AP_small": null,
+      "AR100": null,
+      "status": "not_applicable_no_labeled_images",
+      "mAP50": null,
+      "mAP50_95": null,
+      "Precision": 0.0,
+      "Recall": 0.0,
+      "F1": 0.0,
+      "TP": 0,
+      "FP": 0,
+      "FN": 0,
+      "confidence_threshold": 0.25,
+      "precision_recall_iou_threshold": 0.5,
+      "precision_recall_max_dets": 100,
+      "precision_recall_scope": "one annotated UAV per labeled image; unlabeled images excluded"
+    },
+    "vision_crop": {
+      "labeled_queries": 0,
+      "unique_labeled_images": 0,
+      "deduplication": "closest_query_to_image_time_then_query_time_then_sample_id",
+      "prediction_scope": "frozen_visual_detector_full_and_or_crop_predictions_in_source_left_pixels",
+      "AP": null,
+      "AP50": null,
+      "AP75": null,
+      "AP_small": null,
+      "AR100": null,
+      "status": "not_applicable_no_labeled_images",
+      "mAP50": null,
+      "mAP50_95": null,
+      "Precision": 0.0,
+      "Recall": 0.0,
+      "F1": 0.0,
+      "TP": 0,
+      "FP": 0,
+      "FN": 0,
+      "confidence_threshold": 0.25,
+      "precision_recall_iou_threshold": 0.5,
+      "precision_recall_max_dets": 100,
+      "precision_recall_scope": "one annotated UAV per labeled image; unlabeled images excluded"
+    },
+    "track_crop_causal": {
+      "labeled_queries": 0,
+      "unique_labeled_images": 0,
+      "deduplication": "closest_query_to_image_time_then_query_time_then_sample_id",
+      "prediction_scope": "frozen_visual_detector_full_and_or_crop_predictions_in_source_left_pixels",
+      "AP": null,
+      "AP50": null,
+      "AP75": null,
+      "AP_small": null,
+      "AR100": null,
+      "status": "not_applicable_no_labeled_images",
+      "mAP50": null,
+      "mAP50_95": null,
+      "Precision": 0.0,
+      "Recall": 0.0,
+      "F1": 0.0,
+      "TP": 0,
+      "FP": 0,
+      "FN": 0,
+      "confidence_threshold": 0.25,
+      "precision_recall_iou_threshold": 0.5,
+      "precision_recall_max_dets": 100,
+      "precision_recall_scope": "one annotated UAV per labeled image; unlabeled images excluded"
+    },
+    "track_crop_lag05": {
+      "labeled_queries": 0,
+      "unique_labeled_images": 0,
+      "deduplication": "closest_query_to_image_time_then_query_time_then_sample_id",
+      "prediction_scope": "frozen_visual_detector_full_and_or_crop_predictions_in_source_left_pixels",
+      "AP": null,
+      "AP50": null,
+      "AP75": null,
+      "AP_small": null,
+      "AR100": null,
+      "status": "not_applicable_no_labeled_images",
+      "mAP50": null,
+      "mAP50_95": null,
+      "Precision": 0.0,
+      "Recall": 0.0,
+      "F1": 0.0,
+      "TP": 0,
+      "FP": 0,
+      "FN": 0,
+      "confidence_threshold": 0.25,
+      "precision_recall_iou_threshold": 0.5,
+      "precision_recall_max_dets": 100,
+      "precision_recall_scope": "one annotated UAV per labeled image; unlabeled images excluded"
+    }
+  },
+  "protocol": {
+    "unique_labeled_images": 0,
+    "complete_image_set": 8,
+    "unique_sensor_images": 8,
+    "all_available_images": true,
+    "complete_labeled_image_set": 0,
+    "visual_refinement": false,
+    "visual_refinement_scope": null,
+    "partial_evaluation": false,
+    "precision": "fp32",
+    "GT_used_for_inference": false,
+    "new_training": false,
+    "same_detector_weights_for_all_crop_arms": true,
+    "same_detector_weights_for_full_and_crop": false,
+    "crop_weights": "/home/jasoncui/projects/rdq-uav-final/weights/vision_crop.ckpt",
+    "raw_views_saved_before_cross_view_NMS": true,
+    "all_images_retained_when_prior_missing": true,
+    "lag05_image_delay": "recorded in input priors; may exceed 0.5 due to timestamp alignment",
+    "selection_objective": "image mAP50_95, mAP50, Precision and Recall; not joint_success"
+  },
+  "config": {
+    "camera_config": "configs/calibration/mmaud_v1_omni.yaml",
+    "geometry_calibration": "calibration/official_left_p4_current_geometry.json",
+    "crop_side_px": 256,
+    "max_prior_gap_s": 0.25,
+    "short_edge": 800,
+    "max_size": 1333,
+    "topk": 100,
+    "nms_iou": 0.5,
+    "confidence_threshold": 0.25,
+    "radar_box_gate": "crop_only"
+  },
+  "runtime_s": 4.023690269008512,
+  "argv": [
+    "/home/jasoncui/projects/rdq-uav-final/src/rdq_uav/multimodal_v3/pipeline/evaluate_image_guidance.py",
+    "--checkpoint",
+    "/home/jasoncui/projects/rdq-uav-final/weights/vision_full.ckpt",
+    "--crop-checkpoint",
+    "/home/jasoncui/projects/rdq-uav-final/weights/vision_crop.ckpt",
+    "--samples",
+    "/home/jasoncui/projects/rdq-uav-final/runs/v3_consolidation_smoke/seq0020/cache/image_samples.jsonl",
+    "--priors",
+    "/home/jasoncui/projects/rdq-uav-final/runs/v3_consolidation_smoke/seq0020/priors/image_priors.jsonl",
+    "--data-root",
+    "/home/jasoncui/datasets/MMAUD/official/train",
+    "--config",
+    "configs/final/image_guidance.json",
+    "--all-available-images",
+    "--output",
+    "/home/jasoncui/projects/rdq-uav-final/runs/v3_consolidation_smoke/seq0020/image_eval"
+  ],
+  "torch": "2.1.1+cu118",
+  "input_sha256": {
+    "/home/jasoncui/projects/rdq-uav-final/weights/vision_full.ckpt": "04b5e587e2710d5137638888b407f754a45b09ce48a060f045daba61cfd58396",
+    "/home/jasoncui/projects/rdq-uav-final/runs/v3_consolidation_smoke/seq0020/cache/image_samples.jsonl": "5b03763ac4cfaf8afa37cb9cb9c4c6ba8f80c90755f98893c465c1a2d99a0b1f",
+    "/home/jasoncui/projects/rdq-uav-final/runs/v3_consolidation_smoke/seq0020/priors/image_priors.jsonl": "c5fb124b20fa9fec9582980be8fe32ecf2a236853e65d417ec3b48a372b5dc93",
+    "configs/final/image_guidance.json": "18f86507574b7e299f9bda1f794dd7b6d7500a42b008510349eda31e60ae2049",
+    "/home/jasoncui/projects/rdq-uav-final/weights/vision_crop.ckpt": "85ba1a7ca899f146c3cdfede2d982f7ee255751dc17093ea7cefa413829df8c9"
+  },
+  "source_sha256": {
+    "src/rdq_uav/multimodal_v3/pipeline/evaluate_image_guidance.py": "fa79d83edbbd6600617f92ced5b61a5a6fdefa75aba6aa8b83e5043f0a97f5cb",
+    "src/rdq_uav/multimodal_v3/image_guidance.py": "25db0200ab96f72c482e21397283eda356b3d66beb7b404b6dabacf57314b071",
+    "src/rdq_uav/multimodal_v3/image_detection.py": "a19bc4b5877ef04acff98b7bff5964e9b96de14a3b55a788d83af3c3c9278d46",
+    "src/rdq_uav/multimodal_v3/visual_refinement.py": "198ce7f33f37197638b7d7e64fbb36fd7f7e1be5897482f92d27554a7f28047c",
+    "src/rdq_uav/multimodal_v3/detection_metrics.py": "4f9f7abe1637835a751522465554179be86ceabc31909ddcc9144aae69f6cc5d",
+    "src/rdq_uav/multimodal_v3/modeling/dino_adapter.py": "a9af23a56b9827d9043c82f1a546d0c9805cb62f3b94ee1dc2d04e94408ec065",
+    "src/rdq_uav/multimodal_v3/modeling/training.py": "2ea9898661639f6257b0de045dcd94fd7756ecd833ac35af911b748a234f4ec7",
+    "src/rdq_uav/multimodal_v3/modeling/candidate_builders.py": "06e40c4da886a9afeec751b904be9a4979f9b27d3baea193f98a232e63590c63",
+    "src/rdq_uav/multimodal_v3/modeling/data.py": "9ad5fe88357214853c2a88dd1a7df36de1f1572490e3e7402e88808c8b9fb5d0",
+    "src/rdq_uav/multimodal_v3/modeling/paper_metrics.py": "2280a779abba723d90cb8b825166fb3524aa79eec74e8922ab16b8682600204a"
+  },
+  "gpu_memory": {
+    "name": "NVIDIA GeForce RTX 3070 Laptop GPU",
+    "peak_allocated_gib": 0.7041854858398438,
+    "peak_reserved_gib": 1.138671875,
+    "free_at_end_gib": 5.771484375,
+    "total_gib": 7.99951171875,
+    "scope": "model construction and sequential inference; no backward or optimizer"
+  }
+}
+SEQUENCE COMPLETE: seq0020 {'all_left_images': 620, 'predicted_images': 8, 'complete_image_coverage': False, 'sensor_queries': 12}
+RESULTS: /home/jasoncui/projects/rdq-uav-final/runs/v3_consolidation_smoke/metrics.json

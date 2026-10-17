@@ -1,0 +1,30 @@
+{
+  "time_convention": "gt_query_time = image_time + time_offset_s",
+  "time_offset_s": 0.0,
+  "cameras": {
+    "left": {
+      "rotation_camera_from_gt": [
+        [
+          1.0,
+          0.0,
+          0.0
+        ],
+        [
+          0.0,
+          1.0,
+          0.0
+        ],
+        [
+          0.0,
+          0.0,
+          1.0
+        ]
+      ],
+      "translation_camera_from_gt_m": [
+        0.16965789709994833,
+        0.01804162364147821,
+        0.036247986801981685
+      ]
+    }
+  }
+}

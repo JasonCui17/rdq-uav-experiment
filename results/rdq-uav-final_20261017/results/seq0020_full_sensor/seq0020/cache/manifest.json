@@ -1,0 +1,153 @@
+{
+  "schema_version": 2,
+  "complete": true,
+  "checkpoint": "/home/jasoncui/projects/rdq-uav-final/weights/radar.ckpt",
+  "checkpoint_sha256": "1c841c4dac463e4910a0e08d99f4fc75fe1bb1c4f02951ec12cc05c2fb5ea023",
+  "checkpoint_info": {
+    "epoch": 7,
+    "global_step": 11176
+  },
+  "config": "/home/jasoncui/projects/rdq-uav-final/configs/final/radar.yaml",
+  "config_sha256": "809f49b6fadb5aadd24b3b80d28e88efe09e7db8ea9e3108800bc69833a6e75e",
+  "lidar_config_sha256": "fa22d84842057e30dda554e993ae959bb1d10a47677905bdfca9f8e58ad16435",
+  "candidate_config_sha256": "78570aaa9715148df1a26d133bd1cb090ea24610bf44ae13d00dbfc080c3bea7",
+  "split_file_sha256": "046cf8a6a564c5a82424f25c80c9421b744c8284c81c2226b5a78fac500f3136",
+  "data_root": "/home/jasoncui/datasets/MMAUD/official/train",
+  "split": "validation_sub",
+  "queries": 935,
+  "extractor_sha256": "d9cdf3c9db818ebebd7a04cb3c449a5e443dc56d092b9fb8dee36496497203f0",
+  "torch": "2.1.1+cu118",
+  "precision": "fp32",
+  "code_commit": "",
+  "selector": {
+    "raw_topk": 10,
+    "pre_nms_topk": 50,
+    "final_topk": 10,
+    "nms_radius_m": 1.0
+  },
+  "protocol": "sensor timestamp union: Image + livox_avia + lidar_360; no GT query schedule",
+  "independent_reference_checked": false,
+  "evidence_fields": [
+    "dense_point_count",
+    "dense_motion_valid",
+    "dense_motion_dynamic",
+    "dense_motion_reliability",
+    "dense_motion_speed_mps"
+  ],
+  "background_evidence_note": "Raw L0 count and optional GT-free motion diagnostics; invalid motion is unknown",
+  "smoke_test": false,
+  "vision_cache_scope": "all_available_images_no_label_filter",
+  "vision_checkpoint": "/home/jasoncui/projects/rdq-uav-final/weights/vision_full.ckpt",
+  "vision_checkpoint_sha256": "04b5e587e2710d5137638888b407f754a45b09ce48a060f045daba61cfd58396",
+  "vision_runtime_config": {
+    "data": {
+      "camera_config": "configs/calibration/mmaud_v1_omni.yaml",
+      "dino_max_size": 1333,
+      "dino_short_edge": 800,
+      "geometry_calibration": "calibration/official_left_p4_current_geometry.json",
+      "label_directory": "2d_detect",
+      "max_image_gap_s": 1.0,
+      "num_workers": 2,
+      "prefetch_factor": 2,
+      "radar_history_s": 1.0,
+      "root": "/home/jasoncui/datasets/MMAUD/official/train",
+      "split_file": "/home/jasoncui/projects/rdq-uav-final/splits/mmaud_v2_annotated20_seed42.json",
+      "train_split": "train_sub",
+      "val_split": "validation_sub",
+      "annotation_manifest": "annotations/human_gt_overlay.json"
+    },
+    "experiment": {
+      "name": "mmv3_image_finetune",
+      "output_dir": "outputs/mmv3_image_finetune",
+      "seed": 42,
+      "stage": "B1"
+    },
+    "initialization": {
+      "candidate_config": "experiments/multimodal_v2/configs/candidates.yaml",
+      "dino_config": "third_party/detrex/projects/dino/configs/dino-swin/dino_swin_tiny_224_4scale_12ep.py",
+      "dino_root": "third_party/detrex",
+      "lidar_config": "/home/jasoncui/projects/rdq-uav-final/configs/final/radar_architecture.yaml",
+      "image_warmstart": {
+        "checkpoint": "/home/jasoncui/projects/rdq-uav-final/weights/vision_full.ckpt",
+        "sha256": "04b5e587e2710d5137638888b407f754a45b09ce48a060f045daba61cfd58396",
+        "strict": true,
+        "optimizer_and_epoch_restored": false
+      }
+    },
+    "lightning": {
+      "accelerator": "gpu",
+      "deterministic": "warn",
+      "devices": 1,
+      "num_sanity_val_steps": 0,
+      "precision": "16-mixed"
+    },
+    "logging": {
+      "every_updates": 20
+    },
+    "loss": {
+      "box_ignore_iou": 0.3,
+      "box_positive_iou": 0.5,
+      "focal_alpha": 0.25,
+      "focal_gamma": 2.0,
+      "lambda_rank_2d": 1.0,
+      "lambda_rank_3d": 0.0,
+      "negative_only_weight": 0.25,
+      "xyz_ignore_m": 2.0,
+      "xyz_positive_m": 1.0
+    },
+    "model": {
+      "geometry_gate": {
+        "max_px": 48.0,
+        "min_px": 8.0,
+        "mode": "inverse_range",
+        "reference_margin_px": 16.0,
+        "reference_range_m": 20.0
+      },
+      "interaction_enabled": false,
+      "lidar_neighbors": 16,
+      "max_abs_delta_logit": 2.0,
+      "vision_reads_radar": false,
+      "vision_scoring_enabled": false,
+      "visual_radius_cells": 1
+    },
+    "training": {
+      "accumulate": 4,
+      "batch_size": 1,
+      "betas": [
+        0.9,
+        0.999
+      ],
+      "epochs": 12,
+      "eps": 1e-08,
+      "final_lr_ratio": 0.01,
+      "grad_clip_norm": 1.0,
+      "learning_rate": 1e-05,
+      "warmup_fraction": 0.05,
+      "weight_decay": 0.0001,
+      "image_freeze_backbone": false
+    },
+    "checkpoint": {
+      "monitor": "val/AP",
+      "mode": "max",
+      "filename": "best_ap"
+    }
+  },
+  "image_config": {
+    "short_edge": 800,
+    "max_size": 1333,
+    "topk": 100
+  },
+  "vision_dino_config_sha256": "147e6dada519517efa00c104fe0905f79c5f5614a51152b9619b10877a07a97b",
+  "vision_source_sha256": {
+    "experiments/multimodal_v3/train_image.py": "67b982a072cc2e80fd3a6fdb300b091cd673e7290f0af6e4e43336ed8e378c7a",
+    "src/rdq_uav/multimodal_v3/image_detection.py": "6bd43d605cf36801133dc283c0c57382ed7f64ebb8690cbcdf10193a7e43fccb",
+    "src/rdq_uav/multimodal_v2/training.py": "023243bef00f3c7a305030e8deef685b480e8d33db375a7c8147d5fb3cd616a2",
+    "src/rdq_uav/multimodal_v2/dino_adapter.py": "a9af23a56b9827d9043c82f1a546d0c9805cb62f3b94ee1dc2d04e94408ec065",
+    "src/rdq_uav/multimodal_v2/swin_adapter.py": "a6c5b26f27aff1f42ad5ad3a3019ca1394bdabd798438fc1fdfb8abb6ddf76c9",
+    "src/rdq_uav/multimodal_v2/uav_dino.py": "e9118260d0d3eeef47d3f7eb499d4837cdca6b43b97c62ee989911d628649e3c"
+  },
+  "extraction_seconds": 338.9440036560118,
+  "image_samples_sha256": "656648cdd4c5c31201646b4df6bee0d2ae478613f106428c044d54343cc827e1",
+  "raw_view_cache_sha256": "01dc6a46419d49838df91125dac458438b2179e8b2d238ea5b7d0462de990235",
+  "unique_cached_images": 620
+}

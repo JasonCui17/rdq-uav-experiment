@@ -1,0 +1,13 @@
+{
+  "filter": {
+    "measurement_std_m": 0.5,
+    "process_noise_density": 4.0,
+    "max_innovation_m": 2.0,
+    "max_prediction_age_s": 0.5
+  },
+  "birth_score": 0.9,
+  "high_score": 0.5,
+  "fallback_radius_m": 1.0,
+  "quality_weight": 2.0,
+  "high_rank_first": true
+}
