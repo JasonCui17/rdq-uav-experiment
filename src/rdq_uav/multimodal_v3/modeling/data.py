@@ -1,0 +1,615 @@
+"""V2 data boundary: query -> Sample -> packed Batch -> model inputs.
+
+Flat fields keep the existing detector interfaces. Radar: points/delta_t/
+sensor_id/m_R (None when absent). Vision: image_uint8/vision_delta_t/m_V
+and resize dimensions (None when absent). Collate packs only observed samples;
+radar_batch_index/vision_batch_index map local batches to original Sample slots.
+Target: target_xyz/target_valid/gt_box_xyxy_px/gt_2d_valid. All remaining
+identity, absolute time and file fields are audit metadata, not model inputs.
+"""
+from __future__ import annotations
+
+from dataclasses import dataclass
+import json
+from pathlib import Path
+from typing import Any, Mapping, Sequence
+
+import numpy as np
+from PIL import Image
+import torch
+from torch.utils.data import Dataset
+import yaml
+
+from .radar_data import LidarFrameEvent, load_released_xyz, merge_frame_streams
+from .geometry import ProjectionContext
+from .loss import MultimodalTargets
+from .contracts import validate_batch
+
+@dataclass(frozen=True)
+class ViewTransform:
+    """Invertible resize + optional horizontal flip from source camera pixels."""
+
+    source_wh: tuple[int, int]
+    view_wh: tuple[int, int]
+    horizontal_flip: bool = False
+
+    def __post_init__(self) -> None:
+        sw, sh = self.source_wh
+        vw, vh = self.view_wh
+        if min(sw, sh, vw, vh) <= 0:
+            raise ValueError("source/view dimensions must be positive")
+
+    @property
+    def scale_xy(self) -> tuple[float, float]:
+        sw, sh = self.source_wh
+        vw, vh = self.view_wh
+        return vw / sw, vh / sh
+
+    def source_points_to_view(self, points_xy: torch.Tensor) -> torch.Tensor:
+        points = torch.as_tensor(points_xy)
+        if points.shape[-1] != 2:
+            raise ValueError("points must end in XY")
+        sx, sy = self.scale_xy
+        out = points * points.new_tensor((sx, sy))
+        if self.horizontal_flip:
+            out = torch.stack((out.new_tensor(float(self.view_wh[0])) - out[..., 0], out[..., 1]), dim=-1)
+        return out
+
+    def source_boxes_to_view(self, boxes_xyxy: torch.Tensor) -> torch.Tensor:
+        boxes = torch.as_tensor(boxes_xyxy)
+        if boxes.shape[-1] != 4:
+            raise ValueError("boxes must end in XYXY")
+        sx, sy = self.scale_xy
+        x1, y1, x2, y2 = (boxes * boxes.new_tensor((sx, sy, sx, sy))).unbind(-1)
+        if self.horizontal_flip:
+            width = boxes.new_tensor(float(self.view_wh[0]))
+            x1, x2 = width - x2, width - x1
+        return torch.stack((x1, y1, x2, y2), dim=-1)
+
+    def view_boxes_to_source(self, boxes_xyxy: torch.Tensor) -> torch.Tensor:
+        boxes = torch.as_tensor(boxes_xyxy)
+        if boxes.shape[-1] != 4:
+            raise ValueError("boxes must end in XYXY")
+        x1, y1, x2, y2 = boxes.unbind(-1)
+        if self.horizontal_flip:
+            width = boxes.new_tensor(float(self.view_wh[0]))
+            x1, x2 = width - x2, width - x1
+        sx, sy = self.scale_xy
+        return torch.stack((x1 / sx, y1 / sy, x2 / sx, y2 / sy), dim=-1)
+
+
+def load_yolo_box(path: Path, source_wh: tuple[int, int]) -> torch.Tensor | None:
+    """Directory labels are trusted supervision, normalized to the left source crop.
+
+    This matches gt_bbox_annotator's calibration-sized left-view convention,
+    including when the released PNG contains side-by-side camera images.
+    Missing/empty files have no box supervision, never an implicit negative.
+    The current single-target contract cannot represent multiple rows.
+    """
+    if not path.exists():
+        return None
+    rows = [row.strip() for row in path.read_text(encoding="utf-8-sig").splitlines() if row.strip()]
+    if not rows:
+        return None
+    if len(rows) != 1:
+        raise ValueError(f"single-UAV target requires one YOLO box, found {len(rows)}: {path}")
+    fields = rows[0].split()
+    if len(fields) != 5:
+        raise ValueError(f"YOLO label must have 5 columns: {path}")
+    try:
+        class_id = int(fields[0])
+        cx, cy, width, height = map(float, fields[1:])
+    except ValueError as exc:
+        raise ValueError(f"malformed YOLO label: {path}") from exc
+    if class_id < 0 or not np.isfinite([cx, cy, width, height]).all() or not (
+        0 <= cx <= 1 and 0 <= cy <= 1 and 0 < width <= 1 and 0 < height <= 1
+    ):
+        raise ValueError(f"invalid normalized YOLO label: {path}")
+    w, h = source_wh
+    box = np.asarray([(cx-width/2)*w, (cy-height/2)*h,
+                      (cx+width/2)*w, (cy+height/2)*h], dtype=np.float64)
+    # Same rounding tolerance as the project's annotation writer/reader.
+    if box[0] < -1e-3 or box[1] < -1e-3 or box[2] > w+1e-3 or box[3] > h+1e-3:
+        raise ValueError(f"YOLO box outside left source image: {path}")
+    box = np.clip(box, [0, 0, 0, 0], [w, h, w, h])
+    return torch.tensor(box, dtype=torch.float32)
+
+
+SENSORS = ((0, "Avia", "livox_avia"), (1, "Mid360", "lidar_360"))
+
+
+def _timestamp_paths(directory: Path, suffix: str) -> tuple[Path, ...]:
+    paths = tuple(sorted(directory.glob(f"*.{suffix}"), key=lambda p: (float(p.stem), str(p))))
+    if any(not np.isfinite(float(p.stem)) for p in paths):
+        raise ValueError(f"non-finite filename timestamp in {directory}")
+    return paths
+
+
+@dataclass(frozen=True)
+class LeftImageMatch:
+    sequence_id: str
+    path: Path | None
+    image_time: float | None
+    delta_t: float | None
+    valid: bool
+
+
+class LeftImageIndex:
+    """Sequence-local latest historical frame within [query_time-gap, query_time]."""
+    def __init__(self, root: str | Path, sequence_ids: Sequence[str], max_image_gap_s: float = 1.0):
+        self.max_image_gap_s = float(max_image_gap_s)
+        if not np.isfinite(self.max_image_gap_s) or self.max_image_gap_s < 0:
+            raise ValueError("max_image_gap_s must be finite and non-negative")
+        self.image_index_by_sequence = {}
+        for seq in sequence_ids:
+            paths = _timestamp_paths(Path(root)/seq/"Image", "png")
+            self.image_index_by_sequence[seq] = (np.asarray([float(p.stem) for p in paths]), paths)
+
+    def match(self, sequence_id: str, query_time: float) -> LeftImageMatch:
+        if not np.isfinite(query_time):
+            raise ValueError("query_time must be finite")
+        times, paths = self.image_index_by_sequence[sequence_id]
+        if not len(times):
+            return LeftImageMatch(sequence_id, None, None, None, False)
+        # right includes a frame exactly at query_time; future frames are never candidates.
+        index = int(np.searchsorted(times, query_time, side="right"))-1
+        if index < 0:
+            return LeftImageMatch(sequence_id, None, None, None, False)
+        image_time = float(times[index])
+        delta_t = image_time-query_time
+        valid = query_time-self.max_image_gap_s <= image_time <= query_time
+        # Out-of-range historical frame is deliberately not an input or GT key.
+        return LeftImageMatch(sequence_id, paths[index] if valid else None,
+                              image_time if valid else None, delta_t if valid else None, valid)
+
+
+def resize_wh(source_wh: tuple[int, int], short_edge: int, max_size: int) -> tuple[int, int]:
+    width, height = source_wh
+    if min(width, height, short_edge, max_size) <= 0:
+        raise ValueError("image dimensions and resize limits must be positive")
+    scale = min(float(short_edge)/min(width, height), float(max_size)/max(width, height))
+    return int(width*scale+0.5), int(height*scale+0.5)
+
+
+def prepare_image(path: str | Path, source_wh: tuple[int, int],
+                  short_edge: int, max_size: int) -> dict[str, torch.Tensor]:
+    if path is None:
+        raise ValueError("prepare_image requires an observed image, not a placeholder")
+    with Image.open(path) as handle:
+        source = handle.convert("RGB")
+    if source.width < source_wh[0] or source.height < source_wh[1]:
+        raise ValueError(f"image {source.size} smaller than calibration {source_wh}: {path}")
+    source = source.crop((0, 0, source_wh[0], source_wh[1]))
+    view_wh = resize_wh(source_wh, short_edge, max_size)
+    array = np.asarray(source.resize(view_wh, Image.Resampling.BILINEAR), dtype=np.uint8).copy()
+    return {
+        "image_uint8": torch.from_numpy(array).permute(2, 0, 1).contiguous(),
+        "image_source_wh": torch.tensor(source_wh, dtype=torch.long),
+        "image_view_wh": torch.tensor(view_wh, dtype=torch.long),
+        "image_scale_xy": torch.tensor((view_wh[0]/source_wh[0], view_wh[1]/source_wh[1])),
+    }
+
+
+def validate_sample(sample: Mapping[str, Any]) -> None:
+    """Check identities, inclusive time window, shapes and single-source validity."""
+    seq, tq = sample["sequence_id"], float(sample["query_time"])
+    history, gap = float(sample["radar_history_s"]), float(sample["max_image_gap_s"])
+    if not seq or not np.isfinite(tq):
+        raise ValueError("invalid query identity")
+    times, sequences = sample["event_timestamps"], sample["event_sequence_ids"]
+    if len(times) != len(sequences) or len(times) != sample["event_count"]:
+        raise ValueError("event metadata length mismatch")
+    if any(s != seq for s in sequences):
+        raise ValueError("radar event sequence mismatch")
+    if any(not np.isfinite(t) or not tq-history <= t <= tq for t in times):
+        raise ValueError("radar event outside causal history window")
+    radar_keys = ("points", "delta_t", "sensor_id")
+    if sample["m_R"]:
+        points = sample["points"]
+        if points is None or points.ndim != 2 or points.shape[1] != 3 or not len(points):
+            raise ValueError("valid radar requires nonempty [N,3] points")
+        n = len(points)
+        if not torch.isfinite(points).all():
+            raise ValueError("points must be finite")
+        for key in radar_keys[1:]:
+            if sample[key] is None or sample[key].shape != (n,):
+                raise ValueError(f"{key} must be [N]")
+        dt = sample["delta_t"]
+        tolerance = np.finfo(np.float32).eps*max(1.0, history)
+        if not torch.isfinite(dt).all() or bool(((dt > 0) | (dt < -history-tolerance)).any()):
+            raise ValueError("point relative time outside causal history window")
+        if sample["sensor_id"].dtype != torch.long or bool(((sample["sensor_id"] < 0) | (sample["sensor_id"] > 1)).any()):
+            raise ValueError("sensor_id must be long with 0=Avia, 1=Mid360")
+    elif any(sample[k] is not None for k in radar_keys):
+        raise ValueError("missing radar must have None observation fields")
+    vision_keys = ("image_uint8", "vision_delta_t", "image_source_wh", "image_view_wh", "image_scale_xy")
+    if sample["m_V"]:
+        image = sample["image_uint8"]
+        if image is None or image.ndim != 3 or image.shape[0] != 3 or image.dtype != torch.uint8:
+            raise ValueError("valid vision requires uint8 [3,H,W]")
+        for key in vision_keys[2:]:
+            if sample[key] is None or sample[key].shape != (2,):
+                raise ValueError(f"{key} must be [2]")
+        if tuple(sample["image_view_wh"].tolist()) != (image.shape[2], image.shape[1]):
+            raise ValueError("image view dimensions mismatch")
+        if not torch.allclose(sample["image_scale_xy"], sample["image_view_wh"].float()/sample["image_source_wh"]):
+            raise ValueError("image scale mismatch")
+        it = sample["image_time"]
+        if sample["image_sequence_id"] != seq or sample["left_image_path"] is None:
+            raise ValueError("image sequence/path mismatch")
+        if it is None or not np.isfinite(it) or not tq-gap <= it <= tq:
+            raise ValueError("valid image outside causal history window")
+        if sample["vision_delta_t"] != it-tq:
+            raise ValueError("vision relative time mismatch")
+    elif (any(sample[k] is not None for k in vision_keys) or sample["left_image_path"] is not None
+          or sample["image_time"] is not None or sample["gt_2d_valid"]):
+        raise ValueError("invalid image must not carry an input path/time or valid box")
+    if sample["target_xyz"].shape != (3,) or sample["gt_box_xyxy_px"].shape != (4,):
+        raise ValueError("target shapes must be [3]/[4]")
+    if sample["target_valid"] and (not torch.isfinite(sample["target_xyz"]).all() or sample["target_timestamp"] != tq):
+        raise ValueError("valid XYZ target must be finite and refer to query_time")
+    if sample["gt_2d_valid"]:
+        box = sample["gt_box_xyxy_px"]
+        if not torch.isfinite(box).all() or bool((box[2:] <= box[:2]).any()):
+            raise ValueError("valid box must be finite, non-degenerate source-pixel xyxy")
+
+
+@dataclass(frozen=True)
+class QueryRecord:
+    """External query identity; no supervision or observation paths."""
+    sequence_id: str
+    query_time: float
+    sample_id: str
+
+    def __post_init__(self):
+        if (not self.sequence_id or Path(self.sequence_id).name != self.sequence_id
+                or self.sequence_id in (".", "..") or not self.sample_id
+                or not np.isfinite(self.query_time)):
+            raise ValueError("invalid query identity")
+
+
+@dataclass(frozen=True)
+class Target3DRecord:
+    xyz_m: torch.Tensor
+    valid: bool
+    source_path: str | None
+
+
+def query_records_from_3d_gt(root: str | Path, sequence_ids: Sequence[str]) -> list[QueryRecord]:
+    """Current offline QuerySource: read GT filenames only, never GT arrays."""
+    records = [QueryRecord(seq, float(p.stem), f"{seq}_query_{p.stem}")
+               for seq in sequence_ids
+               for p in _timestamp_paths(Path(root)/seq/"ground_truth", "npy")]
+    if len({r.query_time for r in records}) != len(records):
+        raise ValueError("duplicate query_time; query_time must uniquely identify a Sample")
+    return records
+
+
+def build_3d_target_index(root: str | Path, sequence_ids: Sequence[str]) -> dict[float, Path]:
+    """Independent exact-time target provider index; no nearest-GT matching."""
+    index = {}
+    for seq in sequence_ids:
+        for path in _timestamp_paths(Path(root)/seq/"ground_truth", "npy"):
+            time = float(path.stem)
+            if time in index:
+                raise ValueError("duplicate target query_time")
+            index[time] = path
+    return index
+
+
+def load_3d_target(path: Path | None) -> Target3DRecord:
+    if path is None:
+        return Target3DRecord(torch.zeros(3), False, None)
+    xyz = torch.as_tensor(np.load(path, allow_pickle=False).reshape(3), dtype=torch.float32)
+    valid = bool(torch.isfinite(xyz).all())
+    return Target3DRecord(xyz if valid else torch.zeros(3), valid, str(path))
+
+
+class MultimodalV2Dataset(Dataset):
+    """Construct a complete Sample directly from each unique query_time.
+
+    Query records are supplied externally; optional exact-time targets are independent.
+    Train-only empty-input filtering happens here at initialization, including
+    events whose released XYZ rows are all invalid. Cached validity is one bool
+    per event; complete clouds are not retained or capped.
+    """
+    def __init__(self, root: str | Path, query_records: Sequence[QueryRecord], *,
+                 target_3d_index: Mapping[float, Path] | None = None,
+                 camera_wh: tuple[int, int], short_edge: int, max_size: int,
+                 radar_history_s: float = 1.0, max_image_gap_s: float = 1.0,
+                 filter_empty: bool = False, label_directory: str = "2d_detect") -> None:
+        self.root = Path(root)
+        if not label_directory or Path(label_directory).is_absolute() or ".." in Path(label_directory).parts:
+            raise ValueError("label_directory must be a sequence-local relative directory")
+        self.label_directory = label_directory
+        self.camera_wh = tuple(map(int, camera_wh))
+        self.short_edge, self.max_size = int(short_edge), int(max_size)
+        self.radar_history_s = float(radar_history_s)
+        self.max_image_gap_s = float(max_image_gap_s)
+        if not np.isfinite(self.radar_history_s) or self.radar_history_s < 0:
+            raise ValueError("radar_history_s must be finite and non-negative")
+        records = list(query_records)
+        if any(not isinstance(r, QueryRecord) for r in records):
+            raise TypeError("Dataset requires QueryRecord objects, not sequence names")
+        if len({r.query_time for r in records}) != len(records):
+            raise ValueError("duplicate query_time; query_time must uniquely identify a Sample")
+        sequence_ids = list(dict.fromkeys(r.sequence_id for r in records))
+        self.target_3d_index = {float(t): Path(p) for t, p in (target_3d_index or {}).items()}
+        for r in records:
+            path = self.target_3d_index.get(r.query_time)
+            if path is not None and (path.parent.name != "ground_truth"
+                    or path.parent.parent.name != r.sequence_id or float(path.stem) != r.query_time):
+                raise ValueError("3D target sequence/time mismatch")
+        self.image_index = LeftImageIndex(self.root, sequence_ids, max_image_gap_s)
+        self.image_index_by_sequence = self.image_index.image_index_by_sequence
+        self.radar_events_by_sequence = {}
+        self.radar_times_by_sequence = {}
+        for seq in sequence_ids:
+            events = merge_frame_streams([
+                [LidarFrameEvent(seq, float(p.stem), sid, name, p)
+                 for p in _timestamp_paths(self.root/seq/directory, "npy")]
+                for sid, name, directory in SENSORS])
+            self.radar_events_by_sequence[seq] = events
+            self.radar_times_by_sequence[seq] = np.asarray([e.timestamp for e in events], dtype=np.float64)
+        self.query_records = []
+        self.filtered_empty_queries = 0
+        self._event_validity = {}
+        for record in records:
+            seq, tq = record.sequence_id, record.query_time
+            match = self.image_index.match(seq, tq)
+            if filter_empty and not match.valid and not self._has_valid_radar(seq, tq):
+                self.filtered_empty_queries += 1
+                continue
+            self.query_records.append(record)
+        # records remains an audit alias used by existing tooling, no wrapper Dataset.
+        self.records = self.query_records
+
+    def select_radar_events(self, sequence_id: str, query_time: float) -> list[LidarFrameEvent]:
+        if not np.isfinite(query_time):
+            raise ValueError("query_time must be finite")
+        times = self.radar_times_by_sequence[sequence_id]
+        start = int(np.searchsorted(times, query_time-self.radar_history_s, side="left"))
+        stop = int(np.searchsorted(times, query_time, side="right"))
+        events = self.radar_events_by_sequence[sequence_id][start:stop]
+        if any(e.sequence_id != sequence_id or not query_time-self.radar_history_s <= e.timestamp <= query_time for e in events):
+            raise ValueError("radar index sequence/window mismatch")
+        return events
+
+    def _has_valid_radar(self, sequence_id: str, query_time: float) -> bool:
+        for event in self.select_radar_events(sequence_id, query_time):
+            if event.file_path not in self._event_validity:
+                self._event_validity[event.file_path] = bool(len(load_released_xyz(event.file_path)[0]))
+            if self._event_validity[event.file_path]:
+                return True
+        return False
+
+    def __len__(self) -> int:
+        return len(self.query_records)
+
+    def __getitem__(self, index: int) -> dict[str, Any]:
+        record = self.query_records[index]
+        seq, tq = record.sequence_id, record.query_time
+        events = self.select_radar_events(seq, tq)
+        parts, times, sensors = [], [], []
+        for event in events:
+            points = load_released_xyz(event.file_path)[0].astype(np.float32)
+            parts.append(points)
+            times.append(np.full(len(points), event.timestamp-tq, dtype=np.float32))
+            sensors.append(np.full(len(points), event.sensor_id, dtype=np.int64))
+        def packed(values, shape, dtype):
+            return torch.from_numpy(np.concatenate(values) if values else np.empty(shape, dtype=dtype))
+        points = packed(parts, (0, 3), np.float32)
+        match = self.image_index.match(seq, tq)
+        label_path = None if match.path is None else self.root/seq/self.label_directory/f"{match.path.stem}.txt"
+        box = None if label_path is None else load_yolo_box(label_path, self.camera_wh)
+        target = load_3d_target(self.target_3d_index.get(tq))
+        sample = {
+            # Radar
+            "points": points, "delta_t": packed(times, (0,), np.float32),
+            "sensor_id": packed(sensors, (0,), np.int64), "m_R": bool(len(points)),
+            # Vision; absent observation fields are None, never fake images.
+            "m_V": match.valid, "vision_delta_t": match.delta_t,
+            # Target
+            "target_xyz": target.xyz_m, "target_valid": target.valid,
+            "target_source_path": target.source_path,
+            "target_timestamp": tq, "gt_box_xyxy_px": torch.zeros(4) if box is None else box,
+            "gt_2d_valid": box is not None,
+            # Meta
+            "sequence_id": seq, "query_time": tq, "sample_id": record.sample_id,
+            "num_samples": 1, "event_count": len(events),
+            "event_timestamps": [e.timestamp for e in events],
+            "event_sequence_ids": [e.sequence_id for e in events],
+            "image_time": match.image_time, "left_image_path": None if match.path is None else str(match.path),
+            "image_sequence_id": seq if match.valid else None,
+            "radar_history_s": self.radar_history_s, "max_image_gap_s": self.max_image_gap_s,
+        }
+        if not sample["m_R"]:
+            for key in ("points", "delta_t", "sensor_id"):
+                sample[key] = None
+        if match.valid:
+            sample.update(prepare_image(match.path, self.camera_wh, self.short_edge, self.max_size))
+        else:
+            sample.update({key: None for key in
+                           ("image_uint8", "image_source_wh", "image_view_wh", "image_scale_xy")})
+        validate_sample(sample)
+        return sample
+
+
+# Batch construction: compact modality batches share original Sample index maps.
+def collate_multimodal_v2(samples: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
+    if not samples:
+        raise ValueError("cannot collate an empty sample list")
+    for sample in samples:
+        validate_sample(sample)
+    n = len(samples)
+    radar_ids = [i for i, sample in enumerate(samples) if sample["m_R"]]
+    vision_ids = [i for i, sample in enumerate(samples) if sample["m_V"]]
+    counts = torch.tensor([len(samples[i]["points"]) for i in radar_ids], dtype=torch.long)
+    batch = dict(num_samples=n, radar_batch_index=torch.tensor(radar_ids, dtype=torch.long),
+                 vision_batch_index=torch.tensor(vision_ids, dtype=torch.long), point_counts=counts,
+                 point_batch_index=torch.repeat_interleave(torch.arange(len(radar_ids)), counts))
+    for key, shape, dtype in (("points", (0, 3), torch.float32), ("delta_t", (0,), torch.float32),
+                              ("sensor_id", (0,), torch.long)):
+        batch[key] = torch.cat([samples[i][key] for i in radar_ids]) if radar_ids else torch.empty(shape, dtype=dtype)
+    for key in ("m_R", "m_V", "target_valid", "gt_2d_valid"):
+        batch[key] = torch.tensor([bool(s[key]) for s in samples], dtype=torch.bool)
+    for key in ("target_xyz", "gt_box_xyxy_px"):
+        batch[key] = torch.stack([s[key] for s in samples])
+    images = [samples[i]["image_uint8"] for i in vision_ids]
+    if images:
+        height, width = max(x.shape[1] for x in images), max(x.shape[2] for x in images)
+        batch["image_uint8"] = torch.stack([
+            torch.nn.functional.pad(x, (0, width-x.shape[2], 0, height-x.shape[1])) for x in images])
+    else:
+        batch["image_uint8"] = None
+    for key, dtype in (("image_source_wh", torch.long), ("image_view_wh", torch.long), ("image_scale_xy", torch.float32)):
+        batch[key] = torch.stack([samples[i][key] for i in vision_ids]) if vision_ids else torch.empty((0, 2), dtype=dtype)
+    batch["vision_delta_t"] = torch.tensor([samples[i]["vision_delta_t"] for i in vision_ids], dtype=torch.float32)
+    for key in ("query_time", "target_timestamp", "image_time"):
+        batch[key] = torch.tensor([float('nan') if s[key] is None else s[key] for s in samples], dtype=torch.float64)
+    batch["event_count"] = torch.tensor([s["event_count"] for s in samples], dtype=torch.long)
+    for key in ("sequence_id", "sample_id", "left_image_path", "event_timestamps", "event_sequence_ids", "image_sequence_id"):
+        batch[key] = [s[key] for s in samples]
+    validate_batch(batch)
+    return batch
+
+
+def radar_model_batch(batch: Mapping[str, Any]) -> dict[str, Any]:
+    """Only tensor indexing of the prepared Batch; no file reads or matching.
+
+    Detector point indices and targets use compact radar-local sample indices.
+    Candidate indices are restored to original Sample indices by the model.
+    """
+    ids = batch["radar_batch_index"]
+    result = {key: batch[key] for key in
+              ("points", "delta_t", "sensor_id", "point_counts", "point_batch_index")}
+    result.update(num_samples=len(ids), target_xyz=batch["target_xyz"][ids],
+                  target_valid=batch["target_valid"][ids])
+    return result
+
+
+def expand_projection(base: ProjectionContext, scale_xy: torch.Tensor) -> ProjectionContext:
+    count = len(scale_xy)
+    result = ProjectionContext(
+        base.rotation_camera_from_radar.expand(count, -1, -1),
+        base.translation_camera_from_radar_m.expand(count, -1),
+        base.intrinsics.expand(count, -1), base.distortion.expand(count, -1),
+        base.image_size_wh.expand(count, -1), scale_xy)
+    result.validate(count)
+    return result
+
+
+# Model preparation: absolute timestamps, identities and paths never cross this boundary.
+def prepare_model_batch(batch: Mapping[str, Any], dino_detector: Any,
+                        projection_base: ProjectionContext, device: torch.device):
+    validate_batch(batch)
+    model_keys = ("points", "delta_t", "sensor_id", "point_counts",
+                  "point_batch_index", "radar_batch_index", "vision_batch_index", "m_R", "m_V",
+                  "vision_delta_t", "target_xyz", "target_valid", "gt_box_xyxy_px", "gt_2d_valid",
+                  "image_source_wh", "image_view_wh", "image_scale_xy")
+    moved = {key: batch[key].to(device, non_blocking=True) for key in model_keys}
+    moved["num_samples"] = int(batch["num_samples"])
+    # Used for contract validation; the model consumes the preprocessed tensor.
+    moved["image_uint8"] = batch["image_uint8"]
+    inputs, transforms = [], []
+    if batch["image_uint8"] is not None:
+        image_batch = batch["image_uint8"].to(device=device, dtype=torch.float32, non_blocking=True)
+        for index in range(len(image_batch)):
+            source_wh = tuple(map(int, batch["image_source_wh"][index].tolist()))
+            view_wh = tuple(map(int, batch["image_view_wh"][index].tolist()))
+            # Remove collation padding before DINO normalizes/pads the views.
+            inputs.append({"image": image_batch[index, :, :view_wh[1], :view_wh[0]],
+                           "height": view_wh[1], "width": view_wh[0]})
+            transforms.append(ViewTransform(source_wh, view_wh, False))
+    image_tensor, image_mask = None, None
+    if inputs:
+        images = dino_detector.preprocess_image(inputs)
+        image_tensor = images.tensor
+        image_mask = torch.ones((len(inputs), images.tensor.shape[-2], images.tensor.shape[-1]),
+                                dtype=torch.bool, device=device)
+        for index, (height, width) in enumerate(images.image_sizes):
+            image_mask[index, :height, :width] = False
+    # Projection uses original Sample indices. Neutral resize for samples without
+    # an image is geometry bookkeeping only, never a fabricated observation.
+    scale = torch.ones((moved["num_samples"], 2), device=device)
+    scale[moved["vision_batch_index"]] = moved["image_scale_xy"]
+    projection = expand_projection(projection_base, scale)
+    targets = MultimodalTargets(moved["target_xyz"], moved["target_valid"],
+                                moved["gt_box_xyxy_px"], moved["gt_2d_valid"])
+    return moved, image_tensor, image_mask, projection, targets, transforms
+
+
+V2_SPLIT_COUNTS = {"train_sub": 14, "validation_sub": 3, "heldout_test_sub": 3}
+
+
+def load_sequence_splits(path: Path) -> dict[str, list[str]]:
+    """Validate sequence isolation before constructing any dataset."""
+    payload = json.loads(path.read_text())
+    if not isinstance(payload, dict):
+        raise ValueError("split file must be an object")
+    strict = payload.get("schema_version") == 1 or "num_sequences" in payload
+    names = V2_SPLIT_COUNTS if strict else {key: None for key in ("train", "val") if key in payload}
+    if strict and payload.get("num_sequences") != 20:
+        raise ValueError("V2 split must declare 20 sequences")
+    if not names:
+        raise ValueError("split file has no sequence groups")
+    groups = {}
+    seen = set()
+    for name, expected in names.items():
+        values = payload.get(name)
+        if not isinstance(values, list) or any(not isinstance(value, str) or not value for value in values):
+            raise ValueError(f"{name} must be a list of sequence names")
+        if expected is not None and len(values) != expected:
+            raise ValueError(f"{name} must contain {expected} sequences")
+        if len(values) != len(set(values)):
+            raise ValueError(f"duplicate sequence within {name}")
+        overlap = seen.intersection(values)
+        if overlap:
+            raise ValueError(f"sequence shared across splits: {sorted(overlap)}")
+        seen.update(values)
+        groups[name] = values
+    if strict and len(seen) != 20:
+        raise ValueError("V2 split must contain 20 distinct sequences")
+    return groups
+
+
+def build_split_dataset(config: Mapping[str, Any], root: Path, split_name: str,
+                        *, filter_empty: bool = False) -> MultimodalV2Dataset:
+    data = config["data"]
+    def resolve(value):
+        path = Path(value)
+        return path if path.is_absolute() else root/path
+    dataset_root = resolve(data["root"])
+    if not dataset_root.is_dir():
+        raise FileNotFoundError(f"MMAUD root missing: {dataset_root}")
+    splits = load_sequence_splits(resolve(data["split_file"]))
+    if split_name not in splits:
+        raise ValueError(f"unknown sequence split {split_name!r}")
+    geometry = json.loads(resolve(data["geometry_calibration"]).read_text())
+    # This Sample contract uses raw image_time-query_time, not an implicit clock correction.
+    # Current audited calibration is zero. A nonzero offset requires an explicit new contract.
+    if float(geometry.get("time_offset_s", 0.0)) != 0.0:
+        raise ValueError("raw historical-image contract requires time_offset_s=0; nonzero offset needs explicit review")
+    camera = yaml.safe_load(resolve(data["camera_config"]).read_text())
+    args = dict(camera_wh=tuple(camera["cameras"]["left"]["resolution"]),
+                short_edge=int(data["dino_short_edge"]), max_size=int(data["dino_max_size"]),
+                radar_history_s=float(data.get("radar_history_s", 1.0)),
+                max_image_gap_s=float(data.get("max_image_gap_s", 1.0)),
+                label_directory=str(data.get("label_directory", "2d_detect")))
+    sequences = splits[split_name]
+    dataset = MultimodalV2Dataset(dataset_root, query_records_from_3d_gt(dataset_root, sequences),
+                               target_3d_index=build_3d_target_index(dataset_root, sequences),
+                               filter_empty=filter_empty, **args)
+    return dataset
+
+
+def build_datasets(config: Mapping[str, Any], root: Path):
+    data = config["data"]
+    if data["train_split"] == "heldout_test_sub" or data["val_split"] == "heldout_test_sub":
+        raise ValueError("heldout_test_sub cannot be used for training or checkpoint selection")
+    train = build_split_dataset(config, root, data["train_split"], filter_empty=True)
+    val = build_split_dataset(config, root, data["val_split"])
+    train_times = {r.query_time for r in train.query_records}
+    if any(r.query_time in train_times for r in val.query_records):
+        raise ValueError("duplicate query_time across train/validation")
+    return train, val

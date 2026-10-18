@@ -1,0 +1,215 @@
+{
+  "independent_top1": {
+    "queries": 1200,
+    "outputs": 1196,
+    "coverage": 0.9966666666666667,
+    "success_0_5m": 0.5116666666666667,
+    "success_1m": 0.9116666666666666,
+    "success_2m": 0.9633333333333334,
+    "rmse_3d_m": 5.426829984233227,
+    "mean_error_m": 1.4553915310868286,
+    "median_error_m": 0.4917629951466054,
+    "severe_gt10m": 40,
+    "missing": 4
+  },
+  "target": {
+    "queries": 1200,
+    "outputs": 1190,
+    "coverage": 0.9916666666666667,
+    "success_0_5m": 0.5258333333333334,
+    "success_1m": 0.935,
+    "success_2m": 0.9916666666666667,
+    "rmse_3d_m": 0.5928363224635845,
+    "mean_error_m": 0.5285830098189724,
+    "median_error_m": 0.4800919519643829,
+    "severe_gt10m": 0,
+    "missing": 10
+  },
+  "lagged": {
+    "queries": 1200,
+    "outputs": 1200,
+    "coverage": 1.0,
+    "success_0_5m": 0.6008333333333333,
+    "success_1m": 0.9791666666666666,
+    "success_2m": 1.0,
+    "rmse_3d_m": 0.5330810750536507,
+    "mean_error_m": 0.4805541931713619,
+    "median_error_m": 0.44164334162203167,
+    "severe_gt10m": 0,
+    "missing": 0
+  },
+  "lagged_sequences": {
+    "seq0020": {
+      "queries": 400,
+      "outputs": 400,
+      "coverage": 1.0,
+      "success_0_5m": 0.8575,
+      "success_1m": 1.0,
+      "success_2m": 1.0,
+      "rmse_3d_m": 0.3699441487543945,
+      "mean_error_m": 0.33337351229020595,
+      "median_error_m": 0.3169208781810682,
+      "severe_gt10m": 0,
+      "missing": 0
+    },
+    "seq0026": {
+      "queries": 400,
+      "outputs": 400,
+      "coverage": 1.0,
+      "success_0_5m": 0.4925,
+      "success_1m": 0.965,
+      "success_2m": 1.0,
+      "rmse_3d_m": 0.5737533436134028,
+      "mean_error_m": 0.5242393546320794,
+      "median_error_m": 0.504565669954483,
+      "severe_gt10m": 0,
+      "missing": 0
+    },
+    "seq0079": {
+      "queries": 400,
+      "outputs": 400,
+      "coverage": 1.0,
+      "success_0_5m": 0.4525,
+      "success_1m": 0.9725,
+      "success_2m": 1.0,
+      "rmse_3d_m": 0.6216709139375062,
+      "mean_error_m": 0.5840497125918003,
+      "median_error_m": 0.5225585845230043,
+      "severe_gt10m": 0,
+      "missing": 0
+    }
+  },
+  "lagged_events": {
+    "startup_backfill": 10,
+    "smoothed": 1190
+  },
+  "sequences": {
+    "seq0020": {
+      "queries": 400,
+      "outputs": 393,
+      "coverage": 0.9825,
+      "success_0_5m": 0.7225,
+      "success_1m": 0.9675,
+      "success_2m": 0.9825,
+      "rmse_3d_m": 0.45931616938967473,
+      "mean_error_m": 0.4062430466002499,
+      "median_error_m": 0.3673229935218862,
+      "severe_gt10m": 0,
+      "missing": 7
+    },
+    "seq0026": {
+      "queries": 400,
+      "outputs": 399,
+      "coverage": 0.9975,
+      "success_0_5m": 0.4475,
+      "success_1m": 0.9475,
+      "success_2m": 0.9975,
+      "rmse_3d_m": 0.6291588567707217,
+      "mean_error_m": 0.5639371008840866,
+      "median_error_m": 0.5246694260403479,
+      "severe_gt10m": 0,
+      "missing": 1
+    },
+    "seq0079": {
+      "queries": 400,
+      "outputs": 398,
+      "coverage": 0.995,
+      "success_0_5m": 0.4075,
+      "success_1m": 0.89,
+      "success_2m": 0.995,
+      "rmse_3d_m": 0.6675897795780038,
+      "mean_error_m": 0.6139431183867551,
+      "median_error_m": 0.5639272010324257,
+      "severe_gt10m": 0,
+      "missing": 2
+    }
+  },
+  "events": {
+    "warmup": 10,
+    "birth": 3,
+    "high_update": 1150,
+    "low_update": 37
+  },
+  "protocol": {
+    "target_causal": true,
+    "GT_used_for_inference": false,
+    "split": "validation_sub",
+    "schedule": "existing GT-timestamp query schedule, not continuous raw sensor tracking",
+    "validation_tuned": true,
+    "held_out_test": false,
+    "lagged": {
+      "causal": false,
+      "max_lookahead_s": 0.5,
+      "batch_evaluation": true,
+      "startup_completion": "bounded backward extrapolation, not radar detection"
+    },
+    "policy": "camera_supported_birth; original_radar_continuation",
+    "GT_used_for_birth": false,
+    "post_test_exploration": false,
+    "diagnostic_cache_subset": false,
+    "missing_cached_image_queries": 0,
+    "camera_cache_scope": "all_available_images_no_label_filter"
+  },
+  "runtime_s": 24.506746519356966,
+  "reproducibility": {
+    "argv": [
+      "experiments/multimodal_v3/evaluate_target.py",
+      "--cache",
+      "outputs/mmv3_visual_birth_val_20261015_194436/cache",
+      "--config",
+      "experiments/multimodal_v3/releases/target_kf_v1_20261015/config.json",
+      "--lag-s",
+      "0.5",
+      "--output",
+      "outputs/mmv3_visual_birth_val_20261015_194436/tracks"
+    ],
+    "python": "3.10.8 (main, Nov 24 2022, 14:13:03) [GCC 11.2.0]",
+    "numpy": "1.26.4",
+    "source_sha256": {
+      "experiments/multimodal_v3/evaluate_target.py": "b5a8ee710fc1f212f6479fba4e0efb7e92c2e8a37a814d75d9fc7fcd6472116e",
+      "src/rdq_uav/multimodal_v3/target_tracker.py": "6a76768ace47d37ef302f08bbd26caec502f01c882fc3ed4b94844f752240e62",
+      "src/rdq_uav/multimodal_v3/target_smoothing.py": "3ce800b10144ec36fd0cad99ac9f0eeb8a5e65e0addad0c4c6a5259087a70f44",
+      "src/rdq_uav/multimodal_v3/tracking.py": "6576dc7334edfb9437c144a9ca37787e2c0f614de5a670aff87fa49c876b17f8",
+      "src/rdq_uav/multimodal_v3/candidate_adapter.py": "9003c078a6a26b8b5bdac68e4bf623e6c23704f830887eade84fb7131f4fed4c",
+      "experiments/multimodal_v3/evaluate_tracking.py": "c32ce4a61d8a28bb844c8536928c855f2bc944470f54d126319634ede1d811ed"
+    },
+    "cache_index_sha256": "4a62f43a235cad6d2006e3350f47f05559ab7157202d141c2bbba6c12c5badb7"
+  },
+  "frozen_evaluator_protocol": {
+    "target_causal": true,
+    "GT_used_for_inference": false,
+    "split": "validation_sub",
+    "schedule": "existing GT-timestamp query schedule, not continuous raw sensor tracking",
+    "validation_tuned": true,
+    "held_out_test": false,
+    "lagged": {
+      "causal": false,
+      "max_lookahead_s": 0.5,
+      "batch_evaluation": true,
+      "startup_completion": "bounded backward extrapolation, not radar detection"
+    }
+  },
+  "visual_birth_reproducibility": {
+    "argv": [
+      "experiments/multimodal_v3/evaluate_visual_birth.py",
+      "--cache",
+      "outputs/mmv3_visual_birth_val_20261015_194436/cache",
+      "--samples",
+      "outputs/mmv3_visual_birth_val_20261015_194436/cache/image_samples.jsonl",
+      "--visual-cache",
+      "outputs/mmv3_visual_birth_val_20261015_194436/cache/raw_view_cache.jsonl",
+      "--output",
+      "outputs/mmv3_visual_birth_val_20261015_194436/tracks"
+    ],
+    "input_sha256": {
+      "outputs/mmv3_visual_birth_val_20261015_194436/cache/image_samples.jsonl": "d363e17253ca10f8e8aa810ab04d7bf14f2b198f44ae133f3fae6963773ea5d0",
+      "outputs/mmv3_visual_birth_val_20261015_194436/cache/raw_view_cache.jsonl": "649fe805bf36481afc5c1a24451304e11737cc8fc964631c8040b940096e1050",
+      "configs/calibration/mmaud_v1_omni.yaml": "efdc380520d35be03c64b33dbd9e8477226b66e0cd381ab4960d11e1ddfc9e14",
+      "calibration/official_left_p4_current_geometry.json": "9094d4c9fb374efd4fdd665ae7d88e954763ca53310da9d0a9d516ccdc4be156"
+    },
+    "source_sha256": {
+      "experiments/multimodal_v3/evaluate_visual_birth.py": "e3d58f8416357eb2432f7f4445513242a5dd7bed12f6d4d8d613ec840de2806f",
+      "src/rdq_uav/multimodal_v3/visual_birth.py": "34ab0787e7d10e8cf38ce4d1d0058f89d233b3679ce76012c685060143548a65"
+    }
+  }
+}
