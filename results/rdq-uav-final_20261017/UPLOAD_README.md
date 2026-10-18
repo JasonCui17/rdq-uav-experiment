@@ -22,6 +22,14 @@
 
 本目录同时保存当前自有源码、配置、测试、运行说明和原工程MANIFEST，以绑定结果与代码版本。源码已经统一在 `src/rdq_uav/multimodal_v3/`。
 
-这是一份结果与源码快照，不是完整运行资产包：MMAUD数据、模型权重、COCO初始化、third_party源码和CUDA二进制未上传。原工程MANIFEST记录这些资产的SHA256；执行需在完整rdq-uav-final工程环境中按README准备资产。未重新训练或改变模型。
+这是一份结果与源码快照，不是完整运行资产包：MMAUD数据、模型权重、COCO初始化、CUDA二进制未上传。原工程MANIFEST记录这些资产的SHA256；执行需在完整rdq-uav-final工程环境中按README准备资产。未重新训练或改变模型。
 
 `UPLOAD_SHA256.json`只校验本次实际上传文件；`MANIFEST.json`为完整本地工程的清单，二者范围不同。
+
+## 2026-10-18 同步
+
+确认本地自有源码及完整序列实验指标与上次快照一致；本次没有新增训练或实验指标。
+
+补齐 `third_party/` 中的 detrex、detectron2、Stone Soup 和 reference_only 参考工程源码及其许可证，排除嵌套Git历史、编译产物与缓存。补齐已完成实验的逐方法检测预测、先验、汇总、训练冒烟检查和GPU验证日志。大型原始观测缓存和模型权重仍由本地保留。
+
+使用时将此目录作为工程根目录；模型权重和COCO初始化放入原README指定位置，CUDA扩展按 `tools/install.sh` 重编译。原MANIFEST包含本地CUDA/资产环境之外的完整文件清单；上传范围以UPLOAD_SHA256为准。

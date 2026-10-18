@@ -1,0 +1,7 @@
+{
+  "effective_GT_images": 1158,
+  "uncertain_label_files_archived": 37,
+  "max_GT_roundtrip_difference_px": 6.0994062550889794e-05,
+  "same_seq0020_GT_denominator_and_detection_counts": true,
+  "metrics_difference_lt_1e_6": true
+}

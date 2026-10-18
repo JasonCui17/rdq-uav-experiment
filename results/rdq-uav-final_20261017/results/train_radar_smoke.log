@@ -1,0 +1,37 @@
+RUN: /home/jasoncui/miniconda3/envs/rdq/bin/python -u /home/jasoncui/projects/rdq-uav-final/experiments/multimodal_v2/train.py --config configs/final/radar.yaml --output /home/jasoncui/projects/rdq-uav-final/runs/train_radar_smoke --accelerator gpu --devices 1 --precision 32-true --batch-size 1 --accumulate 1 --num-workers 0 --epochs 12 --fast-dev-run
+Seed set to 42
+Loaded ABC A2 warmstart: {'checkpoint': '/home/jasoncui/projects/rdq-uav-final/weights/radar_warmstart.ckpt', 'loaded_keys': 148, 'new_keys': ['encoder1.blocks.0.proj.lora_A', 'encoder1.blocks.0.proj.lora_B', 'encoder1.blocks.0.qkv.lora_A', 'encoder1.blocks.0.qkv.lora_B', 'encoder1.blocks.1.proj.lora_A', 'encoder1.blocks.1.proj.lora_B', 'encoder1.blocks.1.qkv.lora_A', 'encoder1.blocks.1.qkv.lora_B', 'encoder2.blocks.0.proj.lora_A', 'encoder2.blocks.0.proj.lora_B', 'encoder2.blocks.0.qkv.lora_A', 'encoder2.blocks.0.qkv.lora_B', 'encoder2.blocks.1.proj.lora_A', 'encoder2.blocks.1.proj.lora_B', 'encoder2.blocks.1.qkv.lora_A', 'encoder2.blocks.1.qkv.lora_B', 'temporal_motion.conditioners.0.0.bias', 'temporal_motion.conditioners.0.0.weight', 'temporal_motion.conditioners.0.2.bias', 'temporal_motion.conditioners.0.2.weight', 'temporal_motion.conditioners.1.0.bias', 'temporal_motion.conditioners.1.0.weight', 'temporal_motion.conditioners.1.2.bias', 'temporal_motion.conditioners.1.2.weight', 'temporal_motion.conditioners.2.0.bias', 'temporal_motion.conditioners.2.0.weight', 'temporal_motion.conditioners.2.2.bias', 'temporal_motion.conditioners.2.2.weight', 'temporal_motion.offset_gate.0.bias', 'temporal_motion.offset_gate.0.weight', 'temporal_motion.offset_gate.2.bias', 'temporal_motion.offset_gate.2.weight']}
+GPU available: True (cuda), used: True
+TPU available: False, using: 0 TPU cores
+💡 Tip: For seamless cloud logging and experiment tracking, try installing [litlogger](https://pypi.org/project/litlogger/) to enable LitLogger, which logs metrics and artifacts automatically to the Lightning Experiments platform.
+Running in `fast_dev_run` mode: will run the requested loop using 1 batch(es). Logging and checkpointing is suppressed.
+💡 Tip: For seamless cloud uploads and versioning, try installing [litmodels](https://pypi.org/project/litmodels/) to enable LitModelCheckpoint, which syncs automatically with the Lightning model registry.
+You are using a CUDA device ('NVIDIA GeForce RTX 3070 Laptop GPU') that has Tensor Cores. To properly utilize them, you should set `torch.set_float32_matmul_precision('medium' | 'high')` which will trade-off precision for performance. For more details, read https://pytorch.org/docs/stable/generated/torch.set_float32_matmul_precision.html#torch.set_float32_matmul_precision
+LOCAL_RANK: 0 - CUDA_VISIBLE_DEVICES: [0]
+Loading `train_dataloader` to estimate number of stepping batches.
+/home/jasoncui/miniconda3/envs/rdq/lib/python3.10/site-packages/lightning/pytorch/trainer/connectors/data_connector.py:434: The 'train_dataloader' does not have many workers which may be a bottleneck. Consider increasing the value of the `num_workers` argument` to `num_workers=15` in the `DataLoader` to improve performance.
+┏━━━┳━━━━━━━━━┳━━━━━━━━━━━━━━┳━━━━━━━━┳━━━━━━━┳━━━━━━━┓
+┃   ┃ Name    ┃ Type         ┃ Params ┃ Mode  ┃ FLOPs ┃
+┡━━━╇━━━━━━━━━╇━━━━━━━━━━━━━━╇━━━━━━━━╇━━━━━━━╇━━━━━━━┩
+│ 0 │ network │ MultimodalV2 │  1.5 M │ train │     0 │
+└───┴─────────┴──────────────┴────────┴───────┴───────┘
+Trainable params: 127 K                                                         
+Non-trainable params: 1.3 M                                                     
+Total params: 1.5 M                                                             
+Total estimated model params size (MB): 5.869                                   
+Modules in train mode: 192                                                      
+Modules in eval mode: 0                                                         
+Total FLOPs: 0                                                                  
+/home/jasoncui/miniconda3/envs/rdq/lib/python3.10/site-packages/lightning/pytorch/trainer/connectors/data_connector.py:434: The 'val_dataloader' does not have many workers which may be a bottleneck. Consider increasing the value of the `num_workers` argument` to `num_workers=15` in the `DataLoader` to improve performance.
+Training: |          | 0/? [00:00<?, ?it/s]Training: |          | 0/? [00:00<?, ?it/s]Epoch 0:   0%|          | 0/1 [00:00<?, ?it/s]/home/jasoncui/miniconda3/envs/rdq/lib/python3.10/site-packages/lightning/pytorch/trainer/connectors/data_connector.py:378: You have overridden `transfer_batch_to_device` in `LightningModule` but have passed in a `LightningDataModule`. It will use the implementation from `LightningModule` instance.
+/home/jasoncui/miniconda3/envs/rdq/lib/python3.10/site-packages/lightning/pytorch/loops/optimization/automatic.py:134: `training_step` returned `None`. If this was on purpose, ignore this warning...
+Epoch 0: 100%|██████████| 1/1 [00:01<00:00,  0.73it/s]Epoch 0: 100%|██████████| 1/1 [00:01<00:00,  0.73it/s, T/rx=0.278, T/ry=0.214, T/rz=0.134, T/r3=0.375, T/Cov=1.000, T/S1=1.000, T/N=1, loss=-0.00, cls=-0.00, reg=-0.00, mem=0.488, lr=0.0001, skip=1]
+Validation: |          | 0/? [00:00<?, ?it/s][A
+Validation: |          | 0/? [00:00<?, ?it/s][A
+Validation DataLoader 0:   0%|          | 0/1 [00:00<?, ?it/s][A
+Validation DataLoader 0: 100%|██████████| 1/1 [00:00<00:00, 99.08it/s][A                                                                                                                                                                                                      
+                                                                      [AValidation epoch 0: val_loss=0 V/rx=-- V/ry=-- V/rz=-- V/r3=-- V/Cov=0 V/S1=0 V/N=1
+Epoch 0: 100%|██████████| 1/1 [00:01<00:00,  0.72it/s, T/rx=0.278, T/ry=0.214, T/rz=0.134, T/r3=0.375, T/Cov=1.000, T/S1=1.000, T/N=1, loss=-0.00, cls=-0.00, reg=-0.00, mem=0.488, lr=0.0001, skip=1]
+Validation DataLoader 0: 100%|██████████| 1/1 [00:00<00:00, 62.60it/s][A
+                                                                      [AEpoch 0: 100%|██████████| 1/1 [00:01<00:00,  0.72it/s, val_loss=0.000, V/rx=--, V/ry=--, V/rz=--, V/r3=--, V/Cov=0.000, V/S1=0.000, V/N=1]                                                            Epoch 0: 100%|██████████| 1/1 [00:01<00:00,  0.72it/s, val_loss=0.000, V/rx=--, V/ry=--, V/rz=--, V/r3=--, V/Cov=0.000, V/S1=0.000, V/N=1]`Trainer.fit` stopped: `max_steps=1` reached.
+Epoch 0: 100%|██████████| 1/1 [00:01<00:00,  0.72it/s, val_loss=0.000, V/rx=--, V/ry=--, V/rz=--, V/r3=--, V/Cov=0.000, V/S1=0.000, V/N=1]

@@ -1,0 +1,55 @@
+{
+  "queries": 12,
+  "unique_labeled_images": 0,
+  "unique_sensor_images": 8,
+  "all_available_images": true,
+  "image_sequences": {
+    "seq0020": 8
+  },
+  "source_wh": [
+    1280,
+    960
+  ],
+  "config": {
+    "camera_config": "configs/calibration/mmaud_v1_omni.yaml",
+    "geometry_calibration": "calibration/official_left_p4_current_geometry.json",
+    "crop_side_px": 256,
+    "max_prior_gap_s": 0.25,
+    "short_edge": 800,
+    "max_size": 1333,
+    "topk": 100,
+    "nms_iou": 0.5,
+    "confidence_threshold": 0.25,
+    "radar_box_gate": "crop_only"
+  },
+  "GT_used_to_construct_priors": false,
+  "scope": "diagnostic coverage, not measured detection AP improvement",
+  "crop_recall_denominator": "all_unique_labeled_images; unlabeled sensor frames excluded from GT diagnostics",
+  "input_sha256": {
+    "/home/jasoncui/projects/rdq-uav-final/runs/v3_consolidation_smoke/seq0020/cache/image_samples.jsonl": "5b03763ac4cfaf8afa37cb9cb9c4c6ba8f80c90755f98893c465c1a2d99a0b1f",
+    "/home/jasoncui/projects/rdq-uav-final/runs/v3_consolidation_smoke/seq0020/tracks/per_query.jsonl": "c6f88406b09ea8ee514d838f9969234e185813ac0c26831cb572ccb811206d34",
+    "configs/final/image_guidance.json": "18f86507574b7e299f9bda1f794dd7b6d7500a42b008510349eda31e60ae2049",
+    "/home/jasoncui/projects/rdq-uav-final/configs/calibration/mmaud_v1_omni.yaml": "efdc380520d35be03c64b33dbd9e8477226b66e0cd381ab4960d11e1ddfc9e14",
+    "/home/jasoncui/projects/rdq-uav-final/calibration/official_left_p4_current_geometry.json": "4320585445a92775e866c63afdd2644c90b96af78d6293e7b75eca1c566a3947"
+  },
+  "causal": {
+    "priors": 0,
+    "missing_priors": 0,
+    "center_error_px_quantiles_50_90_95_max": null,
+    "gt_box_fully_in_crop": 0,
+    "crop_recall_all_images": null,
+    "projected_point_inside_gt_box": 0,
+    "max_image_lookahead_s": 0.0
+  },
+  "lag05": {
+    "priors": 0,
+    "missing_priors": 0,
+    "center_error_px_quantiles_50_90_95_max": null,
+    "gt_box_fully_in_crop": 0,
+    "crop_recall_all_images": null,
+    "projected_point_inside_gt_box": 0,
+    "max_image_lookahead_s": 0.0
+  },
+  "box_width_px_quantiles_10_50_90": null,
+  "small_box_fraction_area_lt_32sq": null
+}

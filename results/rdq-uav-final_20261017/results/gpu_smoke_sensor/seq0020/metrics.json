@@ -1,0 +1,106 @@
+{
+  "sequence_id": "seq0020",
+  "schedule": "sensor",
+  "radar": {
+    "realtime": {
+      "GT_timestamps": 400,
+      "scored_outputs": 0,
+      "missing_at_GT": 400,
+      "coverage_at_GT": 0.0,
+      "rmse_3d_m": null,
+      "success_1m_all_GT": 0.0,
+      "severe_gt10m": 0,
+      "output_timeline_coverage": 0.0,
+      "metric_alignment": "causal past-state velocity extrapolation to GT timestamp; max age 0.25s"
+    },
+    "lag05": {
+      "GT_timestamps": 400,
+      "scored_outputs": 0,
+      "missing_at_GT": 400,
+      "coverage_at_GT": 0.0,
+      "rmse_3d_m": null,
+      "success_1m_all_GT": 0.0,
+      "severe_gt10m": 0,
+      "output_timeline_coverage": 0.0,
+      "metric_alignment": "post-inference linear interpolation at GT timestamps; max bracket 0.25s; no gap/birth bridging"
+    }
+  },
+  "image": {
+    "realtime": {
+      "labeled_queries": 8,
+      "unique_labeled_images": 8,
+      "deduplication": "closest_query_to_image_time_then_query_time_then_sample_id",
+      "prediction_scope": "provided_2D_predictions_in_source_left_view_pixels",
+      "AP": 0.4711056105610561,
+      "AP50": 1.0,
+      "AP75": 0.3072607260726073,
+      "AP_small": 0.4711056105610561,
+      "AR100": 0.525,
+      "status": "evaluated",
+      "max_predictions_per_image": 55,
+      "coco_max_dets": [
+        1,
+        10,
+        100
+      ],
+      "unit": "fraction_0_to_1",
+      "mAP50": 1.0,
+      "mAP50_95": 0.4711056105610561,
+      "Precision": 1.0,
+      "Recall": 1.0,
+      "F1": 1.0,
+      "TP": 8,
+      "FP": 0,
+      "FN": 0,
+      "confidence_threshold": 0.25,
+      "precision_recall_iou_threshold": 0.5,
+      "precision_recall_max_dets": 100,
+      "precision_recall_scope": "one annotated UAV per labeled image; unlabeled images excluded",
+      "uncertain_images_excluded": 0,
+      "unlabeled_images_not_scored": 0
+    },
+    "lag05": {
+      "labeled_queries": 8,
+      "unique_labeled_images": 8,
+      "deduplication": "closest_query_to_image_time_then_query_time_then_sample_id",
+      "prediction_scope": "provided_2D_predictions_in_source_left_view_pixels",
+      "AP": 0.4711056105610561,
+      "AP50": 1.0,
+      "AP75": 0.3072607260726073,
+      "AP_small": 0.4711056105610561,
+      "AR100": 0.525,
+      "status": "evaluated",
+      "max_predictions_per_image": 55,
+      "coco_max_dets": [
+        1,
+        10,
+        100
+      ],
+      "unit": "fraction_0_to_1",
+      "mAP50": 1.0,
+      "mAP50_95": 0.4711056105610561,
+      "Precision": 1.0,
+      "Recall": 1.0,
+      "F1": 1.0,
+      "TP": 8,
+      "FP": 0,
+      "FN": 0,
+      "confidence_threshold": 0.25,
+      "precision_recall_iou_threshold": 0.5,
+      "precision_recall_max_dets": 100,
+      "precision_recall_scope": "one annotated UAV per labeled image; unlabeled images excluded",
+      "uncertain_images_excluded": 0,
+      "unlabeled_images_not_scored": 0
+    }
+  },
+  "annotation_protocol": "bundled human overlay where present; 37 uncertain excluded; remaining dataset labels; unlabeled is not negative",
+  "inference_used_GT": false,
+  "benchmark_GT_usage": "no GT inputs during inference",
+  "human_GT_model_assisted": true,
+  "coverage": {
+    "all_left_images": 620,
+    "predicted_images": 8,
+    "complete_image_coverage": false,
+    "sensor_queries": 12
+  }
+}

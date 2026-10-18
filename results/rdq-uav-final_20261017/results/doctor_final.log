@@ -1,0 +1,36 @@
+/home/jasoncui/miniconda3/envs/rdq/lib/python3.10/site-packages/timm/models/layers/__init__.py:48: FutureWarning: Importing from timm.models.layers is deprecated, please import via timm.layers
+  warnings.warn(f"Importing from {__name__} is deprecated, please import via timm.layers", FutureWarning)
+/home/jasoncui/projects/rdq-uav-final/third_party/detrex/detrex/config/config.py:18: UserWarning: pkg_resources is deprecated as an API. See https://setuptools.pypa.io/en/latest/pkg_resources.html. The pkg_resources package is slated for removal as early as 2025-11-30. Refrain from using this package or pin to Setuptools<81.
+  import pkg_resources
+{
+  "root": "/home/jasoncui/projects/rdq-uav-final",
+  "python": "3.10.21 | packaged by conda-forge | (main, Aug 21 2026, 22:42:31) [GCC 14.4.0]",
+  "torch": "2.1.1+cu118",
+  "cuda": true,
+  "GPU": "NVIDIA GeForce RTX 3070 Laptop GPU",
+  "modules": {
+    "rdq_uav": "/home/jasoncui/projects/rdq-uav-final/src/rdq_uav/__init__.py",
+    "detrex": "/home/jasoncui/projects/rdq-uav-final/third_party/detrex/detrex/__init__.py",
+    "detectron2": "/home/jasoncui/projects/rdq-uav-final/third_party/detrex/detectron2/detectron2/__init__.py",
+    "stonesoup": "/home/jasoncui/projects/rdq-uav-final/third_party/stonesoup/stonesoup/__init__.py",
+    "pycocotools": "/home/jasoncui/miniconda3/envs/rdq/lib/python3.10/site-packages/pycocotools/__init__.py"
+  },
+  "weights": {
+    "radar.ckpt": {
+      "sha256": "1c841c4dac463e4910a0e08d99f4fc75fe1bb1c4f02951ec12cc05c2fb5ea023",
+      "state_dict_keys": 216
+    },
+    "radar_warmstart.ckpt": {
+      "sha256": "2edf8b346dd1338dab9dd4341ee8ccecbdceae36ec47985a6791bb99bcb6838d",
+      "state_dict_keys": 184
+    },
+    "vision_full.ckpt": {
+      "sha256": "04b5e587e2710d5137638888b407f754a45b09ce48a060f045daba61cfd58396",
+      "state_dict_keys": 733
+    },
+    "vision_crop.ckpt": {
+      "sha256": "85ba1a7ca899f146c3cdfede2d982f7ee255751dc17093ea7cefa413829df8c9",
+      "state_dict_keys": 594
+    }
+  }
+}

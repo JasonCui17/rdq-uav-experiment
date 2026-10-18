@@ -1,0 +1,13 @@
+﻿sequence_id,sample_id,query_time,file,xyz,velocity_mps,event,selected_token_id,observation_xyz,measurement_age_s,birth_requires_vision,birth_visual_available,birth_visual_candidates,birth_visual_verified,gt_xyz,has_gt,target_error_m,independent_top1_error_m,lagged_xyz,lagged_event,lookahead_s,lagged_error_m
+seq0020,seq0020_sensor_1706255517.673974991,1706255517.673975,frames/000000.npz,,,warmup,,,,True,True,0,False,"[0.0, 0.0, 0.0]",False,,,,unavailable,0.0,
+seq0020,seq0020_sensor_1706255517.706013918,1706255517.706014,frames/000001.npz,,,warmup,,,,True,True,0,False,"[0.0, 0.0, 0.0]",False,,,,unavailable,0.0,
+seq0020,seq0020_sensor_1706255517.714382887,1706255517.714383,frames/000002.npz,,,warmup,,,,True,True,0,False,"[0.0, 0.0, 0.0]",False,,,,unavailable,0.0,
+seq0020,seq0020_sensor_1706255517.738631964,1706255517.738632,frames/000003.npz,,,warmup,,,,True,True,0,False,"[0.0, 0.0, 0.0]",False,,,,unavailable,0.0,
+seq0020,seq0020_sensor_1706255517.773885965,1706255517.773886,frames/000004.npz,,,warmup,,,,True,True,0,False,"[0.0, 0.0, 0.0]",False,,,,unavailable,0.0,
+seq0020,seq0020_sensor_1706255517.800805092,1706255517.800805,frames/000005.npz,,,warmup,,,,True,True,0,False,"[0.0, 0.0, 0.0]",False,,,,unavailable,0.0,
+seq0020,seq0020_sensor_1706255517.806195974,1706255517.806196,frames/000006.npz,,,warmup,,,,True,True,0,False,"[0.0, 0.0, 0.0]",False,,,,unavailable,0.0,
+seq0020,seq0020_sensor_1706255517.814471006,1706255517.814471,frames/000007.npz,,,warmup,,,,True,True,0,False,"[0.0, 0.0, 0.0]",False,,,,unavailable,0.0,
+seq0020,seq0020_sensor_1706255517.838433981,1706255517.838434,frames/000008.npz,,,warmup,,,,True,True,0,False,"[0.0, 0.0, 0.0]",False,,,,unavailable,0.0,
+seq0020,seq0020_sensor_1706255517.873931885,1706255517.873932,frames/000009.npz,,,warmup,,,,True,True,0,False,"[0.0, 0.0, 0.0]",False,,,,unavailable,0.0,
+seq0020,seq0020_sensor_1706255517.900743961,1706255517.900744,frames/000010.npz,,,warmup,,,,True,True,0,False,"[0.0, 0.0, 0.0]",False,,,,unavailable,0.0,
+seq0020,seq0020_sensor_1706255517.906177044,1706255517.906177,frames/000011.npz,,,warmup,,,,True,True,0,False,"[0.0, 0.0, 0.0]",False,,,,unavailable,0.0,

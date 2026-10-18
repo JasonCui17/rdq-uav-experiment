@@ -1,0 +1,54 @@
+RUN: /home/jasoncui/miniconda3/envs/rdq/bin/python -u /home/jasoncui/projects/rdq-uav-final/experiments/multimodal_v3/train_image.py --warmstart weights/vision_full.ckpt --crop-training --output /home/jasoncui/projects/rdq-uav-final/runs/train_crop_smoke --accelerator gpu --devices 1 --precision 16-mixed --batch-size 1 --accumulate 1 --num-workers 0 --epochs 12 --fast-dev-run
+Seed set to 42
+Mixed image crop training: {'side_px': 256, 'probability': 0.5, 'center_jitter_max_px': 64, 'training_GT_used_for_crop': True, 'validation_unchanged': True, 'short_edge': 800, 'max_size': 1333}
+/home/jasoncui/miniconda3/envs/rdq/lib/python3.10/site-packages/timm/models/layers/__init__.py:48: FutureWarning: Importing from timm.models.layers is deprecated, please import via timm.layers
+  warnings.warn(f"Importing from {__name__} is deprecated, please import via timm.layers", FutureWarning)
+/home/jasoncui/projects/rdq-uav-final/third_party/detrex/detectron2/detectron2/config/lazy.py:167: UserWarning: pkg_resources is deprecated as an API. See https://setuptools.pypa.io/en/latest/pkg_resources.html. The pkg_resources package is slated for removal as early as 2025-11-30. Refrain from using this package or pin to Setuptools<81.
+  return old_import(name, globals, locals, fromlist=fromlist, level=level)
+/home/jasoncui/miniconda3/envs/rdq/lib/python3.10/site-packages/torch/functional.py:504: UserWarning: torch.meshgrid: in an upcoming release, it will be required to pass the indexing argument. (Triggered internally at ../aten/src/ATen/native/TensorShape.cpp:3526.)
+  return _VF.meshgrid(tensors, **kwargs)  # type: ignore[attr-defined]
+Loaded trained image branch: {'checkpoint': '/home/jasoncui/projects/rdq-uav-final/weights/vision_full.ckpt', 'sha256': '04b5e587e2710d5137638888b407f754a45b09ce48a060f045daba61cfd58396', 'strict': True, 'optimizer_and_epoch_restored': False}
+Using 16bit Automatic Mixed Precision (AMP)
+GPU available: True (cuda), used: True
+TPU available: False, using: 0 TPU cores
+💡 Tip: For seamless cloud logging and experiment tracking, try installing [litlogger](https://pypi.org/project/litlogger/) to enable LitLogger, which logs metrics and artifacts automatically to the Lightning Experiments platform.
+Running in `fast_dev_run` mode: will run the requested loop using 1 batch(es). Logging and checkpointing is suppressed.
+💡 Tip: For seamless cloud uploads and versioning, try installing [litmodels](https://pypi.org/project/litmodels/) to enable LitModelCheckpoint, which syncs automatically with the Lightning model registry.
+You are using a CUDA device ('NVIDIA GeForce RTX 3070 Laptop GPU') that has Tensor Cores. To properly utilize them, you should set `torch.set_float32_matmul_precision('medium' | 'high')` which will trade-off precision for performance. For more details, read https://pytorch.org/docs/stable/generated/torch.set_float32_matmul_precision.html#torch.set_float32_matmul_precision
+LOCAL_RANK: 0 - CUDA_VISIBLE_DEVICES: [0]
+Loading `train_dataloader` to estimate number of stepping batches.
+/home/jasoncui/miniconda3/envs/rdq/lib/python3.10/site-packages/lightning/pytorch/trainer/connectors/data_connector.py:434: The 'train_dataloader' does not have many workers which may be a bottleneck. Consider increasing the value of the `num_workers` argument` to `num_workers=15` in the `DataLoader` to improve performance.
+/home/jasoncui/miniconda3/envs/rdq/lib/python3.10/site-packages/lightning/pytorch/utilities/model_summary/model_summary.py:242: Precision 16-mixed is not supported by the model summary.  Estimated model size in MB will not be accurate. Using 32 bits instead.
+┏━━━┳━━━━━━━━━┳━━━━━━━━━━━━━━┳━━━━━━━━┳━━━━━━━┳━━━━━━━┓
+┃   ┃ Name    ┃ Type         ┃ Params ┃ Mode  ┃ FLOPs ┃
+┡━━━╇━━━━━━━━━╇━━━━━━━━━━━━━━╇━━━━━━━━╇━━━━━━━╇━━━━━━━┩
+│ 0 │ network │ MultimodalV2 │ 48.3 M │ train │     0 │
+└───┴─────────┴──────────────┴────────┴───────┴───────┘
+Trainable params: 48.1 M                                                        
+Non-trainable params: 254 K                                                     
+Total params: 48.3 M                                                            
+Total estimated model params size (MB): 193.353                                 
+Modules in train mode: 590                                                      
+Modules in eval mode: 0                                                         
+Total FLOPs: 0                                                                  
+/home/jasoncui/miniconda3/envs/rdq/lib/python3.10/site-packages/lightning/pytorch/trainer/connectors/data_connector.py:434: The 'val_dataloader' does not have many workers which may be a bottleneck. Consider increasing the value of the `num_workers` argument` to `num_workers=15` in the `DataLoader` to improve performance.
+Training: |          | 0/? [00:00<?, ?it/s]Training: |          | 0/? [00:00<?, ?it/s]Epoch 0:   0%|          | 0/1 [00:00<?, ?it/s]/home/jasoncui/miniconda3/envs/rdq/lib/python3.10/site-packages/lightning/pytorch/trainer/connectors/data_connector.py:378: You have overridden `transfer_batch_to_device` in `LightningModule` but have passed in a `LightningDataModule`. It will use the implementation from `LightningModule` instance.
+/home/jasoncui/miniconda3/envs/rdq/lib/python3.10/site-packages/torch/nn/modules/conv.py:456: UserWarning: Applied workaround for CuDNN issue, install nvrtc.so (Triggered internally at ../aten/src/ATen/native/cudnn/Conv_v8.cpp:80.)
+  return F.conv2d(input, weight, bias, self.stride,
+/home/jasoncui/projects/rdq-uav-final/third_party/detrex/detrex/layers/position_embedding.py:89: UserWarning: cumsum_cuda_kernel does not have a deterministic implementation, but you set 'torch.use_deterministic_algorithms(True, warn_only=True)'. You can file an issue at https://github.com/pytorch/pytorch/issues to help us prioritize adding deterministic support for this operation. (Triggered internally at ../aten/src/ATen/Context.cpp:71.)
+  y_embed = not_mask.cumsum(1, dtype=torch.float32)
+/home/jasoncui/projects/rdq-uav-final/third_party/detrex/detrex/layers/position_embedding.py:90: UserWarning: cumsum_cuda_kernel does not have a deterministic implementation, but you set 'torch.use_deterministic_algorithms(True, warn_only=True)'. You can file an issue at https://github.com/pytorch/pytorch/issues to help us prioritize adding deterministic support for this operation. (Triggered internally at ../aten/src/ATen/Context.cpp:71.)
+  x_embed = not_mask.cumsum(2, dtype=torch.float32)
+/home/jasoncui/miniconda3/envs/rdq/lib/python3.10/site-packages/lightning/pytorch/utilities/data.py:79: Trying to infer the `batch_size` from an ambiguous collection. The batch size we found is 1. To avoid any miscalculations, use `self.log(..., batch_size=batch_size)`.
+/home/jasoncui/miniconda3/envs/rdq/lib/python3.10/site-packages/torch/optim/lr_scheduler.py:136: UserWarning: Detected call of `lr_scheduler.step()` before `optimizer.step()`. In PyTorch 1.1.0 and later, you should call them in the opposite order: `optimizer.step()` before `lr_scheduler.step()`.  Failure to do this will result in PyTorch skipping the first value of the learning rate schedule. See more details at https://pytorch.org/docs/stable/optim.html#how-to-adjust-learning-rate
+  warnings.warn("Detected call of `lr_scheduler.step()` before `optimizer.step()`. "
+Epoch 0: 100%|██████████| 1/1 [00:03<00:00,  0.31it/s]Epoch 0: 100%|██████████| 1/1 [00:03<00:00,  0.31it/s, loss=19.00, cls=0.000142, bbox=0.231, giou=1.350, dn=7.700, aux=7.900, enc=1.820, other=0.000, mem=3.190, lr=1e-5, skip=0, loss_avg=19.00]
+Validation: |          | 0/? [00:00<?, ?it/s][A
+Validation: |          | 0/? [00:00<?, ?it/s][A
+Validation DataLoader 0:   0%|          | 0/1 [00:00<?, ?it/s][A
+Validation DataLoader 0: 100%|██████████| 1/1 [00:00<00:00, 43.17it/s][A                                                                                                                                                                                                 
+                                                                      [AValidation epoch 0: val_loss=0 V/AP=-- V/AP50=-- V/AP75=-- V/AP_small=-- V/AR100=-- V/images=0
+Epoch 0: 100%|██████████| 1/1 [00:03<00:00,  0.31it/s, loss=19.00, cls=0.000142, bbox=0.231, giou=1.350, dn=7.700, aux=7.900, enc=1.820, other=0.000, mem=3.190, lr=1e-5, skip=0, loss_avg=19.00]
+Validation DataLoader 0: 100%|██████████| 1/1 [00:00<00:00, 36.34it/s][A
+                                                                      [AEpoch 0: 100%|██████████| 1/1 [00:03<00:00,  0.31it/s, val_loss=0.000, V/AP=--, V/AP50=--, V/AP75=--, V/AP_small=--, V/AR100=--, V/images=0]                                                     Epoch 0: 100%|██████████| 1/1 [00:03<00:00,  0.31it/s, val_loss=0.000, V/AP=--, V/AP50=--, V/AP75=--, V/AP_small=--, V/AR100=--, V/images=0]`Trainer.fit` stopped: `max_steps=1` reached.
+Epoch 0: 100%|██████████| 1/1 [00:03<00:00,  0.31it/s, val_loss=0.000, V/AP=--, V/AP50=--, V/AP75=--, V/AP_small=--, V/AR100=--, V/images=0]

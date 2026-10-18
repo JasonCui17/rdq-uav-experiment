@@ -1,0 +1,21 @@
+{
+  "trajectory_records_identical": 12,
+  "bbox_records_identical": 8,
+  "radar_token_ids_and_evidence_flags_identical": true,
+  "radar_max_abs_differences": {
+    "dense_xyz": 7.62939453125e-06,
+    "dense_score": 6.51925802230835e-07,
+    "dense_rank": 1.5735626220703125e-05,
+    "dense_motion_reliability": 0,
+    "dense_motion_speed_mps": 0,
+    "global_xyz": 3.814697265625e-06,
+    "global_score": 6.51925802230835e-07,
+    "baseline_xyz": 3.814697265625e-06,
+    "baseline_score": 6.51925802230835e-07,
+    "gt_xyz": 0
+  },
+  "float_tolerance": {
+    "rtol": 1e-05,
+    "atol": 1e-05
+  }
+}
