@@ -19,7 +19,7 @@ from rdq_uav.multimodal_v3.tracking import TrackerConfig
 from rdq_uav.multimodal_v3.pipeline.tracking_metrics import metrics, write_csv
 
 
-def main():
+def main(*, load_dense_evidence=True):
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument('--cache', type=Path, required=True)
     p.add_argument('--config', type=Path, required=True)
@@ -42,10 +42,12 @@ def main():
     trackers, rows, snapshots, segments = {}, [], {}, {}
     for f in frames:
         with np.load(args.cache / f['file'], allow_pickle=False) as data:
-            frame = from_cache(data, manifest['schema_version'])
-            tracker = trackers.setdefault(f['sequence_id'], TargetTracker(cfg))
-            result = tracker.step(f['query_time'], frame)
+            frame = from_cache(data, manifest['schema_version'], load_evidence=load_dense_evidence)
             seq = f['sequence_id']
+            if seq not in trackers:
+                trackers[seq] = TargetTracker(cfg)
+            tracker = trackers[seq]
+            result = tracker.step(f['query_time'], frame)
             if result['event'] == 'birth':
                 segments[seq] = segments.get(seq, 0) + 1
             snapshots.setdefault(seq, []).append(None if tracker.kf is None else

@@ -20,7 +20,7 @@ class CandidateFrame:
     evidence: dict[int, dict[str, float | bool]]
 
 
-def from_cache(data, schema_version: int) -> CandidateFrame:
+def from_cache(data, schema_version: int, *, load_evidence: bool = True) -> CandidateFrame:
     if schema_version not in (1, 2):
         raise ValueError(f"Unsupported candidate cache schema {schema_version}")
     dense = Observations(data["dense_xyz"], data["dense_score"],
@@ -39,7 +39,7 @@ def from_cache(data, schema_version: int) -> CandidateFrame:
     if schema_version == 2 and any(present) and not all(present):
         raise ValueError("Schema 2 evidence fields must be complete")
     evidence = {}
-    if all(present):
+    if load_evidence and all(present):
         arrays = {name: np.asarray(data[f"dense_{name}"]) for name in EVIDENCE_FIELDS}
         if any(array.shape != (len(dense.xyz),) for array in arrays.values()):
             raise ValueError("Dense evidence length differs from candidate count")

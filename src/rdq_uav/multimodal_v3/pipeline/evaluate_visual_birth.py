@@ -14,6 +14,7 @@ import sys
 ROOT = Path(__file__).resolve().parents[4]
 sys.path[:0] = [str(ROOT), str(ROOT/'src'), str(Path(__file__).resolve().parent)]
 import torch
+from rdq_uav.multimodal_v3.causal_tracking import CausalVisualTracker, TRACKING_MODES, build_lidar_pairs
 from rdq_uav.multimodal_v3.modeling.geometry import load_left_projection_context
 from rdq_uav.multimodal_v3.visual_birth import VisualBirthTracker, VisualHint
 from rdq_uav.multimodal_v3.pipeline import evaluate_target
@@ -66,7 +67,10 @@ def main():
     p.add_argument('--visual-cache', type=Path, required=True)
     p.add_argument('--output', type=Path, required=True)
     p.add_argument('--config', type=Path, default=ROOT/'configs/final/tracker.json')
-    p.add_argument('--candidate-rerank', action='store_true', help='Rerank candidates at visual-supported births')
+    policies = p.add_mutually_exclusive_group()
+    policies.add_argument('--candidate-rerank', action='store_true', help='Rerank candidates at visual-supported births')
+    policies.add_argument('--tracking-mode', choices=TRACKING_MODES, default='legacy')
+    p.add_argument('--data-root', type=Path, help='Override the MMAUD root recorded in the cache')
     args = p.parse_args()
     frames = read(args.cache/'index.jsonl')
     hints, missing = build_lookup(frames, read(args.samples), read(args.visual_cache))
@@ -80,7 +84,13 @@ def main():
     projection = load_left_projection_context(camera, geometry, image_scale_xy=torch.ones(1, 2))
     # Injection is process-local, restored afterward. Frozen sources/hashes stay
     # intact; record the actual policy implementation in the extended summary.
+    tracker_class = VisualBirthTracker
     tracker_options = {}
+    if args.tracking_mode != 'legacy':
+        data_root = args.data_root or Path(manifest['data_root'])
+        pairs = build_lidar_pairs(frames, data_root)
+        tracker_class = CausalVisualTracker
+        tracker_options.update(lidar_pair_lookup=pairs.__getitem__, bearing=args.tracking_mode == 'bearing50')
     rerank_birth = None
     if args.candidate_rerank:
         from rdq_uav.multimodal_v3.candidate_rerank.birth import BirthReranker
@@ -94,7 +104,7 @@ def main():
         tracker_options['rerank_birth'] = rerank_birth
 
     previous_factory, previous_argv = evaluate_target.TargetTracker, sys.argv
-    evaluate_target.TargetTracker = partial(VisualBirthTracker, projection=projection,
+    evaluate_target.TargetTracker = partial(tracker_class, projection=projection,
                                             visual_lookup=hints.get, **tracker_options)
     previous_metrics = evaluate_target.metrics
     def inference_safe_metrics(rows, method):
@@ -105,7 +115,7 @@ def main():
     try:
         sys.argv = [str(Path(evaluate_target.__file__)), '--cache', str(args.cache),
             '--config', str(args.config), '--lag-s', '0.5', '--output', str(args.output)]
-        evaluate_target.main()
+        evaluate_target.main(load_dense_evidence=args.tracking_mode == 'legacy')
     finally:
         evaluate_target.TargetTracker, sys.argv = previous_factory, previous_argv
         evaluate_target.metrics=previous_metrics
@@ -124,6 +134,12 @@ def main():
         'input_sha256': {str(p): sha(p) for p in (args.samples, args.visual_cache, camera, geometry)},
         'source_sha256': {str(p.relative_to(ROOT)): sha(p) for p in
             (Path(__file__).resolve(), ROOT/'src/rdq_uav/multimodal_v3/visual_birth.py')}}
+    if args.tracking_mode != 'legacy':
+        result['protocol'].update(tracking_mode=args.tracking_mode,
+                                  policy='camera_supported_birth; fresh_high_score_lidar_continuation'
+                                         + ('; range_preserving_bearing_output' if args.tracking_mode == 'bearing50' else ''))
+        source = ROOT/'src/rdq_uav/multimodal_v3/causal_tracking.py'
+        result['visual_birth_reproducibility']['source_sha256'][str(source.relative_to(ROOT))] = sha(source)
     if rerank_birth is not None:
         result['protocol']['policy'] = 'camera_supported_reranked_birth; original_radar_continuation'
         result['candidate_rerank'] = {

@@ -38,6 +38,18 @@ python -u run.py infer --data-root /home/jasoncui/datasets/MMAUD/official/train 
 
 模型包为 `configs/final/candidate_rerank.npz`，包含开发集 12 条序列拟合的两套数值 GBDT 及归档门槛。推理使用 NumPy 树遍历，沿用原环境依赖。评估会核对候选缓存中的雷达 checkpoint、体素配置和候选配置指纹，并在 `tracks/summary.json` 记录模型哈希、训练序列与触发次数。重排只读取查询时刻及之前的点云。
 
+### 因果高分续轨与视觉方向校正
+
+`run.py infer` 可加 `--tracking-mode bearing50`。该模式从原始 LiDAR 密集输出中取 NMS 前 Top-10，用全图框投影门控起轨。活跃轨迹只在最新 LiDAR 文件对变化时接受通过运动门控的高分量测，距最近合格量测超过 0.5 s 时断轨。近期全图框可调整发布位置的视线方向并保持相机距离，KF 的下一次递推继续使用内部状态。
+
+```bash
+python -u run.py infer --data-root /path/to/MMAUD/official/train \
+  --sequences seq0020 --schedule sensor --tracking-mode bearing50 \
+  --output runs/seq0020_bearing50
+```
+
+`--tracking-mode high_score` 运行同一续轨策略的对照。默认模式为 `legacy`，保留原流程。`--candidate-rerank` 是独立实验开关。已有候选缓存也可直接通过 `python -m rdq_uav.multimodal_v3.pipeline.evaluate_visual_birth --help` 查看回放参数。
+
 ## 2. 端到端流程
 
 ```mermaid
