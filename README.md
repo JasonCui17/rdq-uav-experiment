@@ -32,6 +32,12 @@ python -u run.py infer --data-root /home/jasoncui/datasets/MMAUD/official/train 
 
 每次使用新的输出目录。神经网络推理与训练要求GPU，不自动回退CPU。KF、时间对齐、文件整理和指标计算使用CPU。首次换机器安装见 `docs/INSTALL.md`。
 
+### 可选的视觉起轨候选重排
+
+在 `run.py infer` 命令末尾加 `--candidate-rerank`。默认运行使用原起轨流程。开关开启后，模块只在起轨或重起轨时提升通过原视觉几何门控和检测置信度门槛的重排候选。若重排名单没有合格候选，当帧沿用原顺序。活跃轨迹使用原关联流程。
+
+模型包为 `configs/final/candidate_rerank.npz`，包含开发集 12 条序列拟合的两套数值 GBDT 及归档门槛。推理使用 NumPy 树遍历，沿用原环境依赖。评估会核对候选缓存中的雷达 checkpoint、体素配置和候选配置指纹，并在 `tracks/summary.json` 记录模型哈希、训练序列与触发次数。重排只读取查询时刻及之前的点云。
+
 ## 2. 端到端流程
 
 ```mermaid

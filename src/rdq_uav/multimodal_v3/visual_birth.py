@@ -33,10 +33,11 @@ def _subset(obs, keep):
 
 
 class VisualBirthTracker(TargetTracker):
-    def __init__(self, config, projection, *, visual_lookup):
+    def __init__(self, config, projection, *, visual_lookup, rerank_birth=None):
         super().__init__(config)
         self.projection = projection
         self.visual_lookup = visual_lookup
+        self.rerank_birth = rerank_birth
 
     def step(self, timestamp, frame):
         t = float(timestamp)
@@ -60,11 +61,15 @@ class VisualBirthTracker(TargetTracker):
                 # clipped to 8..48px); no target GT, height prior or tuned ROI.
                 margin = np.clip(16*20/np.maximum(np.linalg.norm(x, axis=1), 1e-6), 8, 48)
                 keep = valid.numpy() & (np.linalg.norm(outside, axis=1) <= margin)
+            if self.rerank_birth is not None:
+                frame = self.rerank_birth(t, frame, keep & (frame.dense.score >= cfg.birth_score))
             ids = set(frame.dense.token_id[keep].tolist())
             frame = replace(frame, dense=_subset(frame.dense, keep),
                 global_pool=_subset(frame.global_pool, np.array([i in ids for i in frame.global_pool.token_id], bool)),
                 baseline=_subset(frame.baseline, np.array([i in ids for i in frame.baseline.token_id], bool)))
             count = int(sum(frame.dense.score >= cfg.birth_score))
+        elif self.rerank_birth is not None:
+            self.rerank_birth(t, frame, None)
         result = super().step(t, frame)
         return {**result, 'birth_requires_vision': needs_birth,
                 'birth_visual_available': available, 'birth_visual_candidates': count,

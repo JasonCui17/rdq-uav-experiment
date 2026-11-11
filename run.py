@@ -60,13 +60,15 @@ def infer(args):
     if any(Path(s).name!=s or not (data/s).is_dir() for s in sequences):raise ValueError('Unknown sequence')
     output.mkdir(parents=True);env=environment(data);all_metrics={}
     status={'complete':False,'sequences':sequences,'schedule':args.schedule,'GT_used_for_sensor_inference':False,'all_left_images_required':args.schedule=='sensor' and args.limit_queries is None,'smoke':args.limit_queries is not None,'root':str(ROOT),'data_root':str(data),'GPU':torch.cuda.get_device_name(0)}
+    if args.candidate_rerank:
+        status['candidate_rerank']='visual_birth'
     (output/'run_status.json').write_text(json.dumps(status,indent=2))
     from score_outputs import score,read,labeled_predictions
     for seq in sequences:
         directory=output/seq;directory.mkdir()
         extra=[] if args.limit_queries is None else ['--limit',args.limit_queries]
         execute('rdq_uav.multimodal_v3.pipeline.extract_observations',['--repo',ROOT,'--config','configs/final/radar.yaml','--checkpoint',weights[0],'--vision-checkpoint',weights[1],'--data-root',data,'--split','heldout_test_sub' if args.split=='heldout_test_sub' else 'validation_sub','--sequence',seq,'--schedule',args.schedule,'--cache',directory/'cache','--device','cuda:0','--num-workers',args.num_workers,*extra],env)
-        execute('rdq_uav.multimodal_v3.pipeline.evaluate_visual_birth',['--cache',directory/'cache','--samples',directory/'cache/image_samples.jsonl','--visual-cache',directory/'cache/raw_view_cache.jsonl','--config','configs/final/tracker.json','--output',directory/'tracks'],env)
+        execute('rdq_uav.multimodal_v3.pipeline.evaluate_visual_birth',['--cache',directory/'cache','--samples',directory/'cache/image_samples.jsonl','--visual-cache',directory/'cache/raw_view_cache.jsonl','--config','configs/final/tracker.json','--output',directory/'tracks',*(['--candidate-rerank'] if args.candidate_rerank else [])],env)
         execute('rdq_uav.multimodal_v3.pipeline.prepare_image_guidance',['--samples',directory/'cache/image_samples.jsonl','--tracks',directory/'tracks/per_query.jsonl','--config','configs/final/image_guidance.json','--all-available-images','--output',directory/'priors'],env)
         execute('rdq_uav.multimodal_v3.pipeline.evaluate_image_guidance',['--checkpoint',weights[1],'--crop-checkpoint',weights[2],'--samples',directory/'cache/image_samples.jsonl','--priors',directory/'priors/image_priors.jsonl','--data-root',data,'--config','configs/final/image_guidance.json','--all-available-images','--output',directory/'image_eval'],env)
         tracks=read(directory/'tracks/per_query.jsonl');public=[]
@@ -117,6 +119,7 @@ def train(args):
 def main():
     os.chdir(ROOT);p=argparse.ArgumentParser(description=__doc__);sub=p.add_subparsers(dest='command',required=True);sub.add_parser('doctor')
     f=sub.add_parser('infer');f.add_argument('--data-root',type=Path,required=True);f.add_argument('--output',type=Path,required=True);f.add_argument('--split',choices=['validation_sub','heldout_test_sub','train_sub','all'],default='validation_sub');f.add_argument('--sequences',nargs='+');f.add_argument('--schedule',choices=['sensor','benchmark'],default='sensor');f.add_argument('--limit-queries',type=int);f.add_argument('--num-workers',type=int,default=2);f.add_argument('--radar-checkpoint',type=Path,default=Path('weights/radar.ckpt'));f.add_argument('--full-checkpoint',type=Path,default=Path('weights/vision_full.ckpt'));f.add_argument('--crop-checkpoint',type=Path,default=Path('weights/vision_crop.ckpt'))
+    f.add_argument('--candidate-rerank', action='store_true', help='Enable candidate reranking at visual-supported births')
     t=sub.add_parser('train');t.add_argument('--data-root',type=Path,required=True);t.add_argument('--output',type=Path,required=True);t.add_argument('--stage',choices=['radar','image-coco','image-full','image-crop'],required=True);t.add_argument('--epochs',type=int,default=12);t.add_argument('--batch-size',type=int,default=4);t.add_argument('--accumulate',type=int,default=1);t.add_argument('--num-workers',type=int,default=2);t.add_argument('--fast-dev-run',action='store_true')
     args=p.parse_args()
     if args.command=='doctor':doctor()

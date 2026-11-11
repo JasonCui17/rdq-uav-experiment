@@ -66,6 +66,7 @@ def main():
     p.add_argument('--visual-cache', type=Path, required=True)
     p.add_argument('--output', type=Path, required=True)
     p.add_argument('--config', type=Path, default=ROOT/'configs/final/tracker.json')
+    p.add_argument('--candidate-rerank', action='store_true', help='Rerank candidates at visual-supported births')
     args = p.parse_args()
     frames = read(args.cache/'index.jsonl')
     hints, missing = build_lookup(frames, read(args.samples), read(args.visual_cache))
@@ -79,9 +80,22 @@ def main():
     projection = load_left_projection_context(camera, geometry, image_scale_xy=torch.ones(1, 2))
     # Injection is process-local, restored afterward. Frozen sources/hashes stay
     # intact; record the actual policy implementation in the extended summary.
+    tracker_options = {}
+    rerank_birth = None
+    if args.candidate_rerank:
+        from rdq_uav.multimodal_v3.candidate_rerank.birth import BirthReranker
+        from rdq_uav.multimodal_v3.candidate_rerank.model import load_bundle
+
+        if not json.loads(args.config.read_text()).get('high_rank_first', False):
+            raise ValueError('Candidate reranking requires high_rank_first in the tracker config')
+        model_path = ROOT/'configs/final/candidate_rerank.npz'
+        bundle = load_bundle(model_path)
+        rerank_birth = BirthReranker(frames, manifest, bundle)
+        tracker_options['rerank_birth'] = rerank_birth
+
     previous_factory, previous_argv = evaluate_target.TargetTracker, sys.argv
     evaluate_target.TargetTracker = partial(VisualBirthTracker, projection=projection,
-                                            visual_lookup=hints.get)
+                                            visual_lookup=hints.get, **tracker_options)
     previous_metrics = evaluate_target.metrics
     def inference_safe_metrics(rows, method):
         if not any(r['has_gt'] for r in rows):
@@ -95,6 +109,8 @@ def main():
     finally:
         evaluate_target.TargetTracker, sys.argv = previous_factory, previous_argv
         evaluate_target.metrics=previous_metrics
+        if rerank_birth is not None:
+            rerank_birth.close()
     path = args.output/'summary.json'
     result = json.loads(path.read_text())
     result['frozen_evaluator_protocol'] = result['protocol'].copy()
@@ -108,6 +124,15 @@ def main():
         'input_sha256': {str(p): sha(p) for p in (args.samples, args.visual_cache, camera, geometry)},
         'source_sha256': {str(p.relative_to(ROOT)): sha(p) for p in
             (Path(__file__).resolve(), ROOT/'src/rdq_uav/multimodal_v3/visual_birth.py')}}
+    if rerank_birth is not None:
+        result['protocol']['policy'] = 'camera_supported_reranked_birth; original_radar_continuation'
+        result['candidate_rerank'] = {
+            'model_sha256': sha(model_path),
+            'source_model_sha256': bundle.source_sha256,
+            'training_sequences': bundle.training_sequences,
+            'scored_queries': rerank_birth.scored_queries,
+            'queries_with_eligible_reranked_candidate': rerank_birth.preferred_queries,
+        }
     path.write_text(json.dumps(result, indent=2))
     print('VISUAL BIRTH RESULTS:', path, flush=True)
     print(json.dumps({k: result[k] for k in ('target', 'lagged', 'protocol')}, indent=2), flush=True)
